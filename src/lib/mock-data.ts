@@ -1,0 +1,75 @@
+import type { SifupData } from "./types";
+
+const now = new Date().toISOString();
+
+export const seedData: SifupData = {
+  matches: [
+    {
+      id: "match-2026-06-30",
+      date: "2026-06-30",
+      time: "21:00",
+      location: "Agrupacion de sordos",
+      status: "confirmed",
+      totalCost: 44000,
+      notes: "Lista importada desde WhatsApp.",
+      createdAt: now,
+      updatedAt: now,
+    },
+  ],
+  players: [
+    "Wictor",
+    "Caldera",
+    "Marcio",
+    "Juanjo",
+    "Beto",
+    "Francis",
+    "Cooper",
+    "Mantelli",
+    "Mario Quintana",
+    "Alonso Duran",
+  ].map((name, index) => ({
+    id: `player-${index + 1}`,
+    name,
+    nickname: name.split(" ")[0],
+    phone: "",
+    skillLevel: ((index % 5) + 1) as 1 | 2 | 3 | 4 | 5,
+    active: true,
+    createdAt: now,
+    updatedAt: now,
+  })),
+  matchPlayers: [
+    ["Wictor", "paid", "A", 4000, ""],
+    ["Caldera", "paid", "B", 4000, ""],
+    ["Marcio", "paid", "A", 4000, ""],
+    ["Juanjo", "paid", "B", 4000, ""],
+    ["Beto", "unpaid", "A", 0, ""],
+    ["Francis", "paid", "B", 4000, ""],
+    ["Cooper", "paid", "A", 4000, ""],
+    ["Mantelli", "unpaid", "B", 0, ""],
+    ["Pololo de Francis", "unpaid", "none", 0, ""],
+    ["Mario Quintana", "paid", "A", 4000, ""],
+    ["Alonso Duran", "promised", "B", 0, "pago manana"],
+  ].map(([name, paymentStatus, team, amountPaid, note], index) => ({
+    id: `mp-${index + 1}`,
+    matchId: "match-2026-06-30",
+    name: String(name),
+    attendanceStatus: "confirmed" as const,
+    paymentStatus: paymentStatus as "paid" | "unpaid" | "promised",
+    amountDue: 4000,
+    amountPaid: Number(amountPaid),
+    note: String(note),
+    team: team as "A" | "B" | "none",
+    createdAt: now,
+    updatedAt: now,
+  })),
+  results: [
+    {
+      id: "result-1",
+      matchId: "match-2026-06-30",
+      scoreA: 7,
+      scoreB: 6,
+      winner: "A",
+      notes: "Partido cerrado.",
+    },
+  ],
+};

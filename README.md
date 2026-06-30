@@ -1,36 +1,46 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SIFUP
 
-## Getting Started
+SIFUP is an internal admin dashboard for managing match operations, players, payments, and results. It currently runs as a Next.js App Router + TypeScript + Tailwind app and persists state in browser `localStorage` for now.
 
-First, run the development server:
+## Setup
+
+```bash
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`.
+
+## Scripts
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run build
+npm run start
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Environment
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Copy `.env.example` to `.env.local` and set:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `SIFUP_ADMIN_PASSWORD`: admin password used by the login form.
+- `SESSION_SECRET`: secret used to sign the session cookie.
 
-## Learn More
+Without `SESSION_SECRET`, local development falls back to a dev-only default, but production should always set it explicitly.
 
-To learn more about Next.js, take a look at the following resources:
+## Deployment
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+For Vercel:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Set `SIFUP_ADMIN_PASSWORD` and `SESSION_SECRET` in Project Settings.
+- Use the default Next.js build flow; `npm run build` is the local equivalent.
+- `npm run start` is only for local production testing after a build.
+- Because the app currently stores data in `localStorage`, a Vercel deployment is stateless across browsers and devices.
 
-## Deploy on Vercel
+## Migration Notes
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+The current data layer is local/mock data in the browser. A future Supabase/Postgres migration should replace `localStorage` persistence with server-backed storage and move any shared state to a real database before adding multi-user workflows.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Vega MCP Note
+
+I attempted to review Vega MCP docs at `vega.mgranado.com/mcp`, but the endpoint requires an authentication token in this environment, so the documentation here is based on local code inspection.
