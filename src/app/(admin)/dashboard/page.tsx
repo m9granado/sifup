@@ -1,5 +1,6 @@
 import { DashboardPage } from "@/components/admin/SifupWorkspace";
+import { getSifupData } from "@/lib/repository";
 
-export default function Page() {
-  return <DashboardPage />;
+export default async function Page() {
+  return <DashboardPage initialData={await getSifupData()} />;
 }

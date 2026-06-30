@@ -1,6 +1,7 @@
 export type MatchStatus = "open" | "confirmed" | "played" | "closed";
 export type AttendanceStatus = "confirmed" | "maybe" | "out" | "waitlist";
 export type PaymentStatus = "paid" | "unpaid" | "promised";
+export type PaymentPlan = "monthly" | "perMatch";
 export type Team = "A" | "B" | "none";
 export type Winner = "A" | "B" | "draw";
 
@@ -11,6 +12,10 @@ export type Match = {
   location: string;
   status: MatchStatus;
   totalCost: number;
+  weekLabel: string;
+  monthKey: string;
+  courtCost: number;
+  courtPrepaid: boolean;
   notes: string;
   createdAt: string;
   updatedAt: string;
@@ -21,6 +26,7 @@ export type Player = {
   name: string;
   nickname: string;
   phone: string;
+  paymentPlan: PaymentPlan;
   skillLevel: 1 | 2 | 3 | 4 | 5;
   active: boolean;
   createdAt: string;
@@ -52,11 +58,39 @@ export type MatchResult = {
   notes: string;
 };
 
+export type MonthlyPayment = {
+  id: string;
+  playerId: string;
+  monthKey: string;
+  expectedAmount: number;
+  amountPaid: number;
+  paymentStatus: PaymentStatus;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ClubFinance = {
+  id: string;
+  bank: string;
+  account: string;
+  email: string;
+  rut: string;
+  courtCost: number;
+  prepaidCourts: number;
+  prepaidTotal: number;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type SifupData = {
   matches: Match[];
   players: Player[];
   matchPlayers: MatchPlayer[];
   results: MatchResult[];
+  monthlyPayments: MonthlyPayment[];
+  clubFinance: ClubFinance;
 };
 
 export type MatchSummary = {

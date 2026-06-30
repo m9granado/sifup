@@ -1,30 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Clipboard, MessageCircle, Plus, Save, Shield, WalletCards } from "lucide-react";
+import {
+  createMatchAction,
+  markMatchPlayerPaidAction,
+  saveMatchDetailAction,
+  saveMonthlyPaymentAction,
+  savePlayerAction,
+} from "@/app/actions";
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
-import {
-  formatCurrency,
-  loadData,
-  newId,
-  replaceMatchPlayers,
-  saveData,
-  summarizeMatch,
-  upsertMatch,
-  upsertPlayer,
-  upsertResult,
-} from "@/lib/store";
-import { seedData } from "@/lib/mock-data";
-import {
-  finalResultMessage,
-  matchSummaryMessage,
-  pendingPaymentsMessage,
-  teamsMessage,
-} from "@/lib/whatsapp";
-import type { Match, MatchPlayer, MatchResult, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
+import { formatCurrency, newId, replaceMatchPlayers, summarizeMatch, upsertMatch, upsertPlayer, upsertResult } from "@/lib/store";
+import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, teamsMessage } from "@/lib/whatsapp";
+import type { Match, MatchPlayer, MatchResult, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
 
 const sampleInput = `martes 30 junio, 21 horas, agrupacion de sordos:
 
@@ -40,41 +31,48 @@ const sampleInput = `martes 30 junio, 21 horas, agrupacion de sordos:
 10. Mario Quintana (pagado)
 11. Alonso Duran (pago manana)`;
 
-const paymentAccount = {
-  bank: "Cuenta vista Banco BCI MACH",
-  account: "777915748221",
-  email: "vigomez@uchile.cl",
-  rut: "157482211",
-  courtCost: 35000,
-  prepaidCourts: 5,
-};
+const PER_MATCH_AMOUNT = 3500;
+const COURT_COST = 35000;
 
-function useSifupData() {
-  const [data, setData] = useState<SifupData>(seedData);
+type InitialDataProps = { initialData: SifupData };
 
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      setData(loadData());
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
-
-  function commit(next: SifupData) {
-    setData(next);
-    saveData(next);
-  }
-  return { data, commit };
+function useSifupData(initialData: SifupData) {
+  const [data, setData] = useState<SifupData>(initialData);
+  return { data, commit: setData };
 }
 
-function PageTitle({
-  title,
-  description,
-  action,
-}: {
-  title: string;
-  description?: string;
-  action?: React.ReactNode;
-}) {
+function monthKey(date: string) {
+  return date.slice(0, 7);
+}
+
+function weekLabel(date: string) {
+  if (!date) return "";
+  const value = new Date(`${date}T12:00:00`);
+  const month = new Intl.DateTimeFormat("es-CL", { month: "short" }).format(value).replace(".", "");
+  return `${Math.ceil(value.getDate() / 7)}a sem ${month}`;
+}
+
+function findKnownPlayer(players: Player[], name: string) {
+  const clean = name.trim().toLowerCase();
+  return players.find((player) => player.name.toLowerCase() === clean || player.nickname.toLowerCase() === clean);
+}
+
+function normalizePhone(phone: string) {
+  return phone.replace(/[^\d]/g, "");
+}
+
+function whatsappHref(phone: string) {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return "";
+  const withCountry = normalized.startsWith("56") ? normalized : `56${normalized}`;
+  return `https://wa.me/${withCountry}`;
+}
+
+function paymentPlanLabel(plan: PaymentPlan) {
+  return plan === "monthly" ? "mensual $20.000" : "por partido $3.500";
+}
+
+function PageTitle({ title, description, action }: { title: string; description?: string; action?: React.ReactNode }) {
   return (
     <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
@@ -96,12 +94,14 @@ function Button({
   type = "button",
   variant = "primary",
   className = "",
+  disabled,
 }: {
   children: React.ReactNode;
-  onClick?: () => void;
+  onClick?: () => void | Promise<void>;
   type?: "button" | "submit";
   variant?: "primary" | "secondary" | "danger";
   className?: string;
+  disabled?: boolean;
 }) {
   const variants = {
     primary: "bg-emerald-700 text-white hover:bg-emerald-800 border-emerald-700",
@@ -112,7 +112,8 @@ function Button({
     <button
       type={type}
       onClick={onClick}
-      className={`inline-flex h-10 items-center justify-center gap-2 rounded-md border px-3 text-sm font-semibold transition ${variants[variant]} ${className}`}
+      disabled={disabled}
+      className={`inline-flex h-10 items-center justify-center gap-2 rounded-md border px-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${variants[variant]} ${className}`}
     >
       {children}
     </button>
@@ -139,25 +140,13 @@ function AdminOnlyNotice({ label = "Solo admin puede editar esta vista." }: { la
   );
 }
 
-function normalizePhone(phone: string) {
-  return phone.replace(/[^\d]/g, "");
-}
-
-function whatsappHref(phone: string) {
-  const normalized = normalizePhone(phone);
-  if (!normalized) return "";
-  const withCountry = normalized.startsWith("56") ? normalized : `56${normalized}`;
-  return `https://wa.me/${withCountry}`;
-}
-
 function PaymentBadge({ status }: { status: PaymentStatus }) {
   const styles = {
     paid: "bg-emerald-50 text-emerald-800 ring-emerald-200",
     unpaid: "bg-red-50 text-red-800 ring-red-200",
     promised: "bg-amber-50 text-amber-800 ring-amber-200",
   };
-  const labels = { paid: "paid", unpaid: "unpaid", promised: "promised" };
-  return <span className={`rounded-full px-2 py-1 text-xs font-semibold ring-1 ${styles[status]}`}>{labels[status]}</span>;
+  return <span className={`rounded-full px-2 py-1 text-xs font-semibold ring-1 ${styles[status]}`}>{status}</span>;
 }
 
 function StatusBadge({ value }: { value: string }) {
@@ -173,33 +162,22 @@ function Stat({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-function PaymentAccountCard() {
+function PaymentAccountCard({ data }: { data: SifupData }) {
+  const finance = data.clubFinance;
   return (
     <Card className="space-y-3">
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Transferencias</p>
-        <h2 className="mt-1 text-lg font-semibold text-gray-950">{paymentAccount.bank}</h2>
+        <h2 className="mt-1 text-lg font-semibold text-gray-950">{finance.bank}</h2>
       </div>
       <dl className="grid gap-2 text-sm sm:grid-cols-2">
-        <div>
-          <dt className="text-gray-500">Cuenta</dt>
-          <dd className="font-semibold text-gray-950">{paymentAccount.account}</dd>
-        </div>
-        <div>
-          <dt className="text-gray-500">Mail</dt>
-          <dd className="font-semibold text-gray-950">{paymentAccount.email}</dd>
-        </div>
-        <div>
-          <dt className="text-gray-500">RUT</dt>
-          <dd className="font-semibold text-gray-950">{paymentAccount.rut}</dd>
-        </div>
-        <div>
-          <dt className="text-gray-500">Cancha</dt>
-          <dd className="font-semibold text-gray-950">{formatCurrency(paymentAccount.courtCost)}</dd>
-        </div>
+        <div><dt className="text-gray-500">Cuenta</dt><dd className="font-semibold text-gray-950">{finance.account}</dd></div>
+        <div><dt className="text-gray-500">Mail</dt><dd className="font-semibold text-gray-950">{finance.email}</dd></div>
+        <div><dt className="text-gray-500">RUT</dt><dd className="font-semibold text-gray-950">{finance.rut}</dd></div>
+        <div><dt className="text-gray-500">Cancha</dt><dd className="font-semibold text-gray-950">{formatCurrency(finance.courtCost)}</dd></div>
       </dl>
       <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
-        {paymentAccount.prepaidCourts} canchas pagadas en Club Sordos.
+        {finance.prepaidCourts} canchas pagadas: {formatCurrency(finance.prepaidTotal)}.
       </p>
     </Card>
   );
@@ -218,12 +196,10 @@ function CopyBlock({ title, text }: { title: string; text: string }) {
         <h3 className="text-sm font-semibold text-gray-950">{title}</h3>
         <Button variant="secondary" onClick={copy}>
           <Clipboard size={16} />
-          {copied ? "Copied" : "Copy"}
+          {copied ? "Copiado" : "Copiar"}
         </Button>
       </div>
-      <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-gray-950 p-3 text-xs leading-5 text-gray-50">
-        {text}
-      </pre>
+      <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-gray-950 p-3 text-xs leading-5 text-gray-50">{text}</pre>
     </Card>
   );
 }
@@ -232,9 +208,9 @@ function nextMatch(matches: Match[]) {
   return [...matches].sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))[0];
 }
 
-export function DashboardPage() {
+export function DashboardPage({ initialData }: InitialDataProps) {
   const isAdmin = useIsAdmin();
-  const { data } = useSifupData();
+  const { data } = useSifupData(initialData);
   const match = nextMatch(data.matches);
   const rows = data.matchPlayers.filter((row) => row.matchId === match?.id);
   const summary = summarizeMatch(rows);
@@ -244,12 +220,7 @@ export function DashboardPage() {
       <PageTitle
         title="Dashboard"
         description="Resumen rapido del proximo partido y estado de pagos."
-        action={isAdmin ? (
-          <CtaLink href="/matches/new">
-            <Plus size={16} />
-            New match
-          </CtaLink>
-        ) : undefined}
+        action={isAdmin ? <CtaLink href="/matches/new"><Plus size={16} />New match</CtaLink> : undefined}
       />
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: entra como admin para crear partidos y editar pagos." /> : null}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -262,7 +233,7 @@ export function DashboardPage() {
         <Card>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold">{match?.date} {match?.time}</h2>
+              <h2 className="text-lg font-semibold">{match?.weekLabel || match?.date} - {match?.time}</h2>
               <p className="mt-1 text-sm text-gray-600">{match?.location}</p>
             </div>
             {match ? <StatusBadge value={match.status} /> : null}
@@ -276,31 +247,22 @@ export function DashboardPage() {
             ))}
           </div>
         </Card>
-        {match ? (
-          <CopyBlock title="Clean match summary" text={matchSummaryMessage(match, rows)} />
-        ) : null}
+        {match ? <CopyBlock title="Clean match summary" text={matchSummaryMessage(match, rows)} /> : null}
       </div>
-      <div className="mt-4">
-        <PaymentAccountCard />
-      </div>
+      <div className="mt-4"><PaymentAccountCard data={data} /></div>
     </>
   );
 }
 
-export function MatchesPage() {
+export function MatchesPage({ initialData }: InitialDataProps) {
   const isAdmin = useIsAdmin();
-  const { data } = useSifupData();
+  const { data } = useSifupData(initialData);
   return (
     <>
       <PageTitle
         title="Matches"
-        description="Historial local de partidos y listas importadas."
-        action={isAdmin ? (
-          <CtaLink href="/matches/new">
-            <Plus size={16} />
-            New match
-          </CtaLink>
-        ) : undefined}
+        description="Martes registrados por semana, pagos y asistencia."
+        action={isAdmin ? <CtaLink href="/matches/new"><Plus size={16} />New match</CtaLink> : undefined}
       />
       <div className="space-y-3">
         {data.matches.map((match) => {
@@ -311,10 +273,14 @@ export function MatchesPage() {
               <Card className="transition hover:border-emerald-300">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h2 className="font-semibold">{match.date} - {match.time}</h2>
+                    <h2 className="text-lg font-semibold">{match.weekLabel || match.date}</h2>
+                    <p className="mt-1 text-sm font-medium text-gray-700">{match.date} - {match.time}</p>
                     <p className="mt-1 text-sm text-gray-600">{match.location}</p>
                   </div>
-                  <StatusBadge value={match.status} />
+                  <div className="flex flex-col items-end gap-2">
+                    <StatusBadge value={match.status} />
+                    {match.courtPrepaid ? <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200">cancha pagada</span> : null}
+                  </div>
                 </div>
                 <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
                   <span>{summary.confirmedCount} jugadores</span>
@@ -330,23 +296,18 @@ export function MatchesPage() {
   );
 }
 
-export function NewMatchPage() {
+export function NewMatchPage({ initialData }: InitialDataProps) {
   const router = useRouter();
-  const { data, commit } = useSifupData();
+  const { data, commit } = useSifupData(initialData);
+  const [isPending, startTransition] = useTransition();
   const [raw, setRaw] = useState(sampleInput);
-  const [match, setMatch] = useState({
-    date: "",
-    time: "21:00",
-    location: "",
-    totalCost: 0,
-    notes: "",
-  });
+  const [match, setMatch] = useState({ date: "", time: "21:00", location: "", totalCost: COURT_COST, notes: "" });
   const [rows, setRows] = useState<Omit<MatchPlayer, "id" | "matchId" | "createdAt" | "updatedAt">[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
 
   function parse() {
-    const parsed = parseWhatsAppList(raw);
-    setMatch(parsed.match);
+    const parsed = parseWhatsAppList(raw, PER_MATCH_AMOUNT);
+    setMatch({ ...parsed.match, totalCost: COURT_COST });
     setRows(parsed.players);
     setErrors(parsed.errors);
   }
@@ -368,25 +329,45 @@ export function NewMatchPage() {
       time: match.time,
       location: match.location || "Por definir",
       status: "open",
-      totalCost: Number(match.totalCost) || rows.reduce((sum, row) => sum + row.amountDue, 0),
+      totalCost: Number(match.totalCost) || COURT_COST,
+      weekLabel: weekLabel(match.date),
+      monthKey: monthKey(match.date),
+      courtCost: COURT_COST,
+      courtPrepaid: true,
       notes: match.notes,
       createdAt: now,
       updatedAt: now,
     };
-    const nextRows: MatchPlayer[] = rows.map((row) => ({
-      ...row,
-      id: newId("mp"),
-      matchId,
-      createdAt: now,
-      updatedAt: now,
-    }));
-    commit(replaceMatchPlayers(upsertMatch(data, nextMatch), matchId, nextRows));
-    router.push(`/matches/${matchId}`);
+    const nextRows: MatchPlayer[] = rows.map((row) => {
+      const player = findKnownPlayer(data.players, row.name);
+      const monthly = player?.paymentPlan === "monthly";
+      return {
+        ...row,
+        id: newId("mp"),
+        matchId,
+        playerId: player?.id,
+        paymentStatus: monthly ? "paid" : row.paymentStatus,
+        amountDue: monthly ? 0 : row.amountDue,
+        amountPaid: monthly ? 0 : row.amountPaid,
+        note: monthly && !row.note ? "mensualidad" : row.note,
+        createdAt: now,
+        updatedAt: now,
+      };
+    });
+    startTransition(async () => {
+      try {
+        await createMatchAction(nextMatch, nextRows);
+        commit(replaceMatchPlayers(upsertMatch(data, nextMatch), matchId, nextRows));
+        router.push(`/matches/${matchId}`);
+      } catch (error) {
+        setErrors([error instanceof Error ? error.message : "No se pudo guardar el partido."]);
+      }
+    });
   }
 
   return (
     <>
-      <PageTitle title="New match" description="Pega la lista WhatsApp, revisa la tabla editable y guarda." />
+      <PageTitle title="New match" description="Pega la lista WhatsApp, revisa la tabla editable y guarda en la base." />
       <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
         <Card className="space-y-3">
           <textarea
@@ -395,22 +376,28 @@ export function NewMatchPage() {
             className="min-h-72 w-full rounded-md border border-gray-300 p-3 text-sm outline-none focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100"
           />
           <div className="flex flex-wrap gap-2">
-            <Button onClick={parse}>
-              <WalletCards size={16} />
-              Paste WhatsApp list
-            </Button>
-            <Button onClick={save} variant="secondary">
-              <Save size={16} />
-              Save match
-            </Button>
+            <Button onClick={parse}><WalletCards size={16} />Paste WhatsApp list</Button>
+            <Button onClick={save} variant="secondary" disabled={isPending}><Save size={16} />Save match</Button>
           </div>
-          {errors.map((error) => (
-            <p key={error} className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{error}</p>
-          ))}
+          {errors.map((error) => <p key={error} className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{error}</p>)}
         </Card>
         <MatchEditor match={match} setMatch={setMatch} rows={rows} updateRow={updateRow} />
       </div>
     </>
+  );
+}
+
+function Input({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
+  return (
+    <label className="space-y-1 text-sm font-medium text-gray-700">
+      <span>{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-10 w-full rounded-md border border-gray-300 px-3 text-sm outline-none focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100"
+      />
+    </label>
   );
 }
 
@@ -438,36 +425,12 @@ function MatchEditor({
   );
 }
 
-function Input({
-  label,
-  value,
-  onChange,
-  type = "text",
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: string;
-}) {
-  return (
-    <label className="space-y-1 text-sm font-medium text-gray-700">
-      <span>{label}</span>
-      <input
-        type={type}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-10 w-full rounded-md border border-gray-300 px-3 text-sm outline-none focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100"
-      />
-    </label>
-  );
-}
-
 function EditableRows({
   rows,
   updateRow,
 }: {
-  rows: Omit<MatchPlayer, "id" | "matchId" | "createdAt" | "updatedAt">[];
-  updateRow: (index: number, patch: Partial<Omit<MatchPlayer, "id" | "matchId" | "createdAt" | "updatedAt">>) => void;
+  rows: Array<Omit<MatchPlayer, "id" | "matchId" | "createdAt" | "updatedAt"> | MatchPlayer>;
+  updateRow: (index: number, patch: Partial<MatchPlayer>) => void;
 }) {
   return (
     <>
@@ -479,9 +442,7 @@ function EditableRows({
               <label className="space-y-1 text-sm font-medium text-gray-700">
                 <span>Payment</span>
                 <select className="h-10 w-full rounded-md border border-gray-300 px-3 text-sm" value={row.paymentStatus} onChange={(event) => updateRow(index, { paymentStatus: event.target.value as PaymentStatus })}>
-                  <option value="paid">paid</option>
-                  <option value="unpaid">unpaid</option>
-                  <option value="promised">promised</option>
+                  <option value="paid">paid</option><option value="unpaid">unpaid</option><option value="promised">promised</option>
                 </select>
               </label>
               <div className="grid grid-cols-2 gap-3">
@@ -491,9 +452,7 @@ function EditableRows({
               <label className="space-y-1 text-sm font-medium text-gray-700">
                 <span>Team</span>
                 <select className="h-10 w-full rounded-md border border-gray-300 px-3 text-sm" value={row.team} onChange={(event) => updateRow(index, { team: event.target.value as Team })}>
-                  <option value="none">none</option>
-                  <option value="A">A</option>
-                  <option value="B">B</option>
+                  <option value="none">none</option><option value="A">A</option><option value="B">B</option>
                 </select>
               </label>
               <Input label="Note" value={row.note} onChange={(value) => updateRow(index, { note: value })} />
@@ -503,48 +462,21 @@ function EditableRows({
       </div>
       <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[720px] text-left text-sm">
-        <thead className="border-b border-gray-200 text-xs uppercase text-gray-500">
-          <tr>
-            <th className="py-2 pr-2">Player</th>
-            <th className="py-2 pr-2">Payment</th>
-            <th className="py-2 pr-2">Due</th>
-            <th className="py-2 pr-2">Paid</th>
-            <th className="py-2 pr-2">Team</th>
-            <th className="py-2 pr-2">Note</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100">
-          {rows.map((row, index) => (
-            <tr key={`${row.name}-${index}`}>
-              <td className="py-2 pr-2">
-                <input className="h-9 w-44 rounded-md border border-gray-300 px-2" value={row.name} onChange={(event) => updateRow(index, { name: event.target.value })} />
-              </td>
-              <td className="py-2 pr-2">
-                <select className="h-9 rounded-md border border-gray-300 px-2" value={row.paymentStatus} onChange={(event) => updateRow(index, { paymentStatus: event.target.value as PaymentStatus })}>
-                  <option value="paid">paid</option>
-                  <option value="unpaid">unpaid</option>
-                  <option value="promised">promised</option>
-                </select>
-              </td>
-              <td className="py-2 pr-2">
-                <input className="h-9 w-24 rounded-md border border-gray-300 px-2" type="number" value={row.amountDue} onChange={(event) => updateRow(index, { amountDue: Number(event.target.value) })} />
-              </td>
-              <td className="py-2 pr-2">
-                <input className="h-9 w-24 rounded-md border border-gray-300 px-2" type="number" value={row.amountPaid} onChange={(event) => updateRow(index, { amountPaid: Number(event.target.value) })} />
-              </td>
-              <td className="py-2 pr-2">
-                <select className="h-9 rounded-md border border-gray-300 px-2" value={row.team} onChange={(event) => updateRow(index, { team: event.target.value as Team })}>
-                  <option value="none">none</option>
-                  <option value="A">A</option>
-                  <option value="B">B</option>
-                </select>
-              </td>
-              <td className="py-2 pr-2">
-                <input className="h-9 w-44 rounded-md border border-gray-300 px-2" value={row.note} onChange={(event) => updateRow(index, { note: event.target.value })} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
+          <thead className="border-b border-gray-200 text-xs uppercase text-gray-500">
+            <tr><th className="py-2 pr-2">Player</th><th className="py-2 pr-2">Payment</th><th className="py-2 pr-2">Due</th><th className="py-2 pr-2">Paid</th><th className="py-2 pr-2">Team</th><th className="py-2 pr-2">Note</th></tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {rows.map((row, index) => (
+              <tr key={`${row.name}-${index}`}>
+                <td className="py-2 pr-2"><input className="h-9 w-44 rounded-md border border-gray-300 px-2" value={row.name} onChange={(event) => updateRow(index, { name: event.target.value })} /></td>
+                <td className="py-2 pr-2"><select className="h-9 rounded-md border border-gray-300 px-2" value={row.paymentStatus} onChange={(event) => updateRow(index, { paymentStatus: event.target.value as PaymentStatus })}><option value="paid">paid</option><option value="unpaid">unpaid</option><option value="promised">promised</option></select></td>
+                <td className="py-2 pr-2"><input className="h-9 w-24 rounded-md border border-gray-300 px-2" type="number" value={row.amountDue} onChange={(event) => updateRow(index, { amountDue: Number(event.target.value) })} /></td>
+                <td className="py-2 pr-2"><input className="h-9 w-24 rounded-md border border-gray-300 px-2" type="number" value={row.amountPaid} onChange={(event) => updateRow(index, { amountPaid: Number(event.target.value) })} /></td>
+                <td className="py-2 pr-2"><select className="h-9 rounded-md border border-gray-300 px-2" value={row.team} onChange={(event) => updateRow(index, { team: event.target.value as Team })}><option value="none">none</option><option value="A">A</option><option value="B">B</option></select></td>
+                <td className="py-2 pr-2"><input className="h-9 w-44 rounded-md border border-gray-300 px-2" value={row.note} onChange={(event) => updateRow(index, { note: event.target.value })} /></td>
+              </tr>
+            ))}
+          </tbody>
         </table>
       </div>
     </>
@@ -555,41 +487,29 @@ function PublicMatchRows({ rows }: { rows: MatchPlayer[] }) {
   return (
     <div className="space-y-2">
       {rows.map((row) => (
-        <div
-          key={row.id}
-          className="flex flex-col gap-2 rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
-        >
-          <div>
-            <p className="font-semibold text-gray-950">{row.name}</p>
-            <p className="text-xs text-gray-500">Equipo {row.team === "none" ? "por asignar" : row.team}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <PaymentBadge status={row.paymentStatus} />
-            <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-gray-600 ring-1 ring-gray-200">
-              {formatCurrency(Math.max(row.amountDue - row.amountPaid, 0))}
-            </span>
-          </div>
+        <div key={row.id} className="flex flex-col gap-2 rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <div><p className="font-semibold text-gray-950">{row.name}</p><p className="text-xs text-gray-500">Equipo {row.team === "none" ? "por asignar" : row.team}</p></div>
+          <div className="flex items-center gap-2"><PaymentBadge status={row.paymentStatus} /><span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-gray-600 ring-1 ring-gray-200">{formatCurrency(Math.max(row.amountDue - row.amountPaid, 0))}</span></div>
         </div>
       ))}
     </div>
   );
 }
 
-export function MatchDetailPage({ id }: { id: string }) {
+export function MatchDetailPage({ id, initialData }: { id: string } & InitialDataProps) {
   const isAdmin = useIsAdmin();
-  const { data, commit } = useSifupData();
+  const { data, commit } = useSifupData(initialData);
+  const [isPending, startTransition] = useTransition();
   const match = data.matches.find((item) => item.id === id);
   const result = data.results.find((item) => item.matchId === id);
   const [rows, setRows] = useState(() => data.matchPlayers.filter((row) => row.matchId === id));
   const [scoreA, setScoreA] = useState(result?.scoreA ?? 0);
   const [scoreB, setScoreB] = useState(result?.scoreB ?? 0);
   const [resultNotes, setResultNotes] = useState(result?.notes ?? "");
+  const [error, setError] = useState("");
   const summary = summarizeMatch(rows);
 
-  if (!match) {
-    return <PageTitle title="Match not found" description="No existe en los datos locales." />;
-  }
-
+  if (!match) return <PageTitle title="Match not found" description="No existe en la base de datos." />;
   const currentMatch = match;
 
   function updateRow(index: number, patch: Partial<MatchPlayer>) {
@@ -598,55 +518,37 @@ export function MatchDetailPage({ id }: { id: string }) {
 
   function save() {
     const winner = scoreA === scoreB ? "draw" : scoreA > scoreB ? "A" : "B";
-    const nextResult: MatchResult = {
-      id: result?.id ?? newId("result"),
-      matchId: currentMatch.id,
-      scoreA,
-      scoreB,
-      winner,
-      notes: resultNotes,
-    };
-    commit(upsertResult(replaceMatchPlayers(data, currentMatch.id, rows), nextResult));
+    const nextResult: MatchResult = { id: result?.id ?? newId("result"), matchId: currentMatch.id, scoreA, scoreB, winner, notes: resultNotes };
+    startTransition(async () => {
+      try {
+        await saveMatchDetailAction(currentMatch.id, rows, nextResult);
+        commit(upsertResult(replaceMatchPlayers(data, currentMatch.id, rows), nextResult));
+        setError("");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo guardar el partido.");
+      }
+    });
   }
 
   return (
     <>
-      <PageTitle
-        title={`${currentMatch.date} ${currentMatch.time}`}
-        description={currentMatch.location}
-        action={isAdmin ? <Button onClick={save}><Save size={16} />Save match</Button> : undefined}
-      />
+      <PageTitle title={`${currentMatch.weekLabel || currentMatch.date} - ${currentMatch.time}`} description={`${currentMatch.date} - ${currentMatch.location}`} action={isAdmin ? <Button onClick={save} disabled={isPending}><Save size={16} />Save match</Button> : undefined} />
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: equipos, resultado y pagos son solo lectura." /> : null}
+      {error ? <p className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{error}</p> : null}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Confirmed" value={summary.confirmedCount} />
-        <Stat label="Paid" value={summary.paidCount} />
-        <Stat label="Unpaid/promised" value={summary.unpaidCount + summary.promisedCount} />
-        <Stat label="Pending" value={formatCurrency(summary.pendingAmount)} />
+        <Stat label="Confirmed" value={summary.confirmedCount} /><Stat label="Paid" value={summary.paidCount} /><Stat label="Unpaid/promised" value={summary.unpaidCount + summary.promisedCount} /><Stat label="Pending" value={formatCurrency(summary.pendingAmount)} />
       </div>
       <div className="mt-4 grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
-        <Card>
-          {isAdmin ? (
-            <EditableRows rows={rows} updateRow={updateRow} />
-          ) : (
-            <PublicMatchRows rows={rows} />
-          )}
-        </Card>
+        <Card>{isAdmin ? <EditableRows rows={rows} updateRow={updateRow} /> : <PublicMatchRows rows={rows} />}</Card>
         <div className="space-y-4">
           {isAdmin ? (
             <Card className="space-y-3">
               <h2 className="font-semibold">Final score</h2>
-              <div className="grid grid-cols-2 gap-3">
-                <Input label="Team A" type="number" value={String(scoreA)} onChange={(value) => setScoreA(Number(value))} />
-                <Input label="Team B" type="number" value={String(scoreB)} onChange={(value) => setScoreB(Number(value))} />
-              </div>
+              <div className="grid grid-cols-2 gap-3"><Input label="Team A" type="number" value={String(scoreA)} onChange={(value) => setScoreA(Number(value))} /><Input label="Team B" type="number" value={String(scoreB)} onChange={(value) => setScoreB(Number(value))} /></div>
               <textarea className="min-h-20 w-full rounded-md border border-gray-300 p-2 text-sm" value={resultNotes} onChange={(event) => setResultNotes(event.target.value)} placeholder="Result notes" />
             </Card>
           ) : result ? (
-            <Card>
-              <h2 className="font-semibold">Resultado final</h2>
-              <p className="mt-2 text-2xl font-semibold">A {result.scoreA} - {result.scoreB} B</p>
-              <p className="mt-1 text-sm text-gray-600">{result.winner === "draw" ? "Empate" : `Gana equipo ${result.winner}`}</p>
-            </Card>
+            <Card><h2 className="font-semibold">Resultado final</h2><p className="mt-2 text-2xl font-semibold">A {result.scoreA} - {result.scoreB} B</p><p className="mt-1 text-sm text-gray-600">{result.winner === "draw" ? "Empate" : `Gana equipo ${result.winner}`}</p></Card>
           ) : null}
           <CopyBlock title="Payment pending summary" text={pendingPaymentsMessage(currentMatch, rows)} />
           <CopyBlock title="Teams summary" text={teamsMessage(currentMatch, rows)} />
@@ -657,91 +559,93 @@ export function MatchDetailPage({ id }: { id: string }) {
   );
 }
 
-export function PaymentsPage() {
+export function PaymentsPage({ initialData }: InitialDataProps) {
   const isAdmin = useIsAdmin();
-  const { data, commit } = useSifupData();
-  const pending = data.matchPlayers.filter((row) => row.paymentStatus !== "paid");
+  const { data, commit } = useSifupData(initialData);
+  const [error, setError] = useState("");
+  const perMatchPending = data.matchPlayers.filter((row) => row.amountDue > row.amountPaid);
+  const courtBalance = data.clubFinance.prepaidTotal - data.matches.filter((match) => match.courtPrepaid).reduce((sum, match) => sum + match.courtCost, 0);
 
   function markPaid(row: MatchPlayer) {
-    const rows = data.matchPlayers.map((item) =>
-      item.id === row.id
-        ? { ...item, paymentStatus: "paid" as const, amountPaid: item.amountDue, updatedAt: new Date().toISOString() }
-        : item,
-    );
-    commit({ ...data, matchPlayers: rows });
+    const updated = { ...row, paymentStatus: "paid" as const, amountPaid: row.amountDue, updatedAt: new Date().toISOString() };
+    markMatchPlayerPaidAction(row.id)
+      .then(() => commit({ ...data, matchPlayers: data.matchPlayers.map((item) => (item.id === row.id ? updated : item)) }))
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo marcar como pagado."));
+  }
+
+  function markMonthlyPaid(payment: MonthlyPayment) {
+    const updated = { ...payment, paymentStatus: "paid" as const, amountPaid: payment.expectedAmount, updatedAt: new Date().toISOString() };
+    saveMonthlyPaymentAction(updated)
+      .then(() => commit({ ...data, monthlyPayments: data.monthlyPayments.map((item) => (item.id === payment.id ? updated : item)) }))
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar la mensualidad."));
   }
 
   return (
     <>
-      <PageTitle title="Payments" description="Todos los jugadores impagos o prometidos por partido." />
+      <PageTitle title="Payments" description="Mensualidades, pagos por partido y estado de cancha." />
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: el marcado de pagos queda reservado para admin." /> : null}
-      <div className="mb-4">
-        <PaymentAccountCard />
+      {error ? <p className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{error}</p> : null}
+      <div className="mb-4 grid gap-4 lg:grid-cols-[1fr_0.7fr]">
+        <PaymentAccountCard data={data} />
+        <Card><p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Cancha</p><p className="mt-2 text-2xl font-semibold text-gray-950">{formatCurrency(data.clubFinance.prepaidTotal)}</p><p className="mt-1 text-sm text-gray-600">Pagado para {data.clubFinance.prepaidCourts} fechas. Saldo referencial: {formatCurrency(courtBalance)}.</p></Card>
       </div>
-      <div className="space-y-3">
-        {pending.map((row) => {
-          const match = data.matches.find((item) => item.id === row.matchId);
-          return (
-            <Card key={row.id}>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 className="font-semibold">{row.name}</h2>
-                  <p className="mt-1 text-sm text-gray-600">{match?.date} - {match?.location}</p>
-                  <p className="mt-1 text-sm font-medium">{formatCurrency(Math.max(row.amountDue - row.amountPaid, 0))}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <PaymentBadge status={row.paymentStatus} />
-                  {isAdmin ? <Button onClick={() => markPaid(row)}>Mark as paid</Button> : null}
-                </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card className="space-y-3">
+          <h2 className="font-semibold">Mensualidad junio</h2>
+          {data.monthlyPayments.map((payment) => {
+            const player = data.players.find((item) => item.id === payment.playerId);
+            const pending = Math.max(payment.expectedAmount - payment.amountPaid, 0);
+            return (
+              <div key={payment.id} className="flex flex-col gap-3 rounded-md border border-gray-100 bg-gray-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div><p className="font-semibold">{player?.name}</p><p className="text-sm text-gray-600">{formatCurrency(payment.amountPaid)} / {formatCurrency(payment.expectedAmount)} - pendiente {formatCurrency(pending)}</p></div>
+                <div className="flex items-center gap-2"><PaymentBadge status={payment.paymentStatus} />{isAdmin && pending > 0 ? <Button onClick={() => markMonthlyPaid(payment)}>Mark as paid</Button> : null}</div>
               </div>
-            </Card>
-          );
-        })}
-        {pending.length === 0 ? <Card>No hay pagos pendientes.</Card> : null}
+            );
+          })}
+        </Card>
+        <Card className="space-y-3">
+          <h2 className="font-semibold">Por partido</h2>
+          {perMatchPending.map((row) => {
+            const match = data.matches.find((item) => item.id === row.matchId);
+            return (
+              <div key={row.id} className="flex flex-col gap-3 rounded-md border border-gray-100 bg-gray-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div><p className="font-semibold">{row.name}</p><p className="mt-1 text-sm text-gray-600">{match?.weekLabel || match?.date} - {match?.location}</p><p className="mt-1 text-sm font-medium">{formatCurrency(Math.max(row.amountDue - row.amountPaid, 0))}</p></div>
+                <div className="flex items-center gap-2"><PaymentBadge status={row.paymentStatus} />{isAdmin ? <Button onClick={() => markPaid(row)}>Mark as paid</Button> : null}</div>
+              </div>
+            );
+          })}
+          {perMatchPending.length === 0 ? <p className="text-sm text-gray-600">No hay pagos por partido pendientes.</p> : null}
+        </Card>
       </div>
     </>
   );
 }
 
-export function PlayersPage() {
+export function PlayersPage({ initialData }: InitialDataProps) {
   const isAdmin = useIsAdmin();
-  const { data, commit } = useSifupData();
+  const { data, commit } = useSifupData(initialData);
   const [name, setName] = useState("");
+  const [error, setError] = useState("");
 
   function addPlayer() {
     if (!name.trim()) return;
     const now = new Date().toISOString();
-    const player: Player = {
-      id: newId("player"),
-      name: name.trim(),
-      nickname: name.trim().split(" ")[0],
-      phone: "",
-      skillLevel: 3,
-      active: true,
-      createdAt: now,
-      updatedAt: now,
-    };
-    commit(upsertPlayer(data, player));
-    setName("");
+    const player: Player = { id: newId("player"), name: name.trim(), nickname: name.trim().split(" ")[0], phone: "", paymentPlan: "perMatch", skillLevel: 3, active: true, createdAt: now, updatedAt: now };
+    savePlayerAction(player)
+      .then(() => {
+        commit(upsertPlayer(data, player));
+        setName("");
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar el jugador."));
   }
 
   return (
     <>
-      <PageTitle title="Players" description={isAdmin ? "Editor rapido de nombres, pseudonimos y contactos." : "Lista publica de jugadores activos."} />
-      {!isAdmin ? <AdminOnlyNotice label="Vista publica: telefonos y edicion quedan ocultos." /> : null}
-      {isAdmin ? (
-        <Card className="mb-4 flex gap-2">
-          <input className="h-10 min-w-0 flex-1 rounded-md border border-gray-300 px-3 text-sm" value={name} onChange={(event) => setName(event.target.value)} placeholder="New player name" />
-          <Button onClick={addPlayer}><Plus size={16} />Add</Button>
-        </Card>
-      ) : null}
-      <Card>
-        {isAdmin ? (
-          <PlayerQuickEditor data={data} commit={commit} />
-        ) : (
-          <PublicPlayers players={data.players} />
-        )}
-      </Card>
+      <PageTitle title="Players" description={isAdmin ? "Editor rapido de nombres, pseudonimos, telefonos y plan de pago." : "Lista publica de jugadores activos."} />
+      {!isAdmin ? <AdminOnlyNotice label="Vista publica: telefonos, WhatsApp y edicion quedan ocultos." /> : null}
+      {error ? <p className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{error}</p> : null}
+      {isAdmin ? <Card className="mb-4 flex gap-2"><input className="h-10 min-w-0 flex-1 rounded-md border border-gray-300 px-3 text-sm" value={name} onChange={(event) => setName(event.target.value)} placeholder="New player name" /><Button onClick={addPlayer}><Plus size={16} />Add</Button></Card> : null}
+      <Card>{isAdmin ? <PlayerQuickEditor data={data} commit={commit} setError={setError} /> : <PublicPlayers players={data.players} />}</Card>
     </>
   );
 }
@@ -753,21 +657,19 @@ function PublicPlayers({ players }: { players: Player[] }) {
         <div key={player.id} className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2">
           <p className="font-semibold text-gray-950">{player.name}</p>
           <p className="text-sm text-gray-600">{player.nickname || "Sin pseudonimo"}</p>
+          <p className="mt-1 text-xs font-semibold text-gray-500">{paymentPlanLabel(player.paymentPlan)}</p>
         </div>
       ))}
     </div>
   );
 }
 
-function PlayerQuickEditor({
-  data,
-  commit,
-}: {
-  data: SifupData;
-  commit: (data: SifupData) => void;
-}) {
+function PlayerQuickEditor({ data, commit, setError }: { data: SifupData; commit: (data: SifupData) => void; setError: (error: string) => void }) {
   function updatePlayer(player: Player, patch: Partial<Player>) {
-    commit(upsertPlayer(data, { ...player, ...patch, updatedAt: new Date().toISOString() }));
+    const updated = { ...player, ...patch, updatedAt: new Date().toISOString() };
+    savePlayerAction(updated)
+      .then(() => commit(upsertPlayer(data, updated)))
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar el jugador."));
   }
 
   return (
@@ -775,34 +677,39 @@ function PlayerQuickEditor({
       {data.players.map((player) => {
         const whatsapp = whatsappHref(player.phone);
         return (
-          <div key={player.id} className="grid gap-3 rounded-md border border-gray-100 bg-gray-50 p-3 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-end">
-            <Input label="Nombre" value={player.name} onChange={(value) => updatePlayer(player, { name: value })} />
-            <Input label="Pseudonimo" value={player.nickname} onChange={(value) => updatePlayer(player, { nickname: value })} />
-            <Input label="Telefono" value={player.phone} onChange={(value) => updatePlayer(player, { phone: value })} />
-            {whatsapp ? (
-              <a
-                href={whatsapp}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-emerald-700 bg-emerald-700 px-3 text-sm font-semibold text-white hover:bg-emerald-800"
-              >
-                <MessageCircle size={16} />
-                WhatsApp
-              </a>
-            ) : (
-              <span className="inline-flex h-10 items-center justify-center rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-500">
-                Sin telefono
-              </span>
-            )}
-          </div>
+          <PlayerEditorRow key={player.id} player={player} whatsapp={whatsapp} onSave={(patch) => updatePlayer(player, patch)} />
         );
       })}
     </div>
   );
 }
 
-export function StandingsPage() {
-  const { data } = useSifupData();
+function PlayerEditorRow({ player, whatsapp, onSave }: { player: Player; whatsapp: string; onSave: (patch: Partial<Player>) => void }) {
+  const [draft, setDraft] = useState(player);
+  return (
+    <div className="grid gap-3 rounded-md border border-gray-100 bg-gray-50 p-3 lg:grid-cols-[1fr_1fr_1fr_0.8fr_auto_auto] lg:items-end">
+      <Input label="Nombre" value={draft.name} onChange={(value) => setDraft({ ...draft, name: value })} />
+      <Input label="Pseudonimo" value={draft.nickname} onChange={(value) => setDraft({ ...draft, nickname: value })} />
+      <Input label="Telefono" value={draft.phone} onChange={(value) => setDraft({ ...draft, phone: value })} />
+      <label className="space-y-1 text-sm font-medium text-gray-700">
+        <span>Plan</span>
+        <select className="h-10 w-full rounded-md border border-gray-300 px-3 text-sm" value={draft.paymentPlan} onChange={(event) => setDraft({ ...draft, paymentPlan: event.target.value as PaymentPlan })}>
+          <option value="monthly">mensual</option>
+          <option value="perMatch">por partido</option>
+        </select>
+      </label>
+      <Button variant="secondary" onClick={() => onSave(draft)}>Guardar</Button>
+      {whatsapp ? (
+        <a href={whatsapp} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-emerald-700 bg-emerald-700 px-3 text-sm font-semibold text-white hover:bg-emerald-800"><MessageCircle size={16} />WhatsApp</a>
+      ) : (
+        <span className="inline-flex h-10 items-center justify-center rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-500">Sin telefono</span>
+      )}
+    </div>
+  );
+}
+
+export function StandingsPage({ initialData }: InitialDataProps) {
+  const { data } = useSifupData(initialData);
   const standings = useMemo(() => {
     return data.players.map((player) => {
       const appearances = data.matchPlayers.filter((row) => (row.name === player.name || row.playerId === player.id) && row.attendanceStatus === "confirmed");
@@ -816,22 +723,15 @@ export function StandingsPage() {
         else if (result.winner === row.team) wins += 1;
         else losses += 1;
       });
-      const pendingDebt = appearances.reduce((sum, row) => sum + Math.max(row.amountDue - row.amountPaid, 0), 0);
-      return {
-        player: player.name,
-        played: appearances.length,
-        wins,
-        losses,
-        draws,
-        winRate: appearances.length ? Math.round((wins / appearances.length) * 100) : 0,
-        pendingDebt,
-      };
+      const matchDebt = appearances.reduce((sum, row) => sum + Math.max(row.amountDue - row.amountPaid, 0), 0);
+      const monthlyDebt = data.monthlyPayments.filter((payment) => payment.playerId === player.id).reduce((sum, payment) => sum + Math.max(payment.expectedAmount - payment.amountPaid, 0), 0);
+      return { player: player.name, played: appearances.length, wins, losses, draws, winRate: appearances.length ? Math.round((wins / appearances.length) * 100) : 0, pendingDebt: matchDebt + monthlyDebt };
     }).sort((a, b) => b.winRate - a.winRate || b.played - a.played);
   }, [data]);
 
   return (
     <>
-      <PageTitle title="Standings" description="Ranking simple calculado desde los datos locales." />
+      <PageTitle title="Standings" description="Ranking simple calculado desde la base de datos." />
       <Card>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-sm">
@@ -840,15 +740,7 @@ export function StandingsPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {standings.map((row) => (
-                <tr key={row.player}>
-                  <td className="py-2 font-medium">{row.player}</td>
-                  <td>{row.played}</td>
-                  <td>{row.wins}</td>
-                  <td>{row.losses}</td>
-                  <td>{row.draws}</td>
-                  <td>{row.winRate}%</td>
-                  <td>{formatCurrency(row.pendingDebt)}</td>
-                </tr>
+                <tr key={row.player}><td className="py-2 font-medium">{row.player}</td><td>{row.played}</td><td>{row.wins}</td><td>{row.losses}</td><td>{row.draws}</td><td>{row.winRate}%</td><td>{formatCurrency(row.pendingDebt)}</td></tr>
               ))}
             </tbody>
           </table>

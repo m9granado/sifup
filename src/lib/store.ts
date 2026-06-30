@@ -1,33 +1,7 @@
-"use client";
-
-import { seedData } from "./mock-data";
 import type { Match, MatchPlayer, MatchResult, Player, SifupData } from "./types";
-
-const STORAGE_KEY = "sifup.local.v2";
 
 export function newId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-export function loadData(): SifupData {
-  if (typeof window === "undefined") return seedData;
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    saveData(seedData);
-    return seedData;
-  }
-  try {
-    return JSON.parse(raw) as SifupData;
-  } catch {
-    saveData(seedData);
-    return seedData;
-  }
-}
-
-export function saveData(data: SifupData) {
-  if (typeof window !== "undefined") {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }
 }
 
 export function upsertMatch(data: SifupData, match: Match) {
