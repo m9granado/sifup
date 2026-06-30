@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Clipboard, MessageCircle, Pencil, Plus, Save, Shield, Users, WalletCards, X } from "lucide-react";
+import { CalendarPlus, Clipboard, Medal, MessageCircle, Pencil, Plus, Save, Shield, Sparkles, Trophy, Users, WalletCards, X } from "lucide-react";
 import {
   createMatchAction,
   markMatchPlayerPaidAction,
@@ -685,6 +685,58 @@ function PlayerRosterRow({
   );
 }
 
+function TeamAssignmentBoard({
+  rows,
+  onTeamChange,
+  onOpenDetails,
+}: {
+  rows: MatchPlayer[];
+  onTeamChange: (rowId: string, team: Team) => void;
+  onOpenDetails: (rowId: string) => void;
+}) {
+  const teamA = rows.filter((row) => row.team === "A");
+  const teamB = rows.filter((row) => row.team === "B");
+  const unassigned = rows.filter((row) => row.team === "none");
+
+  return (
+    <div className="space-y-4">
+      {unassigned.length > 0 ? (
+        <div className="space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Sin asignar ({unassigned.length})</p>
+          <div className="space-y-2 sm:grid sm:grid-cols-2 sm:gap-2 sm:space-y-0 xl:grid-cols-3">
+            {unassigned.map((row) => (
+              <PlayerRosterRow key={row.id} row={row} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+      <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr] lg:items-start">
+        <div className="space-y-2 rounded-md border-2 border-green-200 bg-green-50/40 p-3">
+          <p className="text-sm font-semibold text-green-800">Equipo Verde ({teamA.length})</p>
+          <div className="space-y-2">
+            {teamA.map((row) => (
+              <PlayerRosterRow key={row.id} row={row} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} />
+            ))}
+            {teamA.length === 0 ? <p className="text-sm text-gray-500">Sin jugadores</p> : null}
+          </div>
+        </div>
+        <div className="hidden items-center justify-center px-2 lg:flex">
+          <span className="rounded-full bg-gray-200 px-3 py-1 text-xs font-bold text-gray-600">VS</span>
+        </div>
+        <div className="space-y-2 rounded-md border-2 border-yellow-200 bg-yellow-50/40 p-3">
+          <p className="text-sm font-semibold text-yellow-800">Equipo Amarillo ({teamB.length})</p>
+          <div className="space-y-2">
+            {teamB.map((row) => (
+              <PlayerRosterRow key={row.id} row={row} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} />
+            ))}
+            {teamB.length === 0 ? <p className="text-sm text-gray-500">Sin jugadores</p> : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PlayerDetailModal({
   row,
   onClose,
@@ -806,11 +858,11 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       <Card className="mt-4">
         <h2 className="mb-3 font-semibold">Equipos</h2>
         {isAdmin ? (
-          <div className="space-y-2 sm:grid sm:grid-cols-2 sm:gap-3 sm:space-y-0 xl:grid-cols-3">
-            {rows.map((row, index) => (
-              <PlayerRosterRow key={row.id} row={row} onTeamChange={(team) => updateRow(index, { team })} onOpenDetails={() => setEditingIndex(index)} />
-            ))}
-          </div>
+          <TeamAssignmentBoard
+            rows={rows}
+            onTeamChange={(rowId, team) => updateRow(rows.findIndex((row) => row.id === rowId), { team })}
+            onOpenDetails={(rowId) => setEditingIndex(rows.findIndex((row) => row.id === rowId))}
+          />
         ) : (
           <PublicMatchRows rows={rows} />
         )}
@@ -1110,28 +1162,220 @@ export function StandingsPage({ initialData }: InitialDataProps) {
       });
       const matchDebt = appearances.reduce((sum, row) => sum + Math.max(row.amountDue - row.amountPaid, 0), 0);
       const monthlyDebt = data.monthlyPayments.filter((payment) => payment.playerId === player.id).reduce((sum, payment) => sum + Math.max(payment.expectedAmount - payment.amountPaid, 0), 0);
-      return { player: player.name, played: appearances.length, wins, losses, draws, winRate: appearances.length ? Math.round((wins / appearances.length) * 100) : 0, pendingDebt: matchDebt + monthlyDebt };
-    }).sort((a, b) => b.winRate - a.winRate || b.played - a.played);
+      const decided = wins + losses + draws;
+      return {
+        player: player.name,
+        nickname: player.nickname,
+        plan: player.paymentPlan,
+        played: appearances.length,
+        wins,
+        losses,
+        draws,
+        winRate: appearances.length ? Math.round((wins / appearances.length) * 100) : 0,
+        points: wins * 3 + draws,
+        form: decided ? `${wins}-${draws}-${losses}` : "0-0-0",
+        pendingDebt: matchDebt + monthlyDebt,
+      };
+    }).sort((a, b) => b.points - a.points || b.winRate - a.winRate || b.played - a.played);
   }, [data]);
 
+  const topThree = standings.slice(0, 3);
+  const totalPlayed = data.results.length;
+  const activePlayers = data.players.filter((player) => player.active).length;
+  const totalPending = standings.reduce((sum, row) => sum + row.pendingDebt, 0);
+  const averageWinRate = standings.length ? Math.round(standings.reduce((sum, row) => sum + row.winRate, 0) / standings.length) : 0;
+  const recentResults = [...data.results]
+    .map((result) => ({ result, match: data.matches.find((match) => match.id === result.matchId) }))
+    .filter((item) => item.match)
+    .sort((a, b) => (b.match?.date ?? "").localeCompare(a.match?.date ?? ""))
+    .slice(0, 4);
+
   return (
-    <>
-      <PageTitle title="Standings" description="Ranking simple calculado desde la base de datos." />
-      <Card>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-sm">
-            <thead className="border-b border-gray-200 text-xs uppercase text-gray-500">
-              <tr><th className="py-2">Player</th><th>Played</th><th>Wins</th><th>Losses</th><th>Draws</th><th>Win rate</th><th>Pending debt</th></tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {standings.map((row) => (
-                <tr key={row.player}><td className="py-2 font-medium">{row.player}</td><td>{row.played}</td><td>{row.wins}</td><td>{row.losses}</td><td>{row.draws}</td><td>{row.winRate}%</td><td>{formatCurrency(row.pendingDebt)}</td></tr>
-              ))}
-            </tbody>
-          </table>
+    <div className="-mx-4 -mt-4 min-h-[calc(100vh-4rem)] overflow-hidden bg-[#07100d] text-white md:-ml-0 md:-mr-4 md:rounded-l-[2rem]">
+      <section className="relative border-b border-white/10 px-4 py-5 sm:px-6 lg:px-8">
+        <div className="absolute inset-0 bg-[url('/brand/sifup-keyvisual-v1.png')] bg-cover bg-center opacity-30" />
+        <div className="absolute inset-0 bg-[linear-gradient(100deg,#07100d_0%,rgba(7,16,13,.86)_42%,rgba(7,16,13,.45)_100%)]" />
+        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-2xl">
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-black uppercase text-lime-200">
+              <span className="rounded bg-lime-300 px-2 py-1 text-[#07100d]">SIFUP</span>
+              <span>Tabla viva de los martes</span>
+            </div>
+            <h1 className="text-4xl font-black leading-none tracking-normal text-white sm:text-6xl">Rankings</h1>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-white/75">
+              Vision general, resultados y rendimiento acumulado por jugador, con deuda pendiente siempre visible.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[520px]">
+            <StandingMetric label="Partidos" value={totalPlayed} tone="cyan" />
+            <StandingMetric label="Jugadores" value={activePlayers} tone="lime" />
+            <StandingMetric label="Win rate prom." value={`${averageWinRate}%`} tone="magenta" />
+            <StandingMetric label="Deuda" value={formatCurrency(totalPending)} tone="gold" />
+          </div>
         </div>
-      </Card>
-    </>
+      </section>
+
+      <div className="px-4 py-5 sm:px-6 lg:px-8">
+        <nav className="mb-5 flex gap-2 overflow-x-auto text-sm font-bold text-white/70">
+          {["Vision general", "Top 3", "Ranking general", "Resultados"].map((item, index) => (
+            <a
+              key={item}
+              href={index === 0 ? "#vision" : index === 1 ? "#top3" : index === 2 ? "#ranking" : "#resultados"}
+              className={`shrink-0 rounded-md border px-3 py-2 transition hover:text-white ${index === 0 ? "border-lime-300 bg-lime-300 text-[#07100d]" : "border-white/10 bg-white/5 hover:bg-white/10"}`}
+            >
+              {item}
+            </a>
+          ))}
+        </nav>
+
+        <section id="vision" className="grid gap-4 xl:grid-cols-[1fr_0.72fr]">
+          <div id="top3" className="rounded-xl border border-white/10 bg-white/[0.06] p-4 shadow-2xl shadow-black/20">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-black">Top 3</h2>
+                <p className="text-sm text-white/60">Puntos primero, win rate despues.</p>
+              </div>
+              <Trophy className="text-yellow-300" size={28} />
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              {topThree.map((row, index) => (
+                <div
+                  key={row.player}
+                  className={`relative overflow-hidden rounded-lg border p-4 ${
+                    index === 0
+                      ? "border-yellow-300 bg-yellow-300 text-[#111107] md:-mt-3"
+                      : index === 1
+                        ? "border-cyan-300 bg-cyan-300/15 text-white"
+                        : "border-pink-300 bg-pink-400/15 text-white"
+                  }`}
+                >
+                  <div className="absolute -right-5 -top-8 text-8xl font-black opacity-15">{index + 1}</div>
+                  <div className="relative">
+                    <Medal size={22} />
+                    <p className="mt-5 text-2xl font-black leading-6">{row.player}</p>
+                    <p className={`mt-1 text-sm ${index === 0 ? "text-[#433b08]" : "text-white/60"}`}>{row.nickname || row.plan}</p>
+                    <div className="mt-5 flex items-end justify-between">
+                      <div>
+                        <p className="text-4xl font-black">{row.points}</p>
+                        <p className={`text-xs font-bold uppercase ${index === 0 ? "text-[#433b08]" : "text-white/60"}`}>pts</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-black">{row.winRate}%</p>
+                        <p className={`text-xs font-bold uppercase ${index === 0 ? "text-[#433b08]" : "text-white/60"}`}>{row.form}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div id="resultados" className="rounded-xl border border-white/10 bg-[#0d1b18] p-4">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-black">Resultados</h2>
+                <p className="text-sm text-white/60">Ultimas fechas cerradas.</p>
+              </div>
+              <Sparkles className="text-cyan-300" size={24} />
+            </div>
+            <div className="space-y-3">
+              {recentResults.map(({ result, match }) => (
+                <div key={result.id} className="grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-3">
+                  <div>
+                    <p className="font-bold">{match?.weekLabel || match?.date}</p>
+                    <p className="text-xs text-white/55">{match?.location}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-black"><span className="text-emerald-300">A</span> {result.scoreA} - {result.scoreB} <span className="text-yellow-300">B</span></p>
+                    <p className="text-xs font-bold uppercase text-white/55">{result.winner === "draw" ? "Empate" : `Gana ${result.winner}`}</p>
+                  </div>
+                </div>
+              ))}
+              {recentResults.length === 0 ? <p className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-4 text-sm text-white/60">Aun no hay resultados cerrados.</p> : null}
+            </div>
+          </div>
+        </section>
+
+        <section id="ranking" className="mt-5 rounded-xl border border-white/10 bg-white/[0.06] p-3 sm:p-4">
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-xl font-black">Ranking general</h2>
+              <p className="text-sm text-white/60">Ordenado por puntos, rendimiento y partidos jugados.</p>
+            </div>
+            <div className="flex items-center gap-2 rounded-md bg-white/10 px-3 py-2 text-xs font-bold uppercase text-lime-200">
+              <Trophy size={15} />
+              Temporada actual
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[820px] border-separate border-spacing-y-2 text-left text-sm">
+              <thead className="text-xs uppercase text-white/45">
+                <tr>
+                  <th className="px-3 py-2">#</th>
+                  <th>Jugador</th>
+                  <th>PJ</th>
+                  <th>G</th>
+                  <th>E</th>
+                  <th>P</th>
+                  <th>%</th>
+                  <th>Puntos</th>
+                  <th>Deuda</th>
+                </tr>
+              </thead>
+              <tbody>
+                {standings.map((row, index) => (
+                  <tr key={row.player} className="group">
+                    <td className="rounded-l-lg bg-white/[0.055] px-3 py-3 font-black text-white/65 group-hover:bg-white/[0.09]">{index + 1}</td>
+                    <td className="bg-white/[0.055] py-3 group-hover:bg-white/[0.09]">
+                      <div className="flex items-center gap-3">
+                        <span className={`flex h-9 w-9 items-center justify-center rounded-md text-sm font-black ${index < 3 ? "bg-yellow-300 text-[#111107]" : "bg-emerald-400 text-[#06120e]"}`}>
+                          {row.player.slice(0, 2).toUpperCase()}
+                        </span>
+                        <div>
+                          <p className="font-black text-white">{row.player}</p>
+                          <p className="text-xs text-white/45">{row.plan === "monthly" ? "Oficial" : "Galleta"} · {row.form}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="bg-white/[0.055] font-bold group-hover:bg-white/[0.09]">{row.played}</td>
+                    <td className="bg-white/[0.055] font-bold text-emerald-300 group-hover:bg-white/[0.09]">{row.wins}</td>
+                    <td className="bg-white/[0.055] font-bold text-cyan-200 group-hover:bg-white/[0.09]">{row.draws}</td>
+                    <td className="bg-white/[0.055] font-bold text-pink-300 group-hover:bg-white/[0.09]">{row.losses}</td>
+                    <td className="bg-white/[0.055] group-hover:bg-white/[0.09]">
+                      <div className="flex items-center gap-2">
+                        <span className="w-10 font-black">{row.winRate}%</span>
+                        <span className="h-2 w-20 overflow-hidden rounded-full bg-white/10">
+                          <span className="block h-full rounded-full bg-lime-300" style={{ width: `${row.winRate}%` }} />
+                        </span>
+                      </div>
+                    </td>
+                    <td className="bg-white/[0.055] text-lg font-black text-yellow-300 group-hover:bg-white/[0.09]">{row.points}</td>
+                    <td className="rounded-r-lg bg-white/[0.055] pr-3 font-bold group-hover:bg-white/[0.09]">
+                      <span className={row.pendingDebt > 0 ? "text-orange-200" : "text-lime-200"}>{formatCurrency(row.pendingDebt)}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function StandingMetric({ label, value, tone }: { label: string; value: string | number; tone: "cyan" | "lime" | "magenta" | "gold" }) {
+  const tones = {
+    cyan: "border-cyan-300/40 bg-cyan-300/15 text-cyan-100",
+    lime: "border-lime-300/40 bg-lime-300/15 text-lime-100",
+    magenta: "border-pink-300/40 bg-pink-300/15 text-pink-100",
+    gold: "border-yellow-300/40 bg-yellow-300/15 text-yellow-100",
+  };
+  return (
+    <div className={`rounded-lg border px-3 py-3 backdrop-blur ${tones[tone]}`}>
+      <p className="text-[11px] font-black uppercase text-white/55">{label}</p>
+      <p className="mt-1 truncate text-xl font-black">{value}</p>
+    </div>
   );
 }
 
