@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Clipboard, MessageCircle, Plus, Save, Shield, WalletCards, X } from "lucide-react";
+import { CalendarPlus, Clipboard, MessageCircle, Plus, Save, Shield, Users, WalletCards, X } from "lucide-react";
 import {
   createMatchAction,
   markMatchPlayerPaidAction,
@@ -345,32 +345,42 @@ export function MatchesPage({ initialData }: InitialDataProps) {
       />
       {error ? <p className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{error}</p> : null}
       <div className="space-y-3">
-        {data.matches.map((match) => {
-          const rows = data.matchPlayers.filter((row) => row.matchId === match.id);
-          const summary = summarizeMatch(rows);
-          return (
-            <Link key={match.id} href={`/matches/${match.id}`} className="block">
-              <Card className="transition hover:border-emerald-300">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-semibold">{match.weekLabel || match.date}</h2>
-                    <p className="mt-1 text-sm font-medium text-gray-700">{match.date} - {match.time}</p>
-                    <p className="mt-1 text-sm text-gray-600">{match.location}</p>
+        {(() => {
+          const today = new Date().toISOString().slice(0, 10);
+          const nextId = [...data.matches]
+            .filter((match) => match.date >= today && match.status !== "played" && match.status !== "closed")
+            .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))[0]?.id;
+          return data.matches.map((match) => {
+            const rows = data.matchPlayers.filter((row) => row.matchId === match.id);
+            const summary = summarizeMatch(rows);
+            const isNext = match.id === nextId;
+            return (
+              <Link key={match.id} href={`/matches/${match.id}`} className="block">
+                <Card className={`transition hover:border-emerald-300 ${isNext ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-300" : ""}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-lg font-semibold">{match.weekLabel || match.date}</h2>
+                        {isNext ? <span className="rounded-full bg-emerald-600 px-2 py-1 text-xs font-semibold text-white">Proximo partido</span> : null}
+                      </div>
+                      <p className="mt-1 text-sm font-medium text-gray-700">{match.date} - {match.time}</p>
+                      <p className="mt-1 text-sm text-gray-600">{match.location}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <StatusBadge value={match.status} />
+                      {match.courtPrepaid ? <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200">cancha pagada</span> : null}
+                    </div>
                   </div>
-                  <div className="flex flex-col items-end gap-2">
-                    <StatusBadge value={match.status} />
-                    {match.courtPrepaid ? <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200">cancha pagada</span> : null}
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
+                    <span>{summary.confirmedCount} jugadores</span>
+                    <span>{summary.paidCount} pagados</span>
+                    <span>{formatCurrency(summary.pendingAmount)} pend.</span>
                   </div>
-                </div>
-                <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
-                  <span>{summary.confirmedCount} jugadores</span>
-                  <span>{summary.paidCount} pagados</span>
-                  <span>{formatCurrency(summary.pendingAmount)} pend.</span>
-                </div>
-              </Card>
-            </Link>
-          );
-        })}
+                </Card>
+              </Link>
+            );
+          });
+        })()}
       </div>
     </>
   );
@@ -637,7 +647,19 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
 
   return (
     <>
-      <PageTitle title={`${currentMatch.weekLabel || currentMatch.date} - ${currentMatch.time}`} description={`${currentMatch.date} - ${currentMatch.location}`} action={isAdmin ? <Button onClick={save} disabled={isPending}><Save size={16} />Save match</Button> : undefined} />
+      <PageTitle
+        title={`${currentMatch.weekLabel || currentMatch.date} - ${currentMatch.time}`}
+        description={`${currentMatch.date} - ${currentMatch.location}`}
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Link href={`/matches/${currentMatch.id}/teams`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-800 transition hover:bg-gray-100">
+              <Users size={16} />
+              Ver equipos
+            </Link>
+            {isAdmin ? <Button onClick={save} disabled={isPending}><Save size={16} />Save match</Button> : null}
+          </div>
+        }
+      />
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: equipos, resultado y pagos son solo lectura." /> : null}
       {error ? <p className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{error}</p> : null}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -763,19 +785,22 @@ export function PlayersPage({ initialData }: InitialDataProps) {
 
   return (
     <>
-      <PageTitle title="Players" description={isAdmin ? "Oficiales (mensualidad) y galletas (por partido)." : "Lista publica de jugadores activos."} />
+      <PageTitle title="Players" description={isAdmin ? "Oficiales: mensualidad del mes actual e historico de pagos. Galletas: deuda acumulada por partido." : "Lista publica de jugadores activos."} />
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: telefonos, WhatsApp y edicion quedan ocultos." /> : null}
       {error ? <p className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{error}</p> : null}
       {isAdmin ? <Card className="mb-4 flex gap-2"><input className="h-10 min-w-0 flex-1 rounded-md border border-gray-300 px-3 text-sm" value={name} onChange={(event) => setName(event.target.value)} placeholder="New player name" /><Button onClick={addPlayer}><Plus size={16} />Add</Button></Card> : null}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="space-y-3">
           <h2 className="font-semibold">Oficiales</h2>
+          <p className="text-xs text-gray-500">Mensualidad de {month} y meses anteriores.</p>
           {oficiales.map((player) => {
             const payment = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === month);
             const paid = payment?.paymentStatus === "paid";
+            const history = data.monthlyPayments.filter((item) => item.playerId === player.id);
             return (
               <PlayerRow key={player.id} player={player} isAdmin={isAdmin} onEdit={() => setEditingPlayer(player)}>
                 <PaymentBadge status={paid ? "paid" : payment?.paymentStatus ?? "unpaid"} />
+                <PaymentHistory payments={history} />
               </PlayerRow>
             );
           })}
@@ -803,6 +828,29 @@ export function PlayersPage({ initialData }: InitialDataProps) {
   );
 }
 
+function PaymentHistory({ payments }: { payments: MonthlyPayment[] }) {
+  const recent = [...payments].sort((a, b) => a.monthKey.localeCompare(b.monthKey)).slice(-6);
+  if (recent.length === 0) return null;
+  const styles = {
+    paid: "bg-emerald-100 text-emerald-800",
+    unpaid: "bg-red-100 text-red-800",
+    promised: "bg-amber-100 text-amber-800",
+  };
+  return (
+    <div className="mt-1 flex flex-wrap gap-1">
+      {recent.map((payment) => (
+        <span
+          key={payment.id}
+          title={`${payment.monthKey}: ${payment.paymentStatus}`}
+          className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${styles[payment.paymentStatus]}`}
+        >
+          {payment.monthKey.slice(5)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function PlayerRow({
   player,
   isAdmin,
@@ -814,14 +862,26 @@ function PlayerRow({
   onEdit: () => void;
   children: React.ReactNode;
 }) {
+  const whatsapp = whatsappHref(player.phone);
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border border-gray-100 bg-gray-50 px-3 py-2">
       <div>
         <p className="font-semibold text-gray-950">{player.name}</p>
         <p className="text-sm text-gray-600">{player.nickname || "Sin pseudonimo"}</p>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         {children}
+        {isAdmin && whatsapp ? (
+          <a
+            href={whatsapp}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-emerald-700 bg-emerald-700 px-3 text-sm font-semibold text-white hover:bg-emerald-800"
+          >
+            <MessageCircle size={16} />
+            Cobrar
+          </a>
+        ) : null}
         {isAdmin ? <Button variant="secondary" onClick={onEdit}>Editar</Button> : null}
       </div>
     </div>
@@ -896,5 +956,50 @@ export function StandingsPage({ initialData }: InitialDataProps) {
         </div>
       </Card>
     </>
+  );
+}
+
+export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps) {
+  const { data } = useSifupData(initialData);
+  const match = data.matches.find((item) => item.id === id);
+  const rows = data.matchPlayers.filter((row) => row.matchId === id);
+
+  if (!match) return <PageTitle title="Match not found" description="No existe en la base de datos." />;
+
+  const teamA = rows.filter((row) => row.team === "A");
+  const teamB = rows.filter((row) => row.team === "B");
+  const unassigned = rows.filter((row) => row.team === "none");
+
+  return (
+    <>
+      <PageTitle
+        title={`Equipos - ${match.weekLabel || match.date}`}
+        description={`${match.date} - ${match.location}`}
+        action={
+          <Link href={`/matches/${match.id}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-800 transition hover:bg-gray-100">
+            Volver al partido
+          </Link>
+        }
+      />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <TeamColumn label="Equipo A" rows={teamA} />
+        <TeamColumn label="Equipo B" rows={teamB} />
+      </div>
+      {unassigned.length > 0 ? <div className="mt-4"><TeamColumn label="Sin equipo" rows={unassigned} /></div> : null}
+    </>
+  );
+}
+
+function TeamColumn({ label, rows }: { label: string; rows: MatchPlayer[] }) {
+  return (
+    <Card className="space-y-2">
+      <h2 className="font-semibold">{label} ({rows.length})</h2>
+      <ul className="space-y-1">
+        {rows.map((row) => (
+          <li key={row.id} className="rounded-md bg-gray-50 px-3 py-2 text-sm font-medium text-gray-950">{row.name}</li>
+        ))}
+        {rows.length === 0 ? <li className="text-sm text-gray-500">Sin jugadores</li> : null}
+      </ul>
+    </Card>
   );
 }
