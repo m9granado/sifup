@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Clipboard, MessageCircle, Plus, Save, Shield, WalletCards } from "lucide-react";
+import { CalendarPlus, Clipboard, MessageCircle, Plus, Save, Shield, WalletCards, X } from "lucide-react";
 import {
   createMatchAction,
   markMatchPlayerPaidAction,
@@ -66,10 +66,6 @@ function whatsappHref(phone: string) {
   if (!normalized) return "";
   const withCountry = normalized.startsWith("56") ? normalized : `56${normalized}`;
   return `https://wa.me/${withCountry}`;
-}
-
-function paymentPlanLabel(plan: PaymentPlan) {
-  return plan === "monthly" ? "mensual $20.000" : "por partido $3.500";
 }
 
 function PageTitle({ title, description, action }: { title: string; description?: string; action?: React.ReactNode }) {
@@ -204,6 +200,40 @@ function CopyBlock({ title, text }: { title: string; text: string }) {
   );
 }
 
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/40 px-4" onClick={onClose}>
+      <div
+        className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-lg bg-white p-4 shadow-xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold text-gray-950">{title}</h2>
+          <button type="button" onClick={onClose} className="rounded-md p-1 text-gray-500 hover:bg-gray-100" aria-label="Cerrar">
+            <X size={18} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function currentMonthKey() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+function nextWeekDates(latestDate: string, count: number) {
+  const base = new Date(`${latestDate}T12:00:00`);
+  const dates: string[] = [];
+  for (let i = 1; i <= count; i += 1) {
+    const next = new Date(base);
+    next.setDate(next.getDate() + i * 7);
+    dates.push(next.toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
 function nextMatch(matches: Match[]) {
   return [...matches].sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))[0];
 }
@@ -256,14 +286,64 @@ export function DashboardPage({ initialData }: InitialDataProps) {
 
 export function MatchesPage({ initialData }: InitialDataProps) {
   const isAdmin = useIsAdmin();
-  const { data } = useSifupData(initialData);
+  const { data, commit } = useSifupData(initialData);
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState("");
+
+  function createUpcomingMatches() {
+    const latest = [...data.matches].sort((a, b) => b.date.localeCompare(a.date))[0];
+    if (!latest) return;
+    const dates = nextWeekDates(latest.date, 2).filter((date) => !data.matches.some((match) => match.date === date));
+    if (dates.length === 0) return;
+    startTransition(async () => {
+      try {
+        let next = data;
+        for (const date of dates) {
+          const now = new Date().toISOString();
+          const match: Match = {
+            id: newId("match"),
+            date,
+            time: latest.time,
+            location: latest.location,
+            status: "confirmed",
+            totalCost: latest.totalCost,
+            weekLabel: weekLabel(date),
+            monthKey: monthKey(date),
+            courtCost: latest.courtCost,
+            courtPrepaid: true,
+            notes: "",
+            createdAt: now,
+            updatedAt: now,
+          };
+          await createMatchAction(match, []);
+          next = upsertMatch(next, match);
+        }
+        commit(next);
+        setError("");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudieron crear los proximos partidos.");
+      }
+    });
+  }
+
   return (
     <>
       <PageTitle
         title="Matches"
         description="Martes registrados por semana, pagos y asistencia."
-        action={isAdmin ? <CtaLink href="/matches/new"><Plus size={16} />New match</CtaLink> : undefined}
+        action={
+          isAdmin ? (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={createUpcomingMatches} disabled={isPending}>
+                <CalendarPlus size={16} />
+                Crear proximas 2 fechas
+              </Button>
+              <CtaLink href="/matches/new"><Plus size={16} />New match</CtaLink>
+            </div>
+          ) : undefined
+        }
       />
+      {error ? <p className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{error}</p> : null}
       <div className="space-y-3">
         {data.matches.map((match) => {
           const rows = data.matchPlayers.filter((row) => row.matchId === match.id);
@@ -381,7 +461,7 @@ export function NewMatchPage({ initialData }: InitialDataProps) {
           </div>
           {errors.map((error) => <p key={error} className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{error}</p>)}
         </Card>
-        <MatchEditor match={match} setMatch={setMatch} rows={rows} updateRow={updateRow} />
+        <MatchEditor match={match} setMatch={setMatch} rows={rows} updateRow={updateRow} knownLocations={data.matches.map((item) => item.location)} lastLocation={data.matches[0]?.location ?? ""} />
       </div>
     </>
   );
@@ -406,18 +486,43 @@ function MatchEditor({
   setMatch,
   rows,
   updateRow,
+  knownLocations,
+  lastLocation,
 }: {
   match: { date: string; time: string; location: string; totalCost: number; notes: string };
   setMatch: (value: { date: string; time: string; location: string; totalCost: number; notes: string }) => void;
   rows: Omit<MatchPlayer, "id" | "matchId" | "createdAt" | "updatedAt">[];
   updateRow: (index: number, patch: Partial<Omit<MatchPlayer, "id" | "matchId" | "createdAt" | "updatedAt">>) => void;
+  knownLocations: string[];
+  lastLocation: string;
 }) {
+  const locations = Array.from(new Set(knownLocations.filter(Boolean)));
   return (
     <Card className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2">
         <Input label="Date" type="date" value={match.date} onChange={(date) => setMatch({ ...match, date })} />
         <Input label="Time" type="time" value={match.time} onChange={(time) => setMatch({ ...match, time })} />
-        <Input label="Location" value={match.location} onChange={(location) => setMatch({ ...match, location })} />
+        <div className="space-y-1">
+          <label className="space-y-1 text-sm font-medium text-gray-700">
+            <span>Location</span>
+            <div className="flex gap-2">
+              <input
+                list="known-locations"
+                value={match.location}
+                onChange={(event) => setMatch({ ...match, location: event.target.value })}
+                className="h-10 w-full rounded-md border border-gray-300 px-3 text-sm outline-none focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100"
+              />
+              <datalist id="known-locations">
+                {locations.map((location) => <option key={location} value={location} />)}
+              </datalist>
+              {lastLocation ? (
+                <Button variant="secondary" onClick={() => setMatch({ ...match, location: lastLocation })}>
+                  Repetir semana pasada
+                </Button>
+              ) : null}
+            </div>
+          </label>
+        </div>
         <Input label="Total cost" type="number" value={String(match.totalCost)} onChange={(totalCost) => setMatch({ ...match, totalCost: Number(totalCost) })} />
       </div>
       <EditableRows rows={rows} updateRow={updateRow} />
@@ -626,6 +731,7 @@ export function PlayersPage({ initialData }: InitialDataProps) {
   const { data, commit } = useSifupData(initialData);
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
 
   function addPlayer() {
     if (!name.trim()) return;
@@ -639,71 +745,114 @@ export function PlayersPage({ initialData }: InitialDataProps) {
       .catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar el jugador."));
   }
 
+  function savePlayer(patch: Partial<Player>) {
+    if (!editingPlayer) return;
+    const updated = { ...editingPlayer, ...patch, updatedAt: new Date().toISOString() };
+    savePlayerAction(updated)
+      .then(() => {
+        commit(upsertPlayer(data, updated));
+        setEditingPlayer(null);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar el jugador."));
+  }
+
+  const visiblePlayers = isAdmin ? data.players : data.players.filter((player) => player.active);
+  const oficiales = visiblePlayers.filter((player) => player.paymentPlan === "monthly");
+  const galletas = visiblePlayers.filter((player) => player.paymentPlan === "perMatch");
+  const month = currentMonthKey();
+
   return (
     <>
-      <PageTitle title="Players" description={isAdmin ? "Editor rapido de nombres, pseudonimos, telefonos y plan de pago." : "Lista publica de jugadores activos."} />
+      <PageTitle title="Players" description={isAdmin ? "Oficiales (mensualidad) y galletas (por partido)." : "Lista publica de jugadores activos."} />
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: telefonos, WhatsApp y edicion quedan ocultos." /> : null}
       {error ? <p className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{error}</p> : null}
       {isAdmin ? <Card className="mb-4 flex gap-2"><input className="h-10 min-w-0 flex-1 rounded-md border border-gray-300 px-3 text-sm" value={name} onChange={(event) => setName(event.target.value)} placeholder="New player name" /><Button onClick={addPlayer}><Plus size={16} />Add</Button></Card> : null}
-      <Card>{isAdmin ? <PlayerQuickEditor data={data} commit={commit} setError={setError} /> : <PublicPlayers players={data.players} />}</Card>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="space-y-3">
+          <h2 className="font-semibold">Oficiales</h2>
+          {oficiales.map((player) => {
+            const payment = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === month);
+            const paid = payment?.paymentStatus === "paid";
+            return (
+              <PlayerRow key={player.id} player={player} isAdmin={isAdmin} onEdit={() => setEditingPlayer(player)}>
+                <PaymentBadge status={paid ? "paid" : payment?.paymentStatus ?? "unpaid"} />
+              </PlayerRow>
+            );
+          })}
+        </Card>
+        <Card className="space-y-3">
+          <h2 className="font-semibold">Galletas</h2>
+          {galletas.map((player) => {
+            const debt = data.matchPlayers
+              .filter((row) => row.playerId === player.id)
+              .reduce((sum, row) => sum + Math.max(row.amountDue - row.amountPaid, 0), 0);
+            return (
+              <PlayerRow key={player.id} player={player} isAdmin={isAdmin} onEdit={() => setEditingPlayer(player)}>
+                <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700 ring-1 ring-gray-200">{formatCurrency(debt)}</span>
+              </PlayerRow>
+            );
+          })}
+        </Card>
+      </div>
+      {editingPlayer ? (
+        <Modal title={`Editar ${editingPlayer.name}`} onClose={() => setEditingPlayer(null)}>
+          <PlayerEditorForm player={editingPlayer} onSave={savePlayer} />
+        </Modal>
+      ) : null}
     </>
   );
 }
 
-function PublicPlayers({ players }: { players: Player[] }) {
+function PlayerRow({
+  player,
+  isAdmin,
+  onEdit,
+  children,
+}: {
+  player: Player;
+  isAdmin: boolean;
+  onEdit: () => void;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="grid gap-2 sm:grid-cols-2">
-      {players.filter((player) => player.active).map((player) => (
-        <div key={player.id} className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2">
-          <p className="font-semibold text-gray-950">{player.name}</p>
-          <p className="text-sm text-gray-600">{player.nickname || "Sin pseudonimo"}</p>
-          <p className="mt-1 text-xs font-semibold text-gray-500">{paymentPlanLabel(player.paymentPlan)}</p>
-        </div>
-      ))}
+    <div className="flex items-center justify-between gap-3 rounded-md border border-gray-100 bg-gray-50 px-3 py-2">
+      <div>
+        <p className="font-semibold text-gray-950">{player.name}</p>
+        <p className="text-sm text-gray-600">{player.nickname || "Sin pseudonimo"}</p>
+      </div>
+      <div className="flex items-center gap-2">
+        {children}
+        {isAdmin ? <Button variant="secondary" onClick={onEdit}>Editar</Button> : null}
+      </div>
     </div>
   );
 }
 
-function PlayerQuickEditor({ data, commit, setError }: { data: SifupData; commit: (data: SifupData) => void; setError: (error: string) => void }) {
-  function updatePlayer(player: Player, patch: Partial<Player>) {
-    const updated = { ...player, ...patch, updatedAt: new Date().toISOString() };
-    savePlayerAction(updated)
-      .then(() => commit(upsertPlayer(data, updated)))
-      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar el jugador."));
-  }
-
+function PlayerEditorForm({ player, onSave }: { player: Player; onSave: (patch: Partial<Player>) => void }) {
+  const [draft, setDraft] = useState(player);
+  const whatsapp = whatsappHref(draft.phone);
   return (
     <div className="space-y-3">
-      {data.players.map((player) => {
-        const whatsapp = whatsappHref(player.phone);
-        return (
-          <PlayerEditorRow key={player.id} player={player} whatsapp={whatsapp} onSave={(patch) => updatePlayer(player, patch)} />
-        );
-      })}
-    </div>
-  );
-}
-
-function PlayerEditorRow({ player, whatsapp, onSave }: { player: Player; whatsapp: string; onSave: (patch: Partial<Player>) => void }) {
-  const [draft, setDraft] = useState(player);
-  return (
-    <div className="grid gap-3 rounded-md border border-gray-100 bg-gray-50 p-3 lg:grid-cols-[1fr_1fr_1fr_0.8fr_auto_auto] lg:items-end">
       <Input label="Nombre" value={draft.name} onChange={(value) => setDraft({ ...draft, name: value })} />
       <Input label="Pseudonimo" value={draft.nickname} onChange={(value) => setDraft({ ...draft, nickname: value })} />
       <Input label="Telefono" value={draft.phone} onChange={(value) => setDraft({ ...draft, phone: value })} />
       <label className="space-y-1 text-sm font-medium text-gray-700">
         <span>Plan</span>
         <select className="h-10 w-full rounded-md border border-gray-300 px-3 text-sm" value={draft.paymentPlan} onChange={(event) => setDraft({ ...draft, paymentPlan: event.target.value as PaymentPlan })}>
-          <option value="monthly">mensual</option>
-          <option value="perMatch">por partido</option>
+          <option value="monthly">mensual (oficial)</option>
+          <option value="perMatch">por partido (galleta)</option>
         </select>
       </label>
-      <Button variant="secondary" onClick={() => onSave(draft)}>Guardar</Button>
-      {whatsapp ? (
-        <a href={whatsapp} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-emerald-700 bg-emerald-700 px-3 text-sm font-semibold text-white hover:bg-emerald-800"><MessageCircle size={16} />WhatsApp</a>
-      ) : (
-        <span className="inline-flex h-10 items-center justify-center rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-500">Sin telefono</span>
-      )}
+      <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+        <input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} />
+        <span>Activo</span>
+      </label>
+      <div className="flex flex-wrap gap-2 pt-2">
+        <Button onClick={() => onSave(draft)}><Save size={16} />Guardar</Button>
+        {whatsapp ? (
+          <a href={whatsapp} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-emerald-700 bg-emerald-700 px-3 text-sm font-semibold text-white hover:bg-emerald-800"><MessageCircle size={16} />WhatsApp</a>
+        ) : null}
+      </div>
     </div>
   );
 }
