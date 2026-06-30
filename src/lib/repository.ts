@@ -254,6 +254,15 @@ export async function markMatchPlayerPaid(rowId: string) {
   `;
 }
 
+export async function setMatchPlayerPaymentStatus(rowId: string, status: "paid" | "unpaid") {
+  const sql = requireDatabase();
+  await sql`
+    update match_players
+    set payment_status = ${status}, amount_paid = case when ${status} = 'paid' then amount_due else 0 end, updated_at = now()
+    where id = ${rowId}
+  `;
+}
+
 export async function savePlayer(player: Player) {
   const sql = requireDatabase();
   await sql`

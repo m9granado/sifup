@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Clipboard, MessageCircle, Plus, Save, Shield, Users, WalletCards, X } from "lucide-react";
+import { CalendarPlus, Clipboard, MessageCircle, Pencil, Plus, Save, Shield, Users, WalletCards, X } from "lucide-react";
 import {
   createMatchAction,
   markMatchPlayerPaidAction,
   saveMatchDetailAction,
   saveMonthlyPaymentAction,
   savePlayerAction,
+  setMatchPlayerPaymentStatusAction,
 } from "@/app/actions";
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
@@ -147,6 +148,51 @@ function PaymentBadge({ status }: { status: PaymentStatus }) {
 
 function StatusBadge({ value }: { value: string }) {
   return <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700 ring-1 ring-gray-200">{value}</span>;
+}
+
+function teamDot(team: Team) {
+  if (team === "A") return "bg-green-600";
+  if (team === "B") return "bg-yellow-400";
+  return "bg-gray-300";
+}
+
+function TeamToggle({ value, onChange, disabled }: { value: Team; onChange: (team: Team) => void; disabled?: boolean }) {
+  const options: { team: Team; label: string; selected: string; idle: string }[] = [
+    { team: "A", label: "Verde", selected: "bg-green-600 text-white border-green-600", idle: "border-green-300 text-green-700 bg-green-50 hover:bg-green-100" },
+    { team: "B", label: "Amarillo", selected: "bg-yellow-400 text-gray-900 border-yellow-400", idle: "border-yellow-300 text-yellow-800 bg-yellow-50 hover:bg-yellow-100" },
+    { team: "none", label: "Sin equipo", selected: "bg-gray-700 text-white border-gray-700", idle: "border-gray-300 text-gray-600 bg-white hover:bg-gray-100" },
+  ];
+  return (
+    <div className="flex gap-2">
+      {options.map((option) => (
+        <button
+          key={option.team}
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange(option.team)}
+          className={`h-11 flex-1 rounded-md border text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${value === option.team ? option.selected : option.idle}`}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PaymentToggle({ status, onToggle, disabled }: { status: PaymentStatus; onToggle: () => void; disabled?: boolean }) {
+  const paid = status === "paid";
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={disabled}
+      className={`inline-flex h-11 w-32 items-center justify-center rounded-md border text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+        paid ? "border-emerald-700 bg-emerald-700 text-white hover:bg-emerald-800" : "border-red-300 bg-red-50 text-red-800 hover:bg-red-100"
+      }`}
+    >
+      {paid ? "Pagado" : "No pagado"}
+    </button>
+  );
 }
 
 function Stat({ label, value }: { label: string; value: string | number }) {
@@ -603,10 +649,85 @@ function PublicMatchRows({ rows }: { rows: MatchPlayer[] }) {
     <div className="space-y-2">
       {rows.map((row) => (
         <div key={row.id} className="flex flex-col gap-2 rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
-          <div><p className="font-semibold text-gray-950">{row.name}</p><p className="text-xs text-gray-500">Equipo {row.team === "none" ? "por asignar" : row.team}</p></div>
+          <div className="flex items-center gap-2">
+            <span className={`h-3 w-3 shrink-0 rounded-full ${teamDot(row.team)}`} />
+            <div>
+              <p className="font-semibold text-gray-950">{row.name}</p>
+              <p className="text-xs text-gray-500">{row.team === "none" ? "Sin equipo" : row.team === "A" ? "Equipo verde" : "Equipo amarillo"}</p>
+            </div>
+          </div>
           <div className="flex items-center gap-2"><PaymentBadge status={row.paymentStatus} /><span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-gray-600 ring-1 ring-gray-200">{formatCurrency(Math.max(row.amountDue - row.amountPaid, 0))}</span></div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function PlayerRosterRow({
+  row,
+  onTeamChange,
+  onOpenDetails,
+}: {
+  row: MatchPlayer;
+  onTeamChange: (team: Team) => void;
+  onOpenDetails: () => void;
+}) {
+  return (
+    <div className="space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-semibold text-gray-950">{row.name}</p>
+        <button type="button" onClick={onOpenDetails} className="rounded-md p-1.5 text-gray-500 hover:bg-gray-200" aria-label={`Editar ${row.name}`}>
+          <Pencil size={16} />
+        </button>
+      </div>
+      <TeamToggle value={row.team} onChange={onTeamChange} />
+    </div>
+  );
+}
+
+function PlayerDetailModal({
+  row,
+  onClose,
+  onSave,
+}: {
+  row: MatchPlayer;
+  onClose: () => void;
+  onSave: (patch: Partial<MatchPlayer>) => void;
+}) {
+  const [draft, setDraft] = useState(row);
+  return (
+    <Modal title={`Editar ${row.name}`} onClose={onClose}>
+      <div className="space-y-3">
+        <Input label="Nombre" value={draft.name} onChange={(value) => setDraft({ ...draft, name: value })} />
+        <label className="space-y-1 text-sm font-medium text-gray-700">
+          <span>Asistencia</span>
+          <select className="h-10 w-full rounded-md border border-gray-300 px-3 text-sm" value={draft.attendanceStatus} onChange={(event) => setDraft({ ...draft, attendanceStatus: event.target.value as MatchPlayer["attendanceStatus"] })}>
+            <option value="confirmed">confirmed</option>
+            <option value="maybe">maybe</option>
+            <option value="out">out</option>
+            <option value="waitlist">waitlist</option>
+          </select>
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <Input label="Due" type="number" value={String(draft.amountDue)} onChange={(value) => setDraft({ ...draft, amountDue: Number(value) })} />
+          <Input label="Paid" type="number" value={String(draft.amountPaid)} onChange={(value) => setDraft({ ...draft, amountPaid: Number(value) })} />
+        </div>
+        <Input label="Nota" value={draft.note} onChange={(value) => setDraft({ ...draft, note: value })} />
+        <Button onClick={() => onSave(draft)}><Save size={16} />Guardar</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function PaymentCollectionRow({ row, onToggle, disabled }: { row: MatchPlayer; onToggle: () => void; disabled?: boolean }) {
+  const pending = Math.max(row.amountDue - row.amountPaid, 0);
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-gray-100 bg-gray-50 px-3 py-2">
+      <div>
+        <p className="font-semibold text-gray-950">{row.name}</p>
+        <p className="text-sm text-gray-600">{pending > 0 ? `Pendiente ${formatCurrency(pending)}` : "Sin saldo pendiente"}</p>
+      </div>
+      <PaymentToggle status={row.paymentStatus} onToggle={onToggle} disabled={disabled} />
     </div>
   );
 }
@@ -615,6 +736,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const isAdmin = useIsAdmin();
   const { data, commit } = useSifupData(initialData);
   const [isPending, startTransition] = useTransition();
+  const [paymentPending, setPaymentPending] = useState<string | null>(null);
   const match = data.matches.find((item) => item.id === id);
   const result = data.results.find((item) => item.matchId === id);
   const [rows, setRows] = useState(() => data.matchPlayers.filter((row) => row.matchId === id));
@@ -622,6 +744,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const [scoreB, setScoreB] = useState(result?.scoreB ?? 0);
   const [resultNotes, setResultNotes] = useState(result?.notes ?? "");
   const [error, setError] = useState("");
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const summary = summarizeMatch(rows);
 
   if (!match) return <PageTitle title="Match not found" description="No existe en la base de datos." />;
@@ -645,6 +768,20 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
     });
   }
 
+  function togglePayment(row: MatchPlayer, index: number) {
+    const nextStatus = row.paymentStatus === "paid" ? "unpaid" : "paid";
+    setPaymentPending(row.id);
+    setMatchPlayerPaymentStatusAction(row.id, nextStatus)
+      .then(() => {
+        const patch = { paymentStatus: nextStatus, amountPaid: nextStatus === "paid" ? row.amountDue : 0 } as const;
+        updateRow(index, patch);
+        commit({ ...data, matchPlayers: data.matchPlayers.map((item) => (item.id === row.id ? { ...item, ...patch } : item)) });
+        setError("");
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo actualizar el pago."))
+      .finally(() => setPaymentPending(null));
+  }
+
   return (
     <>
       <PageTitle
@@ -665,23 +802,62 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Confirmed" value={summary.confirmedCount} /><Stat label="Paid" value={summary.paidCount} /><Stat label="Unpaid/promised" value={summary.unpaidCount + summary.promisedCount} /><Stat label="Pending" value={formatCurrency(summary.pendingAmount)} />
       </div>
-      <div className="mt-4 grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
-        <Card>{isAdmin ? <EditableRows rows={rows} updateRow={updateRow} /> : <PublicMatchRows rows={rows} />}</Card>
-        <div className="space-y-4">
-          {isAdmin ? (
-            <Card className="space-y-3">
-              <h2 className="font-semibold">Final score</h2>
-              <div className="grid grid-cols-2 gap-3"><Input label="Team A" type="number" value={String(scoreA)} onChange={(value) => setScoreA(Number(value))} /><Input label="Team B" type="number" value={String(scoreB)} onChange={(value) => setScoreB(Number(value))} /></div>
-              <textarea className="min-h-20 w-full rounded-md border border-gray-300 p-2 text-sm" value={resultNotes} onChange={(event) => setResultNotes(event.target.value)} placeholder="Result notes" />
-            </Card>
-          ) : result ? (
-            <Card><h2 className="font-semibold">Resultado final</h2><p className="mt-2 text-2xl font-semibold">A {result.scoreA} - {result.scoreB} B</p><p className="mt-1 text-sm text-gray-600">{result.winner === "draw" ? "Empate" : `Gana equipo ${result.winner}`}</p></Card>
-          ) : null}
-          <CopyBlock title="Payment pending summary" text={pendingPaymentsMessage(currentMatch, rows)} />
-          <CopyBlock title="Teams summary" text={teamsMessage(currentMatch, rows)} />
-          <CopyBlock title="Final result summary" text={finalResultMessage(currentMatch, { id: result?.id ?? "preview", matchId: currentMatch.id, scoreA, scoreB, winner: scoreA === scoreB ? "draw" : scoreA > scoreB ? "A" : "B", notes: resultNotes })} />
-        </div>
+
+      <Card className="mt-4">
+        <h2 className="mb-3 font-semibold">Equipos</h2>
+        {isAdmin ? (
+          <div className="space-y-2 sm:grid sm:grid-cols-2 sm:gap-3 sm:space-y-0 xl:grid-cols-3">
+            {rows.map((row, index) => (
+              <PlayerRosterRow key={row.id} row={row} onTeamChange={(team) => updateRow(index, { team })} onOpenDetails={() => setEditingIndex(index)} />
+            ))}
+          </div>
+        ) : (
+          <PublicMatchRows rows={rows} />
+        )}
+      </Card>
+
+      <div className="mt-4">
+        {isAdmin ? (
+          <Card className="space-y-3">
+            <h2 className="font-semibold">Final score</h2>
+            <div className="grid grid-cols-2 gap-3"><Input label="Team A" type="number" value={String(scoreA)} onChange={(value) => setScoreA(Number(value))} /><Input label="Team B" type="number" value={String(scoreB)} onChange={(value) => setScoreB(Number(value))} /></div>
+            <textarea className="min-h-20 w-full rounded-md border border-gray-300 p-2 text-sm" value={resultNotes} onChange={(event) => setResultNotes(event.target.value)} placeholder="Result notes" />
+          </Card>
+        ) : result ? (
+          <Card><h2 className="font-semibold">Resultado final</h2><p className="mt-2 text-2xl font-semibold">A {result.scoreA} - {result.scoreB} B</p><p className="mt-1 text-sm text-gray-600">{result.winner === "draw" ? "Empate" : `Gana equipo ${result.winner}`}</p></Card>
+        ) : null}
       </div>
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <CopyBlock title="Payment pending summary" text={pendingPaymentsMessage(currentMatch, rows)} />
+        <CopyBlock title="Teams summary" text={teamsMessage(currentMatch, rows)} />
+        <CopyBlock title="Final result summary" text={finalResultMessage(currentMatch, { id: result?.id ?? "preview", matchId: currentMatch.id, scoreA, scoreB, winner: scoreA === scoreB ? "draw" : scoreA > scoreB ? "A" : "B", notes: resultNotes })} />
+      </div>
+
+      <Card className="mt-4 space-y-2">
+        <h2 className="font-semibold">Cobranza</h2>
+        {isAdmin
+          ? rows.map((row, index) => (
+              <PaymentCollectionRow key={row.id} row={row} onToggle={() => togglePayment(row, index)} disabled={paymentPending === row.id} />
+            ))
+          : rows.map((row) => (
+              <div key={row.id} className="flex items-center justify-between gap-3 rounded-md border border-gray-100 bg-gray-50 px-3 py-2">
+                <p className="font-semibold text-gray-950">{row.name}</p>
+                <div className="flex items-center gap-2"><PaymentBadge status={row.paymentStatus} /><span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-gray-600 ring-1 ring-gray-200">{formatCurrency(Math.max(row.amountDue - row.amountPaid, 0))}</span></div>
+              </div>
+            ))}
+      </Card>
+
+      {editingIndex !== null ? (
+        <PlayerDetailModal
+          row={rows[editingIndex]}
+          onClose={() => setEditingIndex(null)}
+          onSave={(patch) => {
+            updateRow(editingIndex, patch);
+            setEditingIndex(null);
+          }}
+        />
+      ) : null}
     </>
   );
 }

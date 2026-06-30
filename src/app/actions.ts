@@ -10,6 +10,7 @@ import {
   saveMatchWithPlayers,
   saveMonthlyPayment,
   savePlayer,
+  setMatchPlayerPaymentStatus,
 } from "@/lib/repository";
 import type { Match, MatchPlayer, MatchResult, MonthlyPayment, Player } from "@/lib/types";
 
@@ -56,6 +57,12 @@ export async function saveMatchDetailAction(matchId: string, rows: MatchPlayer[]
 export async function markMatchPlayerPaidAction(rowId: string) {
   await requireAdmin();
   await markMatchPlayerPaid(rowId);
+  revalidateAdminViews();
+}
+
+export async function setMatchPlayerPaymentStatusAction(rowId: string, status: "paid" | "unpaid") {
+  await requireAdmin();
+  await setMatchPlayerPaymentStatus(rowId, status);
   revalidateAdminViews();
 }
 
