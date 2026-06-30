@@ -62,3 +62,7 @@ export function validPassword(password: string) {
   const expected = process.env.SIFUP_ADMIN_PASSWORD;
   return Boolean(expected && password === expected);
 }
+
+export function hasAdminPassword() {
+  return Boolean(process.env.SIFUP_ADMIN_PASSWORD);
+}
