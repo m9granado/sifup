@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Clipboard, Plus, Save, WalletCards } from "lucide-react";
+import { Clipboard, MessageCircle, Plus, Save, Shield, WalletCards } from "lucide-react";
+import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
 import {
   formatCurrency,
@@ -38,6 +39,15 @@ const sampleInput = `martes 30 junio, 21 horas, agrupacion de sordos:
 9. Pololo de Francis (no pagado)
 10. Mario Quintana (pagado)
 11. Alonso Duran (pago manana)`;
+
+const paymentAccount = {
+  bank: "Cuenta vista Banco BCI MACH",
+  account: "777915748221",
+  email: "vigomez@uchile.cl",
+  rut: "157482211",
+  courtCost: 35000,
+  prepaidCourts: 5,
+};
 
 function useSifupData() {
   const [data, setData] = useState<SifupData>(seedData);
@@ -120,6 +130,26 @@ function CtaLink({ href, children }: { href: string; children: React.ReactNode }
   );
 }
 
+function AdminOnlyNotice({ label = "Solo admin puede editar esta vista." }: { label?: string }) {
+  return (
+    <div className="mb-4 flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+      <Shield size={16} />
+      {label}
+    </div>
+  );
+}
+
+function normalizePhone(phone: string) {
+  return phone.replace(/[^\d]/g, "");
+}
+
+function whatsappHref(phone: string) {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return "";
+  const withCountry = normalized.startsWith("56") ? normalized : `56${normalized}`;
+  return `https://wa.me/${withCountry}`;
+}
+
 function PaymentBadge({ status }: { status: PaymentStatus }) {
   const styles = {
     paid: "bg-emerald-50 text-emerald-800 ring-emerald-200",
@@ -139,6 +169,38 @@ function Stat({ label, value }: { label: string; value: string | number }) {
     <Card>
       <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</p>
       <p className="mt-2 text-2xl font-semibold text-gray-950">{value}</p>
+    </Card>
+  );
+}
+
+function PaymentAccountCard() {
+  return (
+    <Card className="space-y-3">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Transferencias</p>
+        <h2 className="mt-1 text-lg font-semibold text-gray-950">{paymentAccount.bank}</h2>
+      </div>
+      <dl className="grid gap-2 text-sm sm:grid-cols-2">
+        <div>
+          <dt className="text-gray-500">Cuenta</dt>
+          <dd className="font-semibold text-gray-950">{paymentAccount.account}</dd>
+        </div>
+        <div>
+          <dt className="text-gray-500">Mail</dt>
+          <dd className="font-semibold text-gray-950">{paymentAccount.email}</dd>
+        </div>
+        <div>
+          <dt className="text-gray-500">RUT</dt>
+          <dd className="font-semibold text-gray-950">{paymentAccount.rut}</dd>
+        </div>
+        <div>
+          <dt className="text-gray-500">Cancha</dt>
+          <dd className="font-semibold text-gray-950">{formatCurrency(paymentAccount.courtCost)}</dd>
+        </div>
+      </dl>
+      <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
+        {paymentAccount.prepaidCourts} canchas pagadas en Club Sordos.
+      </p>
     </Card>
   );
 }
@@ -171,6 +233,7 @@ function nextMatch(matches: Match[]) {
 }
 
 export function DashboardPage() {
+  const isAdmin = useIsAdmin();
   const { data } = useSifupData();
   const match = nextMatch(data.matches);
   const rows = data.matchPlayers.filter((row) => row.matchId === match?.id);
@@ -181,13 +244,14 @@ export function DashboardPage() {
       <PageTitle
         title="Dashboard"
         description="Resumen rapido del proximo partido y estado de pagos."
-        action={
+        action={isAdmin ? (
           <CtaLink href="/matches/new">
             <Plus size={16} />
             New match
           </CtaLink>
-        }
+        ) : undefined}
       />
+      {!isAdmin ? <AdminOnlyNotice label="Vista publica: entra como admin para crear partidos y editar pagos." /> : null}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Confirmados" value={summary.confirmedCount} />
         <Stat label="Pagados" value={summary.paidCount} />
@@ -216,23 +280,27 @@ export function DashboardPage() {
           <CopyBlock title="Clean match summary" text={matchSummaryMessage(match, rows)} />
         ) : null}
       </div>
+      <div className="mt-4">
+        <PaymentAccountCard />
+      </div>
     </>
   );
 }
 
 export function MatchesPage() {
+  const isAdmin = useIsAdmin();
   const { data } = useSifupData();
   return (
     <>
       <PageTitle
         title="Matches"
         description="Historial local de partidos y listas importadas."
-        action={
+        action={isAdmin ? (
           <CtaLink href="/matches/new">
             <Plus size={16} />
             New match
           </CtaLink>
-        }
+        ) : undefined}
       />
       <div className="space-y-3">
         {data.matches.map((match) => {
@@ -483,7 +551,32 @@ function EditableRows({
   );
 }
 
+function PublicMatchRows({ rows }: { rows: MatchPlayer[] }) {
+  return (
+    <div className="space-y-2">
+      {rows.map((row) => (
+        <div
+          key={row.id}
+          className="flex flex-col gap-2 rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div>
+            <p className="font-semibold text-gray-950">{row.name}</p>
+            <p className="text-xs text-gray-500">Equipo {row.team === "none" ? "por asignar" : row.team}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <PaymentBadge status={row.paymentStatus} />
+            <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-gray-600 ring-1 ring-gray-200">
+              {formatCurrency(Math.max(row.amountDue - row.amountPaid, 0))}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function MatchDetailPage({ id }: { id: string }) {
+  const isAdmin = useIsAdmin();
   const { data, commit } = useSifupData();
   const match = data.matches.find((item) => item.id === id);
   const result = data.results.find((item) => item.matchId === id);
@@ -521,8 +614,9 @@ export function MatchDetailPage({ id }: { id: string }) {
       <PageTitle
         title={`${currentMatch.date} ${currentMatch.time}`}
         description={currentMatch.location}
-        action={<Button onClick={save}><Save size={16} />Save match</Button>}
+        action={isAdmin ? <Button onClick={save}><Save size={16} />Save match</Button> : undefined}
       />
+      {!isAdmin ? <AdminOnlyNotice label="Vista publica: equipos, resultado y pagos son solo lectura." /> : null}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Confirmed" value={summary.confirmedCount} />
         <Stat label="Paid" value={summary.paidCount} />
@@ -531,17 +625,29 @@ export function MatchDetailPage({ id }: { id: string }) {
       </div>
       <div className="mt-4 grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
         <Card>
-          <EditableRows rows={rows} updateRow={updateRow} />
+          {isAdmin ? (
+            <EditableRows rows={rows} updateRow={updateRow} />
+          ) : (
+            <PublicMatchRows rows={rows} />
+          )}
         </Card>
         <div className="space-y-4">
-          <Card className="space-y-3">
-            <h2 className="font-semibold">Final score</h2>
-            <div className="grid grid-cols-2 gap-3">
-              <Input label="Team A" type="number" value={String(scoreA)} onChange={(value) => setScoreA(Number(value))} />
-              <Input label="Team B" type="number" value={String(scoreB)} onChange={(value) => setScoreB(Number(value))} />
-            </div>
-            <textarea className="min-h-20 w-full rounded-md border border-gray-300 p-2 text-sm" value={resultNotes} onChange={(event) => setResultNotes(event.target.value)} placeholder="Result notes" />
-          </Card>
+          {isAdmin ? (
+            <Card className="space-y-3">
+              <h2 className="font-semibold">Final score</h2>
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="Team A" type="number" value={String(scoreA)} onChange={(value) => setScoreA(Number(value))} />
+                <Input label="Team B" type="number" value={String(scoreB)} onChange={(value) => setScoreB(Number(value))} />
+              </div>
+              <textarea className="min-h-20 w-full rounded-md border border-gray-300 p-2 text-sm" value={resultNotes} onChange={(event) => setResultNotes(event.target.value)} placeholder="Result notes" />
+            </Card>
+          ) : result ? (
+            <Card>
+              <h2 className="font-semibold">Resultado final</h2>
+              <p className="mt-2 text-2xl font-semibold">A {result.scoreA} - {result.scoreB} B</p>
+              <p className="mt-1 text-sm text-gray-600">{result.winner === "draw" ? "Empate" : `Gana equipo ${result.winner}`}</p>
+            </Card>
+          ) : null}
           <CopyBlock title="Payment pending summary" text={pendingPaymentsMessage(currentMatch, rows)} />
           <CopyBlock title="Teams summary" text={teamsMessage(currentMatch, rows)} />
           <CopyBlock title="Final result summary" text={finalResultMessage(currentMatch, { id: result?.id ?? "preview", matchId: currentMatch.id, scoreA, scoreB, winner: scoreA === scoreB ? "draw" : scoreA > scoreB ? "A" : "B", notes: resultNotes })} />
@@ -552,6 +658,7 @@ export function MatchDetailPage({ id }: { id: string }) {
 }
 
 export function PaymentsPage() {
+  const isAdmin = useIsAdmin();
   const { data, commit } = useSifupData();
   const pending = data.matchPlayers.filter((row) => row.paymentStatus !== "paid");
 
@@ -567,6 +674,10 @@ export function PaymentsPage() {
   return (
     <>
       <PageTitle title="Payments" description="Todos los jugadores impagos o prometidos por partido." />
+      {!isAdmin ? <AdminOnlyNotice label="Vista publica: el marcado de pagos queda reservado para admin." /> : null}
+      <div className="mb-4">
+        <PaymentAccountCard />
+      </div>
       <div className="space-y-3">
         {pending.map((row) => {
           const match = data.matches.find((item) => item.id === row.matchId);
@@ -580,7 +691,7 @@ export function PaymentsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <PaymentBadge status={row.paymentStatus} />
-                  <Button onClick={() => markPaid(row)}>Mark as paid</Button>
+                  {isAdmin ? <Button onClick={() => markPaid(row)}>Mark as paid</Button> : null}
                 </div>
               </div>
             </Card>
@@ -593,6 +704,7 @@ export function PaymentsPage() {
 }
 
 export function PlayersPage() {
+  const isAdmin = useIsAdmin();
   const { data, commit } = useSifupData();
   const [name, setName] = useState("");
 
@@ -615,26 +727,77 @@ export function PlayersPage() {
 
   return (
     <>
-      <PageTitle title="Players" description="Base local simple para conectar luego a Supabase/Postgres." />
-      <Card className="mb-4 flex gap-2">
-        <input className="h-10 min-w-0 flex-1 rounded-md border border-gray-300 px-3 text-sm" value={name} onChange={(event) => setName(event.target.value)} placeholder="New player name" />
-        <Button onClick={addPlayer}><Plus size={16} />Add</Button>
-      </Card>
+      <PageTitle title="Players" description={isAdmin ? "Editor rapido de nombres, pseudonimos y contactos." : "Lista publica de jugadores activos."} />
+      {!isAdmin ? <AdminOnlyNotice label="Vista publica: telefonos y edicion quedan ocultos." /> : null}
+      {isAdmin ? (
+        <Card className="mb-4 flex gap-2">
+          <input className="h-10 min-w-0 flex-1 rounded-md border border-gray-300 px-3 text-sm" value={name} onChange={(event) => setName(event.target.value)} placeholder="New player name" />
+          <Button onClick={addPlayer}><Plus size={16} />Add</Button>
+        </Card>
+      ) : null}
       <Card>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-left text-sm">
-            <thead className="border-b border-gray-200 text-xs uppercase text-gray-500">
-              <tr><th className="py-2">Name</th><th>Nickname</th><th>Skill</th><th>Status</th></tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {data.players.map((player) => (
-                <tr key={player.id}><td className="py-2 font-medium">{player.name}</td><td>{player.nickname}</td><td>{player.skillLevel}/5</td><td>{player.active ? "active" : "inactive"}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {isAdmin ? (
+          <PlayerQuickEditor data={data} commit={commit} />
+        ) : (
+          <PublicPlayers players={data.players} />
+        )}
       </Card>
     </>
+  );
+}
+
+function PublicPlayers({ players }: { players: Player[] }) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      {players.filter((player) => player.active).map((player) => (
+        <div key={player.id} className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2">
+          <p className="font-semibold text-gray-950">{player.name}</p>
+          <p className="text-sm text-gray-600">{player.nickname || "Sin pseudonimo"}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PlayerQuickEditor({
+  data,
+  commit,
+}: {
+  data: SifupData;
+  commit: (data: SifupData) => void;
+}) {
+  function updatePlayer(player: Player, patch: Partial<Player>) {
+    commit(upsertPlayer(data, { ...player, ...patch, updatedAt: new Date().toISOString() }));
+  }
+
+  return (
+    <div className="space-y-3">
+      {data.players.map((player) => {
+        const whatsapp = whatsappHref(player.phone);
+        return (
+          <div key={player.id} className="grid gap-3 rounded-md border border-gray-100 bg-gray-50 p-3 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-end">
+            <Input label="Nombre" value={player.name} onChange={(value) => updatePlayer(player, { name: value })} />
+            <Input label="Pseudonimo" value={player.nickname} onChange={(value) => updatePlayer(player, { nickname: value })} />
+            <Input label="Telefono" value={player.phone} onChange={(value) => updatePlayer(player, { phone: value })} />
+            {whatsapp ? (
+              <a
+                href={whatsapp}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-emerald-700 bg-emerald-700 px-3 text-sm font-semibold text-white hover:bg-emerald-800"
+              >
+                <MessageCircle size={16} />
+                WhatsApp
+              </a>
+            ) : (
+              <span className="inline-flex h-10 items-center justify-center rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-500">
+                Sin telefono
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -642,7 +805,7 @@ export function StandingsPage() {
   const { data } = useSifupData();
   const standings = useMemo(() => {
     return data.players.map((player) => {
-      const appearances = data.matchPlayers.filter((row) => row.name === player.name || row.playerId === player.id);
+      const appearances = data.matchPlayers.filter((row) => (row.name === player.name || row.playerId === player.id) && row.attendanceStatus === "confirmed");
       let wins = 0;
       let losses = 0;
       let draws = 0;

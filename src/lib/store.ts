@@ -3,7 +3,7 @@
 import { seedData } from "./mock-data";
 import type { Match, MatchPlayer, MatchResult, Player, SifupData } from "./types";
 
-const STORAGE_KEY = "sifup.local.v1";
+const STORAGE_KEY = "sifup.local.v2";
 
 export function newId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -62,11 +62,12 @@ export function upsertPlayer(data: SifupData, player: Player) {
 }
 
 export function summarizeMatch(players: MatchPlayer[]) {
+  const confirmed = players.filter((item) => item.attendanceStatus === "confirmed");
   return {
-    confirmedCount: players.filter((item) => item.attendanceStatus === "confirmed").length,
-    paidCount: players.filter((item) => item.paymentStatus === "paid").length,
-    unpaidCount: players.filter((item) => item.paymentStatus === "unpaid").length,
-    promisedCount: players.filter((item) => item.paymentStatus === "promised").length,
+    confirmedCount: confirmed.length,
+    paidCount: confirmed.filter((item) => item.paymentStatus === "paid").length,
+    unpaidCount: confirmed.filter((item) => item.paymentStatus === "unpaid").length,
+    promisedCount: confirmed.filter((item) => item.paymentStatus === "promised").length,
     totalExpected: players.reduce((sum, item) => sum + item.amountDue, 0),
     totalCollected: players.reduce((sum, item) => sum + item.amountPaid, 0),
     pendingAmount: players.reduce((sum, item) => sum + Math.max(item.amountDue - item.amountPaid, 0), 0),

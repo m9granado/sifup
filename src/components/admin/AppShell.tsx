@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { CalendarDays, CreditCard, Home, LogOut, Trophy, Users } from "lucide-react";
+import { CalendarDays, CreditCard, Home, LogIn, LogOut, Trophy, Users } from "lucide-react";
 import { logoutAction } from "@/app/actions";
+import { AuthModeProvider } from "./AuthMode";
 
 const nav = [
   { href: "/dashboard", label: "Dashboard", icon: Home },
@@ -10,9 +11,16 @@ const nav = [
   { href: "/standings", label: "Standings", icon: Trophy },
 ];
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  isAdmin,
+}: {
+  children: React.ReactNode;
+  isAdmin: boolean;
+}) {
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-950">
+    <AuthModeProvider isAdmin={isAdmin}>
+      <div className="min-h-screen bg-gray-50 text-gray-950">
       <header className="sticky top-0 z-20 border-b border-gray-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <Link href="/dashboard" className="flex items-center gap-2">
@@ -24,12 +32,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <p className="hidden text-xs text-gray-500 sm:block">WhatsApp a administracion</p>
             </div>
           </Link>
-          <form action={logoutAction}>
-            <button className="flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 hover:bg-gray-100">
-              <LogOut size={16} />
-              Logout
-            </button>
-          </form>
+          {isAdmin ? (
+            <form action={logoutAction}>
+              <button className="flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 hover:bg-gray-100">
+                <LogOut size={16} />
+                Logout
+              </button>
+            </form>
+          ) : (
+            <Link
+              href="/login"
+              className="flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 hover:bg-gray-100"
+            >
+              <LogIn size={16} />
+              Admin
+            </Link>
+          )}
         </div>
       </header>
 
@@ -63,6 +81,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
         ))}
       </nav>
-    </div>
+      </div>
+    </AuthModeProvider>
   );
 }

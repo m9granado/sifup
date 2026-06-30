@@ -1,7 +1,7 @@
 import { AppShell } from "@/components/admin/AppShell";
-import { requireAdmin } from "@/lib/auth";
+import { isAuthenticated } from "@/lib/auth";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  await requireAdmin();
-  return <AppShell>{children}</AppShell>;
+  const isAdmin = await isAuthenticated();
+  return <AppShell isAdmin={isAdmin}>{children}</AppShell>;
 }

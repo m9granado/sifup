@@ -1,6 +1,6 @@
 # SIFUP
 
-SIFUP is an internal admin dashboard for managing match operations, players, payments, and results. It currently runs as a Next.js App Router + TypeScript + Tailwind app and persists state in browser `localStorage` for now.
+SIFUP is a football group dashboard for managing match operations, players, payments, and results. Most views are public/read-only; admin login is only required for edits, importing WhatsApp lists, mutating payments, and seeing player phone/WhatsApp contact links. It currently runs as a Next.js App Router + TypeScript + Tailwind app and persists state in browser `localStorage` for now.
 
 ## Setup
 
@@ -27,6 +27,8 @@ Copy `.env.example` to `.env.local` and set:
 - `SESSION_SECRET`: secret used to sign the session cookie.
 
 Without `SESSION_SECRET`, local development falls back to a dev-only default, but production should always set it explicitly.
+
+Public users can open the dashboard, matches, payments, players, and standings without logging in. Phone numbers and WhatsApp links only render after admin login.
 
 ## Deployment
 
