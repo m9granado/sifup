@@ -34,7 +34,7 @@ if (!process.env.DATABASE_URL) {
 const sql = postgres(process.env.DATABASE_URL, {
   max: 1,
   prepare: false,
-  ssl: process.env.DATABASE_URL.includes("sslmode=") ? undefined : "require",
+  ssl: "require",
 });
 
 try {
