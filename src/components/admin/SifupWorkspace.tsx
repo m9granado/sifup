@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Clipboard, Medal, MessageCircle, Pencil, Plus, Save, Shield, Sparkles, Trophy, Users, WalletCards, X } from "lucide-react";
+import { CalendarPlus, Clipboard, Medal, MessageCircle, Pencil, Plus, Save, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
 import {
   createMatchAction,
   markMatchPlayerPaidAction,
@@ -667,18 +667,25 @@ function PlayerRosterRow({
   row,
   onTeamChange,
   onOpenDetails,
+  onRemove,
 }: {
   row: MatchPlayer;
   onTeamChange: (team: Team) => void;
   onOpenDetails: () => void;
+  onRemove: () => void;
 }) {
   return (
     <div className="space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="font-semibold text-gray-950">{row.name}</p>
-        <button type="button" onClick={onOpenDetails} className="rounded-md p-1.5 text-gray-500 hover:bg-gray-200" aria-label={`Editar ${row.name}`}>
-          <Pencil size={16} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button type="button" onClick={onOpenDetails} className="rounded-md p-1.5 text-gray-500 hover:bg-gray-200" aria-label={`Editar ${row.name}`}>
+            <Pencil size={16} />
+          </button>
+          <button type="button" onClick={onRemove} className="rounded-md p-1.5 text-red-500 hover:bg-red-100" aria-label={`Quitar ${row.name} del partido`}>
+            <UserMinus size={16} />
+          </button>
+        </div>
       </div>
       <TeamToggle value={row.team} onChange={onTeamChange} />
     </div>
@@ -689,10 +696,14 @@ function TeamAssignmentBoard({
   rows,
   onTeamChange,
   onOpenDetails,
+  onRemove,
+  onAddPlayer,
 }: {
   rows: MatchPlayer[];
   onTeamChange: (rowId: string, team: Team) => void;
   onOpenDetails: (rowId: string) => void;
+  onRemove: (rowId: string) => void;
+  onAddPlayer: () => void;
 }) {
   const teamA = rows.filter((row) => row.team === "A");
   const teamB = rows.filter((row) => row.team === "B");
@@ -700,12 +711,18 @@ function TeamAssignmentBoard({
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button variant="secondary" onClick={onAddPlayer}>
+          <UserPlus size={16} />
+          Agregar jugador
+        </Button>
+      </div>
       {unassigned.length > 0 ? (
         <div className="space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Sin asignar ({unassigned.length})</p>
           <div className="space-y-2 sm:grid sm:grid-cols-2 sm:gap-2 sm:space-y-0 xl:grid-cols-3">
             {unassigned.map((row) => (
-              <PlayerRosterRow key={row.id} row={row} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} />
+              <PlayerRosterRow key={row.id} row={row} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
             ))}
           </div>
         </div>
@@ -715,7 +732,7 @@ function TeamAssignmentBoard({
           <p className="text-sm font-semibold text-green-800">Equipo Verde ({teamA.length})</p>
           <div className="space-y-2">
             {teamA.map((row) => (
-              <PlayerRosterRow key={row.id} row={row} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} />
+              <PlayerRosterRow key={row.id} row={row} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
             ))}
             {teamA.length === 0 ? <p className="text-sm text-gray-500">Sin jugadores</p> : null}
           </div>
@@ -727,13 +744,60 @@ function TeamAssignmentBoard({
           <p className="text-sm font-semibold text-yellow-800">Equipo Amarillo ({teamB.length})</p>
           <div className="space-y-2">
             {teamB.map((row) => (
-              <PlayerRosterRow key={row.id} row={row} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} />
+              <PlayerRosterRow key={row.id} row={row} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
             ))}
             {teamB.length === 0 ? <p className="text-sm text-gray-500">Sin jugadores</p> : null}
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function AddPlayerModal({
+  candidates,
+  onClose,
+  onAddExisting,
+  onCreateAndAdd,
+}: {
+  candidates: Player[];
+  onClose: () => void;
+  onAddExisting: (player: Player) => void;
+  onCreateAndAdd: (name: string, phone: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  return (
+    <Modal title="Agregar jugador al partido" onClose={onClose}>
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-gray-700">Jugadores existentes</p>
+          <div className="max-h-56 space-y-1 overflow-auto">
+            {candidates.length === 0 ? <p className="text-sm text-gray-500">Todos los jugadores activos ya estan en este partido.</p> : null}
+            {candidates.map((player) => (
+              <button
+                key={player.id}
+                type="button"
+                onClick={() => onAddExisting(player)}
+                className="flex w-full items-center justify-between rounded-md border border-gray-200 px-3 py-2 text-left text-sm hover:bg-gray-50"
+              >
+                <span className="font-medium text-gray-950">{player.name}</span>
+                <Plus size={16} className="text-gray-500" />
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-2 border-t border-gray-200 pt-3">
+          <p className="text-sm font-medium text-gray-700">Jugador nuevo</p>
+          <Input label="Nombre" value={name} onChange={setName} />
+          <Input label="Telefono (opcional)" value={phone} onChange={setPhone} />
+          <Button onClick={() => onCreateAndAdd(name, phone)} disabled={!name.trim()}>
+            <UserPlus size={16} />
+            Crear y agregar
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -797,6 +861,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const [resultNotes, setResultNotes] = useState(result?.notes ?? "");
   const [error, setError] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [showAddPlayer, setShowAddPlayer] = useState(false);
   const summary = summarizeMatch(rows);
 
   if (!match) return <PageTitle title="Match not found" description="No existe en la base de datos." />;
@@ -804,6 +869,48 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
 
   function updateRow(index: number, patch: Partial<MatchPlayer>) {
     setRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch, updatedAt: new Date().toISOString() } : row)));
+  }
+
+  function removeRow(rowId: string) {
+    setRows((current) => current.filter((row) => row.id !== rowId));
+  }
+
+  function buildMatchPlayerRow(player: Player): MatchPlayer {
+    const now = new Date().toISOString();
+    const monthly = player.paymentPlan === "monthly";
+    return {
+      id: newId("mp"),
+      matchId: currentMatch.id,
+      playerId: player.id,
+      name: player.name,
+      attendanceStatus: "confirmed",
+      paymentStatus: monthly ? "paid" : "unpaid",
+      amountDue: monthly ? 0 : PER_MATCH_AMOUNT,
+      amountPaid: 0,
+      note: monthly ? "mensualidad" : "",
+      team: "none",
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  function addExistingPlayer(player: Player) {
+    setRows((current) => [...current, buildMatchPlayerRow(player)]);
+    setShowAddPlayer(false);
+  }
+
+  function createAndAddPlayer(name: string, phone: string) {
+    if (!name.trim()) return;
+    const now = new Date().toISOString();
+    const player: Player = { id: newId("player"), name: name.trim(), nickname: name.trim().split(" ")[0], phone: phone.trim(), paymentPlan: "perMatch", skillLevel: 3, active: true, createdAt: now, updatedAt: now };
+    savePlayerAction(player)
+      .then(() => {
+        commit(upsertPlayer(data, player));
+        setRows((current) => [...current, buildMatchPlayerRow(player)]);
+        setShowAddPlayer(false);
+        setError("");
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo crear el jugador."));
   }
 
   function save() {
@@ -862,6 +969,8 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             rows={rows}
             onTeamChange={(rowId, team) => updateRow(rows.findIndex((row) => row.id === rowId), { team })}
             onOpenDetails={(rowId) => setEditingIndex(rows.findIndex((row) => row.id === rowId))}
+            onRemove={removeRow}
+            onAddPlayer={() => setShowAddPlayer(true)}
           />
         ) : (
           <PublicMatchRows rows={rows} />
@@ -908,6 +1017,15 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             updateRow(editingIndex, patch);
             setEditingIndex(null);
           }}
+        />
+      ) : null}
+
+      {showAddPlayer ? (
+        <AddPlayerModal
+          candidates={data.players.filter((player) => player.active && !rows.some((row) => row.playerId === player.id))}
+          onClose={() => setShowAddPlayer(false)}
+          onAddExisting={addExistingPlayer}
+          onCreateAndAdd={createAndAddPlayer}
         />
       ) : null}
     </>
@@ -1191,7 +1309,7 @@ export function StandingsPage({ initialData }: InitialDataProps) {
     .slice(0, 4);
 
   return (
-    <div className="-mx-4 -mt-4 min-h-[calc(100vh-4rem)] overflow-hidden bg-[#07100d] text-white md:-ml-0 md:-mr-4 md:rounded-l-[2rem]">
+    <div className="-mx-4 -mt-4 min-h-[calc(100vh-4rem)] overflow-hidden bg-[#07100d] pb-24 text-white md:-ml-0 md:-mr-4 md:rounded-l-[2rem] md:pb-0">
       <section className="relative border-b border-white/10 px-4 py-5 sm:px-6 lg:px-8">
         <div className="absolute inset-0 bg-[url('/brand/sifup-keyvisual-v1.png')] bg-cover bg-center opacity-30" />
         <div className="absolute inset-0 bg-[linear-gradient(100deg,#07100d_0%,rgba(7,16,13,.86)_42%,rgba(7,16,13,.45)_100%)]" />
@@ -1308,18 +1426,18 @@ export function StandingsPage({ initialData }: InitialDataProps) {
             </div>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[820px] border-separate border-spacing-y-2 text-left text-sm">
+            <table className="w-full min-w-full border-separate border-spacing-y-2 text-left text-sm sm:min-w-[820px]">
               <thead className="text-xs uppercase text-white/45">
                 <tr>
                   <th className="px-3 py-2">#</th>
                   <th>Jugador</th>
-                  <th>PJ</th>
-                  <th>G</th>
-                  <th>E</th>
-                  <th>P</th>
-                  <th>%</th>
-                  <th>Puntos</th>
-                  <th>Deuda</th>
+                  <th className="hidden sm:table-cell">PJ</th>
+                  <th className="hidden sm:table-cell">G</th>
+                  <th className="hidden sm:table-cell">E</th>
+                  <th className="hidden sm:table-cell">P</th>
+                  <th className="hidden sm:table-cell">%</th>
+                  <th className="px-2 text-right">Puntos</th>
+                  <th className="px-3 text-right">Deuda</th>
                 </tr>
               </thead>
               <tbody>
@@ -1337,11 +1455,11 @@ export function StandingsPage({ initialData }: InitialDataProps) {
                         </div>
                       </div>
                     </td>
-                    <td className="bg-white/[0.055] font-bold group-hover:bg-white/[0.09]">{row.played}</td>
-                    <td className="bg-white/[0.055] font-bold text-emerald-300 group-hover:bg-white/[0.09]">{row.wins}</td>
-                    <td className="bg-white/[0.055] font-bold text-cyan-200 group-hover:bg-white/[0.09]">{row.draws}</td>
-                    <td className="bg-white/[0.055] font-bold text-pink-300 group-hover:bg-white/[0.09]">{row.losses}</td>
-                    <td className="bg-white/[0.055] group-hover:bg-white/[0.09]">
+                    <td className="hidden bg-white/[0.055] font-bold group-hover:bg-white/[0.09] sm:table-cell">{row.played}</td>
+                    <td className="hidden bg-white/[0.055] font-bold text-emerald-300 group-hover:bg-white/[0.09] sm:table-cell">{row.wins}</td>
+                    <td className="hidden bg-white/[0.055] font-bold text-cyan-200 group-hover:bg-white/[0.09] sm:table-cell">{row.draws}</td>
+                    <td className="hidden bg-white/[0.055] font-bold text-pink-300 group-hover:bg-white/[0.09] sm:table-cell">{row.losses}</td>
+                    <td className="hidden bg-white/[0.055] group-hover:bg-white/[0.09] sm:table-cell">
                       <div className="flex items-center gap-2">
                         <span className="w-10 font-black">{row.winRate}%</span>
                         <span className="h-2 w-20 overflow-hidden rounded-full bg-white/10">
@@ -1349,8 +1467,8 @@ export function StandingsPage({ initialData }: InitialDataProps) {
                         </span>
                       </div>
                     </td>
-                    <td className="bg-white/[0.055] text-lg font-black text-yellow-300 group-hover:bg-white/[0.09]">{row.points}</td>
-                    <td className="rounded-r-lg bg-white/[0.055] pr-3 font-bold group-hover:bg-white/[0.09]">
+                    <td className="bg-white/[0.055] px-2 text-right text-lg font-black text-yellow-300 group-hover:bg-white/[0.09]">{row.points}</td>
+                    <td className="rounded-r-lg bg-white/[0.055] px-3 text-right font-bold group-hover:bg-white/[0.09]">
                       <span className={row.pendingDebt > 0 ? "text-orange-200" : "text-lime-200"}>{formatCurrency(row.pendingDebt)}</span>
                     </td>
                   </tr>
