@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Clipboard, Medal, MessageCircle, Pencil, Plus, Save, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
+import { CalendarPlus, ChevronLeft, ChevronRight, Clipboard, Medal, MessageCircle, Pencil, Plus, Save, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
 import {
   createMatchAction,
   markMatchPlayerPaidAction,
@@ -14,7 +14,7 @@ import {
 } from "@/app/actions";
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
-import { formatCurrency, newId, nextMatch, replaceMatchPlayers, sortByWhatsappOrder, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
+import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, sortByWhatsappOrder, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
 import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, teamsMessage } from "@/lib/whatsapp";
 import type { Match, MatchPlayer, MatchResult, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
 
@@ -894,6 +894,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
 
   if (!match) return <PageTitle title="Match not found" description="No existe en la base de datos." />;
   const currentMatch = match;
+  const { previous, next } = adjacentMatches(data.matches, currentMatch.id);
 
   function updateRow(index: number, patch: Partial<MatchPlayer>) {
     setRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch, updatedAt: new Date().toISOString() } : row)));
@@ -978,6 +979,18 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         description={`${currentMatch.date} - ${currentMatch.location}`}
         action={
           <div className="flex flex-wrap gap-2">
+            {previous ? (
+              <Link href={`/matches/${previous.id}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
+                <ChevronLeft size={16} />
+                Anterior
+              </Link>
+            ) : null}
+            {next ? (
+              <Link href={`/matches/${next.id}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
+                Proximo
+                <ChevronRight size={16} />
+              </Link>
+            ) : null}
             <Link href={`/matches/${currentMatch.id}/teams`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
               <Users size={16} />
               Ver equipos

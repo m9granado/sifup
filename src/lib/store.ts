@@ -13,6 +13,15 @@ export function nextMatch(matches: Match[]) {
   return [...matches].sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))[0];
 }
 
+export function adjacentMatches(matches: Match[], matchId: string) {
+  const sorted = [...matches].sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+  const index = sorted.findIndex((item) => item.id === matchId);
+  return {
+    previous: index > 0 ? sorted[index - 1] : undefined,
+    next: index >= 0 && index < sorted.length - 1 ? sorted[index + 1] : undefined,
+  };
+}
+
 export function upsertMatch(data: SifupData, match: Match) {
   const matches = data.matches.some((item) => item.id === match.id)
     ? data.matches.map((item) => (item.id === match.id ? match : item))
