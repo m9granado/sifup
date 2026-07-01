@@ -175,3 +175,5 @@ function PageTitle`
           git add src/components/admin/SifupWorkspace.tsx src/lib/whatsapp.ts .github/workflows/codex-apply-sifup-ui-patch.yml
           git commit -m "Update teams and player selection UI"
           git push
+
+# trigger: 2026-07-01T00:00:00Z
