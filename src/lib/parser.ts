@@ -91,6 +91,7 @@ export function parseWhatsAppList(input: string, amountDue = 4000): ParsedWhatsA
 
       return {
         name,
+        phone: "",
         attendanceStatus: "confirmed" as const,
         paymentStatus,
         amountDue,

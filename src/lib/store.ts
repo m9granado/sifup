@@ -5,6 +5,11 @@ export function newId(prefix: string) {
 }
 
 export function nextMatch(matches: Match[]) {
+  const now = new Date();
+  const upcoming = matches
+    .filter((match) => new Date(`${match.date}T${match.time || "00:00"}`) >= now)
+    .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+  if (upcoming.length > 0) return upcoming[0];
   return [...matches].sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))[0];
 }
 

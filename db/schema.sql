@@ -31,6 +31,7 @@ create table if not exists match_players (
   match_id text not null references matches(id) on delete cascade,
   player_id text references players(id) on delete set null,
   name text not null,
+  phone text not null default '',
   attendance_status text not null check (attendance_status in ('confirmed', 'maybe', 'out', 'waitlist')),
   payment_status text not null check (payment_status in ('paid', 'unpaid', 'promised')),
   amount_due integer not null default 0,
@@ -44,6 +45,7 @@ create table if not exists match_players (
 );
 
 alter table match_players add column if not exists whatsapp_order integer;
+alter table match_players add column if not exists phone text not null default '';
 
 with ordered_match_players as (
   select id, row_number() over (partition by match_id order by created_at asc, id asc)::integer as next_order

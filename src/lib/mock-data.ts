@@ -76,6 +76,7 @@ function matchPlayer(
     matchId,
     playerId: player?.id,
     name,
+    phone: player?.phone ?? "",
     attendanceStatus,
     paymentStatus,
     amountDue,

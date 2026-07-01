@@ -47,6 +47,7 @@ type MatchPlayerRow = {
   match_id: string;
   player_id: string | null;
   name: string;
+  phone: string;
   attendance_status: MatchPlayer["attendanceStatus"];
   payment_status: MatchPlayer["paymentStatus"];
   amount_due: number;
@@ -139,6 +140,7 @@ export async function getSifupData(): Promise<SifupData> {
       matchId: row.match_id,
       playerId: row.player_id ?? undefined,
       name: row.name,
+      phone: row.phone,
       attendanceStatus: row.attendance_status,
       paymentStatus: row.payment_status,
       amountDue: row.amount_due,
@@ -214,8 +216,8 @@ export async function saveMatchWithPlayers(match: Match, players: MatchPlayer[])
     await tx`delete from match_players where match_id = ${match.id}`;
     for (const row of players) {
       await tx`
-        insert into match_players (id, match_id, player_id, name, attendance_status, payment_status, amount_due, amount_paid, note, team, whatsapp_order, goals, created_at, updated_at)
-        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue}, ${row.amountPaid}, ${row.note}, ${row.team}, ${row.whatsappOrder}, ${row.goals ?? null}, ${row.createdAt}, ${row.updatedAt})
+        insert into match_players (id, match_id, player_id, name, phone, attendance_status, payment_status, amount_due, amount_paid, note, team, whatsapp_order, goals, created_at, updated_at)
+        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.phone}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue}, ${row.amountPaid}, ${row.note}, ${row.team}, ${row.whatsappOrder}, ${row.goals ?? null}, ${row.createdAt}, ${row.updatedAt})
       `;
     }
   });
@@ -228,8 +230,8 @@ export async function saveMatchPlayers(matchId: string, players: MatchPlayer[], 
     await tx`delete from match_players where match_id = ${matchId}`;
     for (const row of players) {
       await tx`
-        insert into match_players (id, match_id, player_id, name, attendance_status, payment_status, amount_due, amount_paid, note, team, whatsapp_order, goals, created_at, updated_at)
-        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue}, ${row.amountPaid}, ${row.note}, ${row.team}, ${row.whatsappOrder}, ${row.goals ?? null}, ${row.createdAt}, ${row.updatedAt})
+        insert into match_players (id, match_id, player_id, name, phone, attendance_status, payment_status, amount_due, amount_paid, note, team, whatsapp_order, goals, created_at, updated_at)
+        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.phone}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue}, ${row.amountPaid}, ${row.note}, ${row.team}, ${row.whatsappOrder}, ${row.goals ?? null}, ${row.createdAt}, ${row.updatedAt})
       `;
     }
     await tx`update matches set updated_at = ${now} where id = ${matchId}`;

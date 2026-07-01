@@ -158,20 +158,19 @@ function teamDot(team: Team) {
 }
 
 function TeamToggle({ value, onChange, disabled }: { value: Team; onChange: (team: Team) => void; disabled?: boolean }) {
-  const options: { team: Team; label: string; selected: string; idle: string }[] = [
+  const options: { team: "A" | "B"; label: string; selected: string; idle: string }[] = [
     { team: "A", label: "Verde", selected: "bg-(--green) text-(--bg-deep) border-(--green)", idle: "border-(--green)/35 text-(--green) bg-(--green)/10 hover:bg-(--green)/20" },
     { team: "B", label: "Amarillo", selected: "bg-(--gold) text-(--bg-deep) border-(--gold)", idle: "border-(--gold)/35 text-(--gold) bg-(--gold)/10 hover:bg-(--gold)/20" },
-    { team: "none", label: "Sin equipo", selected: "bg-white/20 text-white border-white/20", idle: "border-(--border) text-(--muted) bg-white/[0.04] hover:bg-white/[0.08]" },
   ];
   return (
-    <div className="flex gap-2">
+    <div className="inline-flex gap-1.5">
       {options.map((option) => (
         <button
           key={option.team}
           type="button"
           disabled={disabled}
           onClick={() => onChange(option.team)}
-          className={`h-11 flex-1 rounded-md border text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${value === option.team ? option.selected : option.idle}`}
+          className={`h-7 rounded-full border px-2.5 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${value === option.team ? option.selected : option.idle}`}
         >
           {option.label}
         </button>
@@ -695,11 +694,17 @@ function PlayerRosterRow({
   onOpenDetails: () => void;
   onRemove: () => void;
 }) {
+  const whatsapp = whatsappHref(row.phone);
   return (
     <div className="space-y-2 rounded-md border border-(--border) bg-white/[0.04] p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="font-semibold text-white"><span className="mr-2 text-xs text-(--muted)">#{row.whatsappOrder || "-"}</span>{row.name}</p>
         <div className="flex items-center gap-1">
+          {whatsapp ? (
+            <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15" aria-label={`WhatsApp ${row.name}`}>
+              <MessageCircle size={16} />
+            </a>
+          ) : null}
           <button type="button" onClick={onOpenDetails} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14]" aria-label={`Editar ${row.name}`}>
             <Pencil size={16} />
           </button>
@@ -836,6 +841,7 @@ function PlayerDetailModal({
     <Modal title={`Editar ${row.name}`} onClose={onClose}>
       <div className="space-y-3">
         <Input label="Nombre" value={draft.name} onChange={(value) => setDraft({ ...draft, name: value })} />
+        <Input label="Telefono" value={draft.phone} onChange={(value) => setDraft({ ...draft, phone: value })} />
         <label className="space-y-1 text-sm font-medium text-(--muted)">
           <span>Asistencia</span>
           <select className="h-10 w-full rounded-md border border-(--border) bg-(--panel-strong) px-3 text-sm text-white" value={draft.attendanceStatus} onChange={(event) => setDraft({ ...draft, attendanceStatus: event.target.value as MatchPlayer["attendanceStatus"] })}>
@@ -905,6 +911,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       matchId: currentMatch.id,
       playerId: player.id,
       name: player.name,
+      phone: player.phone,
       attendanceStatus: "confirmed",
       paymentStatus: monthly ? "paid" : "unpaid",
       amountDue: monthly ? 0 : PER_MATCH_AMOUNT,

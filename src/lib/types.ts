@@ -38,6 +38,7 @@ export type MatchPlayer = {
   matchId: string;
   playerId?: string;
   name: string;
+  phone: string;
   attendanceStatus: AttendanceStatus;
   paymentStatus: PaymentStatus;
   amountDue: number;
