@@ -1372,7 +1372,7 @@ export function StandingsPage({ initialData }: InitialDataProps) {
         <a href="#resultados">Resultados</a>
       </nav>
 
-      <section id="vision" className="grid">
+      <section id="vision" className="vision-grid">
         <article id="top3" className="panel top-panel">
           <div className="panel-heading">
             <div>

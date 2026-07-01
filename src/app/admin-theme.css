@@ -152,6 +152,23 @@
   transform: translateX(2px);
 }
 
+.icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.main-nav svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.9;
+}
+
 .main-nav span {
   display: grid;
   width: 30px;
@@ -392,7 +409,7 @@
   color: #07100d;
 }
 
-.grid {
+.vision-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
   gap: 16px;
@@ -892,7 +909,7 @@
   }
 
   .hero-metrics,
-  .grid,
+  .vision-grid,
   .podium-grid {
     grid-template-columns: 1fr;
   }

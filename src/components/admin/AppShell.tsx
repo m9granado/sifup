@@ -3,6 +3,7 @@ import Link from "next/link";
 import { LogIn, LogOut } from "lucide-react";
 import { logoutAction } from "@/app/actions";
 import { AuthModeProvider } from "./AuthMode";
+import { IconSprite } from "./IconSprite";
 import { MainNav } from "./MainNav";
 
 export function AppShell({
@@ -16,6 +17,7 @@ export function AppShell({
 }) {
   return (
     <AuthModeProvider isAdmin={isAdmin}>
+      <IconSprite />
       <input className="menu-toggle" type="checkbox" id="menu-toggle" aria-label="Abrir menu" />
       <div className="shell">
         <header className="mobile-header">

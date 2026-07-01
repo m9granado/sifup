@@ -6,19 +6,19 @@ import { usePathname } from "next/navigation";
 type NavItem = {
   href: string;
   label: string;
-  code: string;
+  icon: string;
 };
 
 export function MainNav({ nextMatchId }: { nextMatchId?: string }) {
   const pathname = usePathname();
 
   const items: NavItem[] = [
-    { href: "/dashboard", label: "Inicio", code: "IN" },
-    { href: "/matches", label: "Partidos", code: "PA" },
-    { href: "/players", label: "Jugadores", code: "JU" },
-    ...(nextMatchId ? [{ href: `/matches/${nextMatchId}/teams`, label: "Equipos", code: "EQ" }] : []),
-    { href: "/payments", label: "Pagos", code: "PG" },
-    { href: "/standings", label: "Rankings", code: "RK" },
+    { href: "/dashboard", label: "Inicio", icon: "icon-home" },
+    { href: "/matches", label: "Partidos", icon: "icon-calendar" },
+    { href: "/players", label: "Jugadores", icon: "icon-users" },
+    ...(nextMatchId ? [{ href: `/matches/${nextMatchId}/teams`, label: "Equipos", icon: "icon-shield" }] : []),
+    { href: "/payments", label: "Pagos", icon: "icon-wallet" },
+    { href: "/standings", label: "Rankings", icon: "icon-trophy" },
   ];
 
   const teamsHref = nextMatchId ? `/matches/${nextMatchId}/teams` : undefined;
@@ -32,7 +32,11 @@ export function MainNav({ nextMatchId }: { nextMatchId?: string }) {
           : pathname === item.href || pathname.startsWith(`${item.href}/`);
         return (
           <Link key={item.href} href={item.href} className={active ? "active" : undefined}>
-            <span>{item.code}</span>
+            <span>
+              <svg>
+                <use href={`#${item.icon}`} />
+              </svg>
+            </span>
             {item.label}
           </Link>
         );
