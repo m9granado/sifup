@@ -40,6 +40,7 @@ export default async function Page() {
   const lastResultRows = lastResult ? sortByWhatsappOrder(data.matchPlayers.filter((row) => row.matchId === lastResult.match.id && row.attendanceStatus === "confirmed")) : [];
   const lastResultTeamA = lastResultRows.filter((row) => row.team === "A");
   const lastResultTeamB = lastResultRows.filter((row) => row.team === "B");
+  const lastResultSummary = summarizeMatch(lastResultRows);
   const monthlyPlayerCount = data.players.filter((player) => player.active && player.paymentPlan === "monthly").length;
   const summary = summarizeMatch(currentRows);
 
@@ -85,6 +86,16 @@ export default async function Page() {
               <p className="mt-2 text-sm font-bold text-(--muted)">
                 {winnerLabel(lastResult.result.winner)}
               </p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="rounded-md border border-(--border) bg-white/[0.04] p-2">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-(--muted)">Falta</p>
+                  <p className="mt-1 text-lg font-black text-(--pink)">{formatCurrency(lastResultSummary.pendingAmount)}</p>
+                </div>
+                <div className="rounded-md border border-(--border) bg-white/[0.04] p-2">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-(--muted)">Recaudado</p>
+                  <p className="mt-1 text-lg font-black text-white">{formatCurrency(lastResultSummary.totalCollected)}</p>
+                </div>
+              </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div>
                   <p className="text-[11px] font-black uppercase tracking-wide text-(--red)">Rojo</p>
@@ -109,6 +120,9 @@ export default async function Page() {
                   </div>
                 </div>
               </div>
+              <Link href={`/matches/${lastResult.match.id}`} className="mt-4 inline-flex h-10 items-center justify-center rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-bold text-white transition hover:bg-white/[0.12]">
+                Ver partido
+              </Link>
             </>
           ) : (
             <p className="mt-2 text-sm text-(--muted)">Todavia no hay resultados cerrados.</p>
