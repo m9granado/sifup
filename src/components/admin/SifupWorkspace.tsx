@@ -76,6 +76,27 @@ function teamLabel(team: Team) {
   return "Sin equipo";
 }
 
+function playerForMatchRow(row: MatchPlayer, players: Player[]) {
+  return players.find((player) => player.id === row.playerId) ?? findKnownPlayer(players, row.name);
+}
+
+function isMonthlyMatchRow(row: MatchPlayer, players: Player[]) {
+  return playerForMatchRow(row, players)?.paymentPlan === "monthly" || row.note.toLowerCase().includes("mensualidad");
+}
+
+function pendingForMatchRow(row: MatchPlayer) {
+  return Math.max(row.amountDue - row.amountPaid, 0);
+}
+
+function sortRowsWithMonthlyLast(rows: MatchPlayer[], players: Player[]) {
+  return [...rows].sort((a, b) => {
+    const monthlyA = isMonthlyMatchRow(a, players) ? 1 : 0;
+    const monthlyB = isMonthlyMatchRow(b, players) ? 1 : 0;
+    if (monthlyA !== monthlyB) return monthlyA - monthlyB;
+    return whatsappOrderFor(a) - whatsappOrderFor(b) || a.name.localeCompare(b.name);
+  });
+}
+
 function PageTitle({ title, description, action }: { title: string; description?: string; action?: React.ReactNode }) {
   return (
     <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -669,42 +690,53 @@ function EditableRows({
   );
 }
 
-function PublicMatchRows({ rows }: { rows: MatchPlayer[] }) {
+function PublicMatchRows({ rows, players }: { rows: MatchPlayer[]; players: Player[] }) {
+  const sortedRows = sortRowsWithMonthlyLast(rows, players);
   return (
     <div className="space-y-2">
-      {rows.map((row, index) => (
-        <div key={row.id} className="flex flex-col gap-2 rounded-md border border-(--border) bg-white/[0.04] px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+      {sortedRows.map((row, index) => {
+        const monthly = isMonthlyMatchRow(row, players);
+        const pending = pendingForMatchRow(row);
+        return (
+        <div key={row.id} className={`flex flex-col gap-2 rounded-md border px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between ${monthly ? "border-(--cyan)/45 bg-(--cyan)/10" : "border-(--border) bg-white/[0.04]"}`}>
           <div className="flex items-center gap-2">
             <span className="flex h-7 min-w-7 items-center justify-center rounded-full bg-white/[0.08] px-2 text-xs font-bold text-(--muted) ring-1 ring-(--border)">{row.whatsappOrder || index + 1}</span>
             <span className={`h-3 w-3 shrink-0 rounded-full ${teamDot(row.team)}`} />
             <div>
-              <p className="font-semibold text-white">{row.name}</p>
-              <p className="text-xs text-(--muted)">{teamLabel(row.team)}</p>
+              <p className="font-semibold text-white">{row.name} {monthly ? <span className="ml-2 rounded bg-(--cyan)/20 px-1.5 py-0.5 text-[10px] font-black uppercase text-(--cyan)">Mensual</span> : null}</p>
+              <p className="text-xs text-(--muted)">{teamLabel(row.team)} - Falta {formatCurrency(pending)}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2"><PaymentBadge status={row.paymentStatus} /><span className="rounded-full bg-white/[0.08] px-2 py-1 text-xs font-semibold text-(--muted) ring-1 ring-(--border)">{formatCurrency(Math.max(row.amountDue - row.amountPaid, 0))}</span></div>
+          <div className="flex items-center gap-2"><PaymentBadge status={row.paymentStatus} /><span className="rounded-full bg-white/[0.08] px-2 py-1 text-xs font-semibold text-(--muted) ring-1 ring-(--border)">{formatCurrency(pending)}</span></div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
 function PlayerRosterRow({
   row,
+  monthly,
   onTeamChange,
   onOpenDetails,
   onRemove,
 }: {
   row: MatchPlayer;
+  monthly: boolean;
   onTeamChange: (team: Team) => void;
   onOpenDetails: () => void;
   onRemove: () => void;
 }) {
   const whatsapp = whatsappHref(row.phone);
+  const pending = pendingForMatchRow(row);
   return (
-    <div className="space-y-2 rounded-md border border-(--border) bg-white/[0.04] p-3">
+    <div className={`space-y-2 rounded-md border p-3 ${monthly ? "border-(--cyan)/45 bg-(--cyan)/10" : "border-(--border) bg-white/[0.04]"}`}>
       <div className="flex items-center justify-between gap-2">
-        <p className="font-semibold text-white"><span className="mr-2 text-xs text-(--muted)">#{row.whatsappOrder || "-"}</span>{row.name}</p>
+        <div>
+          <p className="font-semibold text-white"><span className="mr-2 text-xs text-(--muted)">#{row.whatsappOrder || "-"}</span>{row.name}</p>
+          <p className="mt-0.5 text-xs text-(--muted)">Falta {formatCurrency(pending)} {monthly ? <span className="ml-2 rounded bg-(--cyan)/20 px-1.5 py-0.5 text-[10px] font-black uppercase text-(--cyan)">Mensual</span> : null}</p>
+        </div>
         <div className="flex items-center gap-1">
           {whatsapp ? (
             <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15" aria-label={`WhatsApp ${row.name}`}>
@@ -726,24 +758,31 @@ function PlayerRosterRow({
 
 function TeamAssignmentBoard({
   rows,
+  players,
   onTeamChange,
   onOpenDetails,
   onRemove,
   onAddPlayer,
 }: {
   rows: MatchPlayer[];
+  players: Player[];
   onTeamChange: (rowId: string, team: Team) => void;
   onOpenDetails: (rowId: string) => void;
   onRemove: (rowId: string) => void;
   onAddPlayer: () => void;
 }) {
-  const teamA = sortByWhatsappOrder(rows.filter((row) => row.team === "A"));
-  const teamB = sortByWhatsappOrder(rows.filter((row) => row.team === "B"));
-  const unassigned = sortByWhatsappOrder(rows.filter((row) => row.team === "none"));
+  const teamA = sortRowsWithMonthlyLast(rows.filter((row) => row.team === "A"), players);
+  const teamB = sortRowsWithMonthlyLast(rows.filter((row) => row.team === "B"), players);
+  const unassigned = sortRowsWithMonthlyLast(rows.filter((row) => row.team === "none"), players);
+  const pendingAmount = summarizeMatch(rows).pendingAmount;
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="rounded-md border border-(--pink)/35 bg-(--pink)/10 px-3 py-2">
+          <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Falta recaudar</p>
+          <p className="text-xl font-black text-(--pink)">{formatCurrency(pendingAmount)}</p>
+        </div>
         <Button variant="secondary" onClick={onAddPlayer}>
           <UserPlus size={16} />
           Agregar jugador
@@ -754,7 +793,7 @@ function TeamAssignmentBoard({
           <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">Sin asignar ({unassigned.length})</p>
           <div className="space-y-2 sm:grid sm:grid-cols-2 sm:gap-2 sm:space-y-0 xl:grid-cols-3">
             {unassigned.map((row) => (
-              <PlayerRosterRow key={row.id} row={row} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
+              <PlayerRosterRow key={row.id} row={row} monthly={isMonthlyMatchRow(row, players)} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
             ))}
           </div>
         </div>
@@ -764,7 +803,7 @@ function TeamAssignmentBoard({
           <p className="text-sm font-bold text-(--red)">Equipo Rojo ({teamA.length})</p>
           <div className="space-y-2">
             {teamA.map((row) => (
-              <PlayerRosterRow key={row.id} row={row} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
+              <PlayerRosterRow key={row.id} row={row} monthly={isMonthlyMatchRow(row, players)} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
             ))}
             {teamA.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
           </div>
@@ -776,7 +815,7 @@ function TeamAssignmentBoard({
           <p className="text-sm font-bold text-(--gold)">Equipo Amarillo ({teamB.length})</p>
           <div className="space-y-2">
             {teamB.map((row) => (
-              <PlayerRosterRow key={row.id} row={row} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
+              <PlayerRosterRow key={row.id} row={row} monthly={isMonthlyMatchRow(row, players)} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
             ))}
             {teamB.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
           </div>
@@ -869,12 +908,12 @@ function PlayerDetailModal({
   );
 }
 
-function PaymentCollectionRow({ row, onToggle, disabled }: { row: MatchPlayer; onToggle: () => void; disabled?: boolean }) {
-  const pending = Math.max(row.amountDue - row.amountPaid, 0);
+function PaymentCollectionRow({ row, monthly, onToggle, disabled }: { row: MatchPlayer; monthly: boolean; onToggle: () => void; disabled?: boolean }) {
+  const pending = pendingForMatchRow(row);
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-(--border) bg-white/[0.04] px-3 py-2">
+    <div className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 ${monthly ? "border-(--cyan)/45 bg-(--cyan)/10" : "border-(--border) bg-white/[0.04]"}`}>
       <div>
-        <p className="font-semibold text-white"><span className="mr-2 text-xs text-(--muted)">#{row.whatsappOrder || "-"}</span>{row.name}</p>
+        <p className="font-semibold text-white"><span className="mr-2 text-xs text-(--muted)">#{row.whatsappOrder || "-"}</span>{row.name} {monthly ? <span className="ml-2 rounded bg-(--cyan)/20 px-1.5 py-0.5 text-[10px] font-black uppercase text-(--cyan)">Mensual</span> : null}</p>
         <p className="text-sm text-(--muted)">{pending > 0 ? `Pendiente ${formatCurrency(pending)}` : "Sin saldo pendiente"}</p>
       </div>
       <PaymentToggle status={row.paymentStatus} onToggle={onToggle} disabled={disabled} />
@@ -897,6 +936,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [showAddPlayer, setShowAddPlayer] = useState(false);
   const summary = summarizeMatch(rows);
+  const collectionRows = sortRowsWithMonthlyLast(rows, data.players);
 
   if (!match) return <PageTitle title="Match not found" description="No existe en la base de datos." />;
   const currentMatch = match;
@@ -1012,17 +1052,18 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       </div>
 
       <Card className="mt-4">
-        <h2 className="mb-3 font-semibold">Equipos</h2>
+        <h2 className="mb-3 font-semibold">Jugadores y equipos</h2>
         {isAdmin ? (
           <TeamAssignmentBoard
             rows={rows}
+            players={data.players}
             onTeamChange={(rowId, team) => updateRow(rows.findIndex((row) => row.id === rowId), { team })}
             onOpenDetails={(rowId) => setEditingIndex(rows.findIndex((row) => row.id === rowId))}
             onRemove={removeRow}
             onAddPlayer={() => setShowAddPlayer(true)}
           />
         ) : (
-          <PublicMatchRows rows={rows} />
+          <PublicMatchRows rows={rows} players={data.players} />
         )}
       </Card>
 
@@ -1045,17 +1086,27 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       </div>
 
       <Card className="mt-4 space-y-2">
-        <h2 className="font-semibold">Cobranza</h2>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="font-semibold">Cobranza</h2>
+          <div className="rounded-md border border-(--pink)/35 bg-(--pink)/10 px-3 py-2">
+            <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Falta recaudar</p>
+            <p className="text-lg font-black text-(--pink)">{formatCurrency(summary.pendingAmount)}</p>
+          </div>
+        </div>
         {isAdmin
-          ? rows.map((row, index) => (
-              <PaymentCollectionRow key={row.id} row={row} onToggle={() => togglePayment(row, index)} disabled={paymentPending === row.id} />
+          ? collectionRows.map((row) => (
+              <PaymentCollectionRow key={row.id} row={row} monthly={isMonthlyMatchRow(row, data.players)} onToggle={() => togglePayment(row, rows.findIndex((item) => item.id === row.id))} disabled={paymentPending === row.id} />
             ))
-          : rows.map((row, index) => (
-              <div key={row.id} className="flex items-center justify-between gap-3 rounded-md border border-(--border) bg-white/[0.04] px-3 py-2">
+          : collectionRows.map((row, index) => {
+              const monthly = isMonthlyMatchRow(row, data.players);
+              const pending = pendingForMatchRow(row);
+              return (
+              <div key={row.id} className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 ${monthly ? "border-(--cyan)/45 bg-(--cyan)/10" : "border-(--border) bg-white/[0.04]"}`}>
                 <p className="font-semibold text-white"><span className="mr-2 text-xs text-(--muted)">#{row.whatsappOrder || index + 1}</span>{row.name}</p>
-                <div className="flex items-center gap-2"><PaymentBadge status={row.paymentStatus} /><span className="rounded-full bg-white/[0.08] px-2 py-1 text-xs font-semibold text-(--muted) ring-1 ring-(--border)">{formatCurrency(Math.max(row.amountDue - row.amountPaid, 0))}</span></div>
+                <div className="flex items-center gap-2">{monthly ? <span className="rounded bg-(--cyan)/20 px-1.5 py-0.5 text-[10px] font-black uppercase text-(--cyan)">Mensual</span> : null}<PaymentBadge status={row.paymentStatus} /><span className="rounded-full bg-white/[0.08] px-2 py-1 text-xs font-semibold text-(--muted) ring-1 ring-(--border)">{formatCurrency(pending)}</span></div>
               </div>
-            ))}
+              );
+            })}
       </Card>
 
       {editingIndex !== null ? (
