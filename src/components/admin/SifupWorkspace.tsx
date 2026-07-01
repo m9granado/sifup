@@ -70,6 +70,12 @@ function whatsappHref(phone: string) {
   return `https://wa.me/${withCountry}`;
 }
 
+function teamLabel(team: Team) {
+  if (team === "A") return "Rojo";
+  if (team === "B") return "Amarillo";
+  return "Sin equipo";
+}
+
 function PageTitle({ title, description, action }: { title: string; description?: string; action?: React.ReactNode }) {
   return (
     <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -152,14 +158,14 @@ function StatusBadge({ value }: { value: string }) {
 }
 
 function teamDot(team: Team) {
-  if (team === "A") return "bg-(--green)";
+  if (team === "A") return "bg-(--red)";
   if (team === "B") return "bg-(--gold)";
   return "bg-white/30";
 }
 
 function TeamToggle({ value, onChange, disabled }: { value: Team; onChange: (team: Team) => void; disabled?: boolean }) {
   const options: { team: "A" | "B"; label: string; selected: string; idle: string }[] = [
-    { team: "A", label: "Verde", selected: "bg-(--green) text-(--bg-deep) border-(--green)", idle: "border-(--green)/35 text-(--green) bg-(--green)/10 hover:bg-(--green)/20" },
+    { team: "A", label: "Rojo", selected: "bg-(--red) text-white border-(--red)", idle: "border-(--red)/35 text-(--red) bg-(--red)/10 hover:bg-(--red)/20" },
     { team: "B", label: "Amarillo", selected: "bg-(--gold) text-(--bg-deep) border-(--gold)", idle: "border-(--gold)/35 text-(--gold) bg-(--gold)/10 hover:bg-(--gold)/20" },
   ];
   return (
@@ -631,7 +637,7 @@ function EditableRows({
               <label className="space-y-1 text-sm font-medium text-(--muted)">
                 <span>Team</span>
                 <select className="h-10 w-full rounded-md border border-(--border) bg-(--panel-strong) px-3 text-sm text-white" value={row.team} onChange={(event) => updateRow(index, { team: event.target.value as Team })}>
-                  <option value="none">none</option><option value="A">A</option><option value="B">B</option>
+                  <option value="none">Sin equipo</option><option value="A">Rojo</option><option value="B">Amarillo</option>
                 </select>
               </label>
               <Input label="Note" value={row.note} onChange={(value) => updateRow(index, { note: value })} />
@@ -652,7 +658,7 @@ function EditableRows({
                 <td className="py-2 pr-2"><select className="h-9 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" value={row.paymentStatus} onChange={(event) => updateRow(index, { paymentStatus: event.target.value as PaymentStatus })}><option value="paid">paid</option><option value="unpaid">unpaid</option><option value="promised">promised</option></select></td>
                 <td className="py-2 pr-2"><input className="h-9 w-24 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" type="number" value={row.amountDue} onChange={(event) => updateRow(index, { amountDue: Number(event.target.value) })} /></td>
                 <td className="py-2 pr-2"><input className="h-9 w-24 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" type="number" value={row.amountPaid} onChange={(event) => updateRow(index, { amountPaid: Number(event.target.value) })} /></td>
-                <td className="py-2 pr-2"><select className="h-9 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" value={row.team} onChange={(event) => updateRow(index, { team: event.target.value as Team })}><option value="none">none</option><option value="A">A</option><option value="B">B</option></select></td>
+                <td className="py-2 pr-2"><select className="h-9 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" value={row.team} onChange={(event) => updateRow(index, { team: event.target.value as Team })}><option value="none">Sin equipo</option><option value="A">Rojo</option><option value="B">Amarillo</option></select></td>
                 <td className="py-2 pr-2"><input className="h-9 w-44 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" value={row.note} onChange={(event) => updateRow(index, { note: event.target.value })} /></td>
               </tr>
             ))}
@@ -673,7 +679,7 @@ function PublicMatchRows({ rows }: { rows: MatchPlayer[] }) {
             <span className={`h-3 w-3 shrink-0 rounded-full ${teamDot(row.team)}`} />
             <div>
               <p className="font-semibold text-white">{row.name}</p>
-              <p className="text-xs text-(--muted)">{row.team === "none" ? "Sin equipo" : row.team === "A" ? "Equipo verde" : "Equipo amarillo"}</p>
+              <p className="text-xs text-(--muted)">{teamLabel(row.team)}</p>
             </div>
           </div>
           <div className="flex items-center gap-2"><PaymentBadge status={row.paymentStatus} /><span className="rounded-full bg-white/[0.08] px-2 py-1 text-xs font-semibold text-(--muted) ring-1 ring-(--border)">{formatCurrency(Math.max(row.amountDue - row.amountPaid, 0))}</span></div>
@@ -754,8 +760,8 @@ function TeamAssignmentBoard({
         </div>
       ) : null}
       <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr] lg:items-start">
-        <div className="space-y-2 rounded-md border-2 border-(--green)/35 bg-(--green)/10 p-3">
-          <p className="text-sm font-bold text-(--green)">Equipo Verde ({teamA.length})</p>
+        <div className="space-y-2 rounded-md border-2 border-(--red)/35 bg-(--red)/10 p-3">
+          <p className="text-sm font-bold text-(--red)">Equipo Rojo ({teamA.length})</p>
           <div className="space-y-2">
             {teamA.map((row) => (
               <PlayerRosterRow key={row.id} row={row} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
@@ -1024,11 +1030,11 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         {isAdmin ? (
           <Card className="space-y-3">
             <h2 className="font-semibold">Final score</h2>
-            <div className="grid grid-cols-2 gap-3"><Input label="Team A" type="number" value={String(scoreA)} onChange={(value) => setScoreA(Number(value))} /><Input label="Team B" type="number" value={String(scoreB)} onChange={(value) => setScoreB(Number(value))} /></div>
+            <div className="grid grid-cols-2 gap-3"><Input label="Rojo" type="number" value={String(scoreA)} onChange={(value) => setScoreA(Number(value))} /><Input label="Amarillo" type="number" value={String(scoreB)} onChange={(value) => setScoreB(Number(value))} /></div>
             <textarea className="min-h-20 w-full rounded-md border border-(--border) bg-(--panel-strong) p-2 text-sm text-white" value={resultNotes} onChange={(event) => setResultNotes(event.target.value)} placeholder="Result notes" />
           </Card>
         ) : result ? (
-          <Card><h2 className="font-semibold">Resultado final</h2><p className="mt-2 text-2xl font-semibold">A {result.scoreA} - {result.scoreB} B</p><p className="mt-1 text-sm text-(--muted)">{result.winner === "draw" ? "Empate" : `Gana equipo ${result.winner}`}</p></Card>
+          <Card><h2 className="font-semibold">Resultado final</h2><p className="mt-2 text-2xl font-semibold">Rojo {result.scoreA} - {result.scoreB} Amarillo</p><p className="mt-1 text-sm text-(--muted)">{result.winner === "draw" ? "Empate" : `Gana ${teamLabel(result.winner)}`}</p></Card>
         ) : null}
       </div>
 
@@ -1434,8 +1440,8 @@ export function StandingsPage({ initialData }: InitialDataProps) {
                   <span>{match?.location}</span>
                 </div>
                 <div className="score">
-                  <b>A</b> {result.scoreA} - {result.scoreB} <b>B</b>
-                  <small>{result.winner === "draw" ? "Empate" : `Gana ${result.winner}`}</small>
+                  <b>Rojo</b> {result.scoreA} - {result.scoreB} <b>Amarillo</b>
+                  <small>{result.winner === "draw" ? "Empate" : `Gana ${teamLabel(result.winner)}`}</small>
                 </div>
               </article>
             ))}
@@ -1518,8 +1524,8 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
         }
       />
       <div className="grid gap-4 sm:grid-cols-2">
-        <TeamColumn label="Equipo A" rows={teamA} />
-        <TeamColumn label="Equipo B" rows={teamB} />
+        <TeamColumn label="Equipo Rojo" rows={teamA} />
+        <TeamColumn label="Equipo Amarillo" rows={teamB} />
       </div>
       {unassigned.length > 0 ? <div className="mt-4"><TeamColumn label="Sin equipo" rows={unassigned} /></div> : null}
     </>

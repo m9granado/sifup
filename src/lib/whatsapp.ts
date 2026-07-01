@@ -20,13 +20,13 @@ export function pendingPaymentsMessage(match: Match, players: MatchPlayer[]) {
 export function teamsMessage(match: Match, players: MatchPlayer[]) {
   const teamA = sortByWhatsappOrder(players.filter((player) => player.team === "A"));
   const teamB = sortByWhatsappOrder(players.filter((player) => player.team === "B"));
-  return `SIFUP - Equipos ${match.date}\n\nEquipo A:\n${teamA.map((player) => `- #${whatsappOrderFor(player)} ${player.name}`).join("\n") || "- Por asignar"}\n\nEquipo B:\n${teamB.map((player) => `- #${whatsappOrderFor(player)} ${player.name}`).join("\n") || "- Por asignar"}`;
+  return `SIFUP - Equipos ${match.date}\n\nEquipo Rojo:\n${teamA.map((player) => `- #${whatsappOrderFor(player)} ${player.name}`).join("\n") || "- Por asignar"}\n\nEquipo Amarillo:\n${teamB.map((player) => `- #${whatsappOrderFor(player)} ${player.name}`).join("\n") || "- Por asignar"}`;
 }
 
 export function finalResultMessage(match: Match, result?: MatchResult) {
   if (!result) return `SIFUP - Resultado pendiente para ${match.date}.`;
-  const winner = result.winner === "draw" ? "Empate" : `Gana equipo ${result.winner}`;
-  return `SIFUP - Resultado final ${match.date}\nEquipo A ${result.scoreA} - ${result.scoreB} Equipo B\n${winner}${result.notes ? `\n${result.notes}` : ""}`;
+  const winner = result.winner === "draw" ? "Empate" : `Gana ${result.winner === "A" ? "Rojo" : "Amarillo"}`;
+  return `SIFUP - Resultado final ${match.date}\nRojo ${result.scoreA} - ${result.scoreB} Amarillo\n${winner}${result.notes ? `\n${result.notes}` : ""}`;
 }
 
 function labelPayment(status: MatchPlayer["paymentStatus"]) {
