@@ -53,6 +53,7 @@ type MatchPlayerRow = {
   amount_paid: number;
   note: string;
   team: MatchPlayer["team"];
+  whatsapp_order: number | null;
   goals: number | null;
   created_at: Date | string;
   updated_at: Date | string;
@@ -100,7 +101,7 @@ export async function getSifupData(): Promise<SifupData> {
   const [matches, players, matchPlayers, results, monthlyPayments, finances] = await Promise.all([
     sql<MatchRow[]>`select * from matches order by match_date desc, match_time desc`,
     sql<PlayerRow[]>`select * from players order by name asc`,
-    sql<MatchPlayerRow[]>`select * from match_players order by match_id desc, created_at asc, id asc`,
+    sql<MatchPlayerRow[]>`select * from match_players order by match_id desc, whatsapp_order asc nulls last, created_at asc, id asc`,
     sql<MatchResultRow[]>`select * from match_results`,
     sql<MonthlyPaymentRow[]>`select * from monthly_payments order by month_key desc, player_id asc`,
     sql<ClubFinanceRow[]>`select * from club_finances order by created_at asc limit 1`,
@@ -144,6 +145,7 @@ export async function getSifupData(): Promise<SifupData> {
       amountPaid: row.amount_paid,
       note: row.note,
       team: row.team,
+      whatsappOrder: row.whatsapp_order ?? 0,
       goals: row.goals ?? undefined,
       createdAt: iso(row.created_at),
       updatedAt: iso(row.updated_at),
@@ -212,8 +214,8 @@ export async function saveMatchWithPlayers(match: Match, players: MatchPlayer[])
     await tx`delete from match_players where match_id = ${match.id}`;
     for (const row of players) {
       await tx`
-        insert into match_players (id, match_id, player_id, name, attendance_status, payment_status, amount_due, amount_paid, note, team, goals, created_at, updated_at)
-        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue}, ${row.amountPaid}, ${row.note}, ${row.team}, ${row.goals ?? null}, ${row.createdAt}, ${row.updatedAt})
+        insert into match_players (id, match_id, player_id, name, attendance_status, payment_status, amount_due, amount_paid, note, team, whatsapp_order, goals, created_at, updated_at)
+        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue}, ${row.amountPaid}, ${row.note}, ${row.team}, ${row.whatsappOrder}, ${row.goals ?? null}, ${row.createdAt}, ${row.updatedAt})
       `;
     }
   });
@@ -226,8 +228,8 @@ export async function saveMatchPlayers(matchId: string, players: MatchPlayer[], 
     await tx`delete from match_players where match_id = ${matchId}`;
     for (const row of players) {
       await tx`
-        insert into match_players (id, match_id, player_id, name, attendance_status, payment_status, amount_due, amount_paid, note, team, goals, created_at, updated_at)
-        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue}, ${row.amountPaid}, ${row.note}, ${row.team}, ${row.goals ?? null}, ${row.createdAt}, ${row.updatedAt})
+        insert into match_players (id, match_id, player_id, name, attendance_status, payment_status, amount_due, amount_paid, note, team, whatsapp_order, goals, created_at, updated_at)
+        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue}, ${row.amountPaid}, ${row.note}, ${row.team}, ${row.whatsappOrder}, ${row.goals ?? null}, ${row.createdAt}, ${row.updatedAt})
       `;
     }
     await tx`update matches set updated_at = ${now} where id = ${matchId}`;

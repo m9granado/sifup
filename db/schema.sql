@@ -37,10 +37,23 @@ create table if not exists match_players (
   amount_paid integer not null default 0,
   note text not null default '',
   team text not null check (team in ('A', 'B', 'none')),
+  whatsapp_order integer,
   goals integer,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table match_players add column if not exists whatsapp_order integer;
+
+with ordered_match_players as (
+  select id, row_number() over (partition by match_id order by created_at asc, id asc)::integer as next_order
+  from match_players
+  where whatsapp_order is null or whatsapp_order = 0
+)
+update match_players
+set whatsapp_order = ordered_match_players.next_order
+from ordered_match_players
+where match_players.id = ordered_match_players.id;
 
 create table if not exists match_results (
   id text primary key,
@@ -80,5 +93,6 @@ create table if not exists club_finances (
 
 create index if not exists idx_match_players_match_id on match_players(match_id);
 create index if not exists idx_match_players_player_id on match_players(player_id);
+create index if not exists idx_match_players_whatsapp_order on match_players(match_id, whatsapp_order);
 create index if not exists idx_matches_month_key on matches(month_key);
 create index if not exists idx_monthly_payments_month_key on monthly_payments(month_key);

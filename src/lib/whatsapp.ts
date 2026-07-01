@@ -1,5 +1,5 @@
 import type { Match, MatchPlayer, MatchResult } from "./types";
-import { formatCurrency, summarizeMatch } from "./store";
+import { formatCurrency, sortByWhatsappOrder, summarizeMatch, whatsappOrderFor } from "./store";
 
 export function matchSummaryMessage(match: Match, players: MatchPlayer[]) {
   const summary = summarizeMatch(players);
@@ -18,9 +18,9 @@ export function pendingPaymentsMessage(match: Match, players: MatchPlayer[]) {
 }
 
 export function teamsMessage(match: Match, players: MatchPlayer[]) {
-  const teamA = players.filter((player) => player.team === "A").map((player) => player.name);
-  const teamB = players.filter((player) => player.team === "B").map((player) => player.name);
-  return `SIFUP - Equipos ${match.date}\n\nEquipo A:\n${teamA.map((name) => `- ${name}`).join("\n") || "- Por asignar"}\n\nEquipo B:\n${teamB.map((name) => `- ${name}`).join("\n") || "- Por asignar"}`;
+  const teamA = sortByWhatsappOrder(players.filter((player) => player.team === "A"));
+  const teamB = sortByWhatsappOrder(players.filter((player) => player.team === "B"));
+  return `SIFUP - Equipos ${match.date}\n\nEquipo A:\n${teamA.map((player) => `- #${whatsappOrderFor(player)} ${player.name}`).join("\n") || "- Por asignar"}\n\nEquipo B:\n${teamB.map((player) => `- #${whatsappOrderFor(player)} ${player.name}`).join("\n") || "- Por asignar"}`;
 }
 
 export function finalResultMessage(match: Match, result?: MatchResult) {

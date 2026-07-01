@@ -41,6 +41,8 @@ const playerSeeds: Array<{
   { id: "player-matias", name: "Matias", nickname: "Matias", paymentPlan: "perMatch" },
   { id: "player-beto", name: "Beto", nickname: "Beto", paymentPlan: "perMatch" },
   { id: "player-pololo-francis", name: "Pololo de Francis", nickname: "Pololo Francis", paymentPlan: "perMatch" },
+  { id: "player-galleta", name: "Galleta", nickname: "Galleta", paymentPlan: "perMatch" },
+  { id: "player-felipe-arquero", name: "Felipe arquero", nickname: "Felipe", paymentPlan: "perMatch" },
 ];
 
 const players: Player[] = playerSeeds.map((player, index) => ({
@@ -80,6 +82,7 @@ function matchPlayer(
     amountPaid,
     note,
     team,
+    whatsappOrder: index,
     createdAt: now,
     updatedAt: now,
   };
@@ -136,16 +139,17 @@ const matches: Match[] = [
 const matchPlayers: MatchPlayer[] = [
   ...[
     ["Victor", "paid", "A", 0, 0, "mensualidad"],
+    ["Galleta", "unpaid", "none", PER_MATCH_AMOUNT, 0, ""],
     ["Marcio", "paid", "B", 0, 0, "mensualidad"],
-    ["Mario Quintana", "paid", "A", 0, 0, "mensualidad"],
-    ["Mella", "paid", "B", 0, 0, "mensualidad"],
     ["Juanjo", "paid", "A", 0, 0, "mensualidad"],
+    ["Beto", "unpaid", "none", PER_MATCH_AMOUNT, 0, ""],
     ["Francis", "paid", "B", 0, 0, "mensualidad"],
     ["Cooper", "paid", "A", 0, 0, "mensualidad"],
     ["Stgo Mantelli", "unpaid", "B", PER_MATCH_AMOUNT, 0, ""],
     ["Pololo de Francis", "unpaid", "none", PER_MATCH_AMOUNT, 0, ""],
-    ["Beto", "unpaid", "none", PER_MATCH_AMOUNT, 0, ""],
-    ["Alonso", "paid", "B", 0, 0, "mensualidad"],
+    ["Mario Quintana", "paid", "A", 0, 0, "mensualidad"],
+    ["Alonso Duran", "promised", "B", PER_MATCH_AMOUNT, 0, "pago manana"],
+    ["Felipe arquero", "unpaid", "none", PER_MATCH_AMOUNT, 0, "galleta Cooper"],
   ].map(([name, paymentStatus, team, amountDue, amountPaid, note], index) =>
     matchPlayer("match-2026-06-30", index + 1, String(name), paymentStatus as PaymentStatus, Number(amountDue), Number(amountPaid), String(note), team as Team),
   ),

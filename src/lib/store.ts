@@ -4,6 +4,10 @@ export function newId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+export function nextMatch(matches: Match[]) {
+  return [...matches].sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))[0];
+}
+
 export function upsertMatch(data: SifupData, match: Match) {
   const matches = data.matches.some((item) => item.id === match.id)
     ? data.matches.map((item) => (item.id === match.id ? match : item))
@@ -19,6 +23,20 @@ export function replaceMatchPlayers(data: SifupData, matchId: string, rows: Matc
       ...rows,
     ],
   };
+}
+
+export function sortByWhatsappOrder(rows: MatchPlayer[]) {
+  return [...rows].sort((a, b) => {
+    const orderA = whatsappOrderFor(a);
+    const orderB = whatsappOrderFor(b);
+    if (orderA !== orderB) return orderA - orderB;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+export function whatsappOrderFor(row: MatchPlayer) {
+  const orderFromId = Number(row.id.match(/-player-(\d+)$/)?.[1] ?? 0);
+  return row.whatsappOrder || orderFromId || Number.MAX_SAFE_INTEGER;
 }
 
 export function upsertResult(data: SifupData, result: MatchResult) {

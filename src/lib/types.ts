@@ -44,6 +44,7 @@ export type MatchPlayer = {
   amountPaid: number;
   note: string;
   team: Team;
+  whatsappOrder: number;
   goals?: number;
   createdAt: string;
   updatedAt: string;

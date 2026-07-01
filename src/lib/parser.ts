@@ -82,6 +82,7 @@ export function parseWhatsAppList(input: string, amountDue = 4000): ParsedWhatsA
   const players = lines
     .filter((line) => /^\d+[\).-]\s*/.test(line))
     .map((line) => {
+      const orderMatch = line.match(/^(\d+)[\).-]\s*/);
       const withoutNumber = line.replace(/^\d+[\).-]\s*/, "").trim();
       const noteMatch = withoutNumber.match(/\(([^)]+)\)/);
       const rawNote = noteMatch?.[1] ?? "";
@@ -96,6 +97,7 @@ export function parseWhatsAppList(input: string, amountDue = 4000): ParsedWhatsA
         amountPaid: paymentStatus === "paid" ? amountDue : 0,
         note,
         team: "none" as const,
+        whatsappOrder: Number(orderMatch?.[1] ?? 0),
         goals: 0,
       };
     });
