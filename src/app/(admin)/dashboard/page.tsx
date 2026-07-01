@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getSifupData } from "@/lib/repository";
-import { formatCurrency, summarizeMatch } from "@/lib/store";
-import type { Match, MatchResult } from "@/lib/types";
+import { formatCurrency, sortByWhatsappOrder, summarizeMatch } from "@/lib/store";
+import type { Match, MatchPlayer, MatchResult, Player, Winner } from "@/lib/types";
 
 type ResultWithMatch = { result: MatchResult; match: Match };
 
@@ -11,6 +11,16 @@ function matchTime(match: { date: string; time: string }) {
 
 function matchLabel(match: { weekLabel: string; date: string; time: string; location: string }) {
   return `${match.weekLabel || match.date} - ${match.time} - ${match.location}`;
+}
+
+function winnerLabel(winner: Winner) {
+  if (winner === "draw") return "Empate";
+  return `El Equipo ${winner === "A" ? "Rojo" : "Amarillo"} fue el ganador`;
+}
+
+function playerNickname(row: MatchPlayer, players: Player[]) {
+  const player = players.find((item) => item.id === row.playerId) ?? players.find((item) => item.name.toLowerCase() === row.name.toLowerCase());
+  return player?.nickname || row.name;
 }
 
 export default async function Page() {
@@ -27,6 +37,10 @@ export default async function Page() {
   });
   const lastResult = resultItems.sort((a, b) => matchTime(b.match).localeCompare(matchTime(a.match)))[0];
   const currentRows = currentMatch ? data.matchPlayers.filter((row) => row.matchId === currentMatch.id) : [];
+  const lastResultRows = lastResult ? sortByWhatsappOrder(data.matchPlayers.filter((row) => row.matchId === lastResult.match.id && row.attendanceStatus === "confirmed")) : [];
+  const lastResultTeamA = lastResultRows.filter((row) => row.team === "A");
+  const lastResultTeamB = lastResultRows.filter((row) => row.team === "B");
+  const monthlyPlayerCount = data.players.filter((player) => player.active && player.paymentPlan === "monthly").length;
   const summary = summarizeMatch(currentRows);
 
   return (
@@ -47,8 +61,8 @@ export default async function Page() {
             <strong>{summary.confirmedCount}</strong>
           </article>
           <article className="metric lime">
-            <span>Pagados</span>
-            <strong>{summary.paidCount}</strong>
+            <span>Mensuales</span>
+            <strong>{monthlyPlayerCount}</strong>
           </article>
           <article className="metric pink">
             <span>Pendiente</span>
@@ -69,8 +83,32 @@ export default async function Page() {
               <h2 className="mt-2 text-xl font-black text-white">{matchLabel(lastResult.match)}</h2>
               <p className="mt-3 text-3xl font-black text-white">Rojo {lastResult.result.scoreA} - {lastResult.result.scoreB} Amarillo</p>
               <p className="mt-2 text-sm font-bold text-(--muted)">
-                {lastResult.result.winner === "draw" ? "Empate" : lastResult.result.winner === "A" ? "Gana Rojo" : "Gana Amarillo"}
+                {winnerLabel(lastResult.result.winner)}
               </p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-wide text-(--red)">Rojo</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {lastResultTeamA.map((row) => (
+                      <span key={row.id} className="rounded-md border border-(--red)/35 bg-(--red)/12 px-2 py-1 text-xs font-bold text-white">
+                        {playerNickname(row, data.players)}
+                      </span>
+                    ))}
+                    {lastResultTeamA.length === 0 ? <span className="text-xs text-(--muted)">Sin jugadores</span> : null}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-wide text-(--gold)">Amarillo</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {lastResultTeamB.map((row) => (
+                      <span key={row.id} className="rounded-md border border-(--gold)/40 bg-(--gold)/14 px-2 py-1 text-xs font-bold text-white">
+                        {playerNickname(row, data.players)}
+                      </span>
+                    ))}
+                    {lastResultTeamB.length === 0 ? <span className="text-xs text-(--muted)">Sin jugadores</span> : null}
+                  </div>
+                </div>
+              </div>
             </>
           ) : (
             <p className="mt-2 text-sm text-(--muted)">Todavia no hay resultados cerrados.</p>
