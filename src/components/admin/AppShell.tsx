@@ -42,24 +42,25 @@ export function AppShell({
 
           <MainNav nextMatchId={nextMatchId} />
 
+          <div className="sidebar-auth">
+            {isAdmin ? (
+              <form action={logoutAction}>
+                <button type="submit">
+                  <LogOut size={16} />
+                  Logout
+                </button>
+              </form>
+            ) : (
+              <Link href="/login">
+                <LogIn size={16} />
+                Admin
+              </Link>
+            )}
+          </div>
+
           <div className="sidebar-note">
             <strong>Design system</strong>
             <span>Futbol de barrio organizado: verde cancha, noche, textura, deuda visible y ranking vivo.</span>
-            <div className="sidebar-auth">
-              {isAdmin ? (
-                <form action={logoutAction}>
-                  <button type="submit">
-                    <LogOut size={16} />
-                    Logout
-                  </button>
-                </form>
-              ) : (
-                <Link href="/login">
-                  <LogIn size={16} />
-                  Admin
-                </Link>
-              )}
-            </div>
           </div>
         </aside>
 
