@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Trophy } from "lucide-react";
 import { getSifupData } from "@/lib/repository";
 import { formatCurrency, sortByWhatsappOrder, summarizeMatch } from "@/lib/store";
 import type { Match, MatchPlayer, MatchResult, Player, Winner } from "@/lib/types";
@@ -13,14 +14,28 @@ function matchLabel(match: { weekLabel: string; date: string; time: string; loca
   return `${match.weekLabel || match.date} - ${match.time} - ${match.location}`;
 }
 
+function matchDateLabel(match: { weekLabel: string; date: string; time: string }) {
+  return `${match.weekLabel || match.date} - ${match.time}`;
+}
+
 function winnerLabel(winner: Winner) {
   if (winner === "draw") return "Empate";
-  return `El Equipo ${winner === "A" ? "Rojo" : "Amarillo"} fue el ganador`;
+  return `Equipo ${winner === "A" ? "Rojo" : "Amarillo"} - GANADOR`;
+}
+
+function teamPoints(team: "A" | "B", winner: Winner) {
+  if (winner === "draw") return 2;
+  return winner === team ? 3 : 1;
 }
 
 function playerNickname(row: MatchPlayer, players: Player[]) {
   const player = players.find((item) => item.id === row.playerId) ?? players.find((item) => item.name.toLowerCase() === row.name.toLowerCase());
   return player?.nickname || row.name;
+}
+
+function isGalleta(row: MatchPlayer, players: Player[]) {
+  const player = players.find((item) => item.id === row.playerId) ?? players.find((item) => item.name.toLowerCase() === row.name.toLowerCase());
+  return (player?.paymentPlan ?? "perMatch") === "perMatch";
 }
 
 export default async function Page() {
@@ -36,13 +51,25 @@ export default async function Page() {
     return match ? [{ result, match }] : [];
   });
   const lastResult = resultItems.sort((a, b) => matchTime(b.match).localeCompare(matchTime(a.match)))[0];
-  const currentRows = currentMatch ? data.matchPlayers.filter((row) => row.matchId === currentMatch.id) : [];
   const lastResultRows = lastResult ? sortByWhatsappOrder(data.matchPlayers.filter((row) => row.matchId === lastResult.match.id && row.attendanceStatus === "confirmed")) : [];
   const lastResultTeamA = lastResultRows.filter((row) => row.team === "A");
   const lastResultTeamB = lastResultRows.filter((row) => row.team === "B");
-  const lastResultSummary = summarizeMatch(lastResultRows);
-  const monthlyPlayerCount = data.players.filter((player) => player.active && player.paymentPlan === "monthly").length;
-  const summary = summarizeMatch(currentRows);
+  const lastResultGalletaRows = lastResultRows.filter((row) => isGalleta(row, data.players));
+  const lastResultSummary = summarizeMatch(lastResultGalletaRows);
+  const winner = lastResult?.result.winner;
+
+  const latestMonthKey = [...data.matches].sort((a, b) => matchTime(b).localeCompare(matchTime(a)))[0]?.monthKey;
+  const gastosTotal = data.clubFinance.prepaidTotal;
+  const recaudadoMensuales = data.monthlyPayments
+    .filter((payment) => payment.monthKey === latestMonthKey)
+    .reduce((sum, payment) => sum + payment.amountPaid, 0);
+  const galletaPlayerIds = new Set(data.players.filter((player) => player.paymentPlan === "perMatch").map((player) => player.id));
+  const galletasRegistrados = new Set(
+    data.matchPlayers
+      .filter((row) => row.attendanceStatus === "confirmed" && (row.playerId ? galletaPlayerIds.has(row.playerId) : true))
+      .map((row) => row.playerId ?? row.name.toLowerCase()),
+  ).size;
+  const partidosJugados = resultItems.length;
 
   return (
     <>
@@ -57,21 +84,21 @@ export default async function Page() {
           <p>Resultado del partido pasado, partido actual pendiente de resultado y proxima fecha disponible.</p>
         </div>
         <div className="hero-metrics" aria-label="Resumen">
-          <article className="metric cyan">
-            <span>Confirmados</span>
-            <strong>{summary.confirmedCount}</strong>
+          <article className="metric pink">
+            <span>Gastos canchas</span>
+            <strong>{formatCurrency(gastosTotal)}</strong>
           </article>
           <article className="metric lime">
-            <span>Mensuales</span>
-            <strong>{monthlyPlayerCount}</strong>
+            <span>Recaudado mensuales</span>
+            <strong>{formatCurrency(recaudadoMensuales)}</strong>
           </article>
-          <article className="metric pink">
-            <span>Pendiente</span>
-            <strong>{formatCurrency(summary.pendingAmount)}</strong>
+          <article className="metric cyan">
+            <span>Galletas registrados</span>
+            <strong>{galletasRegistrados}</strong>
           </article>
           <article className="metric gold">
-            <span>Recaudado</span>
-            <strong>{formatCurrency(summary.totalCollected)}</strong>
+            <span>Partidos jugados</span>
+            <strong>{partidosJugados}</strong>
           </article>
         </div>
       </section>
@@ -81,24 +108,42 @@ export default async function Page() {
           <p className="text-xs font-bold uppercase tracking-wide text-(--muted)">Partido pasado</p>
           {lastResult ? (
             <>
-              <h2 className="mt-2 text-xl font-black text-white">{matchLabel(lastResult.match)}</h2>
-              <p className="mt-3 text-3xl font-black text-white">Rojo {lastResult.result.scoreA} - {lastResult.result.scoreB} Amarillo</p>
-              <p className="mt-2 text-sm font-bold text-(--muted)">
-                {winnerLabel(lastResult.result.winner)}
+              <h2 className="mt-2 text-xl font-black text-white">{matchDateLabel(lastResult.match)}</h2>
+              <p className="mt-3 flex flex-wrap items-baseline gap-x-2 text-3xl font-black">
+                <span className={winner === "A" ? "text-(--red)" : "text-white/40"}>Rojo {lastResult.result.scoreA}</span>
+                <span className="text-white/30">-</span>
+                <span className={winner === "B" ? "text-(--gold)" : "text-white/40"}>{lastResult.result.scoreB} Amarillo</span>
               </p>
+              {winner !== "draw" ? (
+                <div className={`mt-2 inline-flex items-center gap-2 rounded-full border px-3 py-1 ${winner === "A" ? "border-(--red)/50 bg-(--red)/15" : "border-(--gold)/50 bg-(--gold)/15"}`}>
+                  <Trophy size={14} className={winner === "A" ? "text-(--red)" : "text-(--gold)"} />
+                  <p className={`text-xs font-black uppercase tracking-wide ${winner === "A" ? "text-(--red)" : "text-(--gold)"}`}>
+                    {winner ? winnerLabel(winner) : ""}
+                  </p>
+                </div>
+              ) : (
+                <p className="mt-2 text-sm font-bold text-(--muted)">Empate</p>
+              )}
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <div className="rounded-md border border-(--border) bg-white/[0.04] p-2">
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-(--muted)">Falta</p>
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-(--muted)">Falta (galletas)</p>
                   <p className="mt-1 text-lg font-black text-(--pink)">{formatCurrency(lastResultSummary.pendingAmount)}</p>
                 </div>
                 <div className="rounded-md border border-(--border) bg-white/[0.04] p-2">
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-(--muted)">Recaudado</p>
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-(--muted)">Recaudado (galletas)</p>
                   <p className="mt-1 text-lg font-black text-white">{formatCurrency(lastResultSummary.totalCollected)}</p>
                 </div>
               </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <div>
-                  <p className="text-[11px] font-black uppercase tracking-wide text-(--red)">Rojo</p>
+                <div className={`rounded-lg p-2 ${winner === "A" ? "bg-(--red)/10 ring-1 ring-(--red)/40" : ""}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-black uppercase tracking-wide text-(--red)">Rojo</p>
+                    {winner ? (
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${winner === "A" ? "bg-(--red) text-white" : "bg-white/10 text-(--muted)"}`}>
+                        +{teamPoints("A", winner)} pts
+                      </span>
+                    ) : null}
+                  </div>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {lastResultTeamA.map((row) => (
                       <span key={row.id} className="rounded-md border border-(--red)/35 bg-(--red)/12 px-2 py-1 text-xs font-bold text-white">
@@ -108,8 +153,15 @@ export default async function Page() {
                     {lastResultTeamA.length === 0 ? <span className="text-xs text-(--muted)">Sin jugadores</span> : null}
                   </div>
                 </div>
-                <div>
-                  <p className="text-[11px] font-black uppercase tracking-wide text-(--gold)">Amarillo</p>
+                <div className={`rounded-lg p-2 ${winner === "B" ? "bg-(--gold)/10 ring-1 ring-(--gold)/40" : ""}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-black uppercase tracking-wide text-(--gold)">Amarillo</p>
+                    {winner ? (
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${winner === "B" ? "bg-(--gold) text-(--bg-deep)" : "bg-white/10 text-(--muted)"}`}>
+                        +{teamPoints("B", winner)} pts
+                      </span>
+                    ) : null}
+                  </div>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {lastResultTeamB.map((row) => (
                       <span key={row.id} className="rounded-md border border-(--gold)/40 bg-(--gold)/14 px-2 py-1 text-xs font-bold text-white">

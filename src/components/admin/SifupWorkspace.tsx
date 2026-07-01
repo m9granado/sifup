@@ -1390,7 +1390,7 @@ export function StandingsPage({ initialData }: InitialDataProps) {
         losses,
         draws,
         winRate: appearances.length ? Math.round((wins / appearances.length) * 100) : 0,
-        points: wins * 3 + draws,
+        points: wins * 3 + draws * 2 + losses,
         form: decided ? `${wins}-${draws}-${losses}` : "0-0-0",
         pendingDebt: matchDebt + monthlyDebt,
       };
