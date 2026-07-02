@@ -14,9 +14,9 @@ import {
 } from "@/app/actions";
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
-import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, sortByWhatsappOrder, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
+import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
 import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, teamsMessage } from "@/lib/whatsapp";
-import type { Match, MatchPlayer, MatchResult, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
+import type { ClubExpense, Match, MatchPlayer, MatchResult, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
 
 const sampleInput = `martes 30 junio, 21 horas, agrupacion de sordos:
 
@@ -34,6 +34,7 @@ const sampleInput = `martes 30 junio, 21 horas, agrupacion de sordos:
 12. Felipe arquero (galleta Cooper)`;
 
 const PER_MATCH_AMOUNT = 3500;
+const MONTHLY_AMOUNT = 20000;
 const COURT_COST = 35000;
 
 type InitialDataProps = { initialData: SifupData };
@@ -294,6 +295,53 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 
 function currentMonthKey() {
   return new Date().toISOString().slice(0, 7);
+}
+
+function monthLabel(key: string) {
+  const value = new Date(`${key}-10T12:00:00`);
+  return new Intl.DateTimeFormat("es-CL", { month: "long", year: "numeric" }).format(value);
+}
+
+function paymentDueLabel(key: string) {
+  return `10/${key.slice(5)}`;
+}
+
+function monthlyPaymentFor(player: Player, month: string, existing?: MonthlyPayment): MonthlyPayment {
+  if (existing) return existing;
+  const now = new Date().toISOString();
+  return {
+    id: `monthly-${month}-${player.id}`,
+    playerId: player.id,
+    monthKey: month,
+    expectedAmount: MONTHLY_AMOUNT,
+    amountPaid: 0,
+    paymentStatus: "unpaid",
+    note: `Mensualidad ${monthLabel(month)}, vencimiento ${paymentDueLabel(month)}`,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function paymentsWithCurrentMonth(data: SifupData, month: string) {
+  const current = data.players
+    .filter((player) => player.active && player.paymentPlan === "monthly")
+    .map((player) => monthlyPaymentFor(player, month, data.monthlyPayments.find((payment) => payment.playerId === player.id && payment.monthKey === month)));
+  const currentIds = new Set(current.map((payment) => payment.id));
+  return [...data.monthlyPayments.filter((payment) => !currentIds.has(payment.id)), ...current];
+}
+
+function upsertMonthlyPayment(payments: MonthlyPayment[], payment: MonthlyPayment) {
+  return payments.some((item) => item.id === payment.id || (item.playerId === payment.playerId && item.monthKey === payment.monthKey))
+    ? payments.map((item) => (item.id === payment.id || (item.playerId === payment.playerId && item.monthKey === payment.monthKey) ? payment : item))
+    : [...payments, payment];
+}
+
+function totalPayments(payments: MonthlyPayment[], rows: MatchPlayer[]) {
+  return payments.reduce((sum, payment) => sum + payment.amountPaid, 0) + rows.reduce((sum, row) => sum + row.amountPaid, 0);
+}
+
+function pendingPayments(payments: MonthlyPayment[], rows: MatchPlayer[]) {
+  return payments.reduce((sum, payment) => sum + Math.max(payment.expectedAmount - payment.amountPaid, 0), 0) + rows.reduce((sum, row) => sum + Math.max(row.amountDue - row.amountPaid, 0), 0);
 }
 
 function nextWeekDates(latestDate: string, count: number) {
@@ -1136,8 +1184,23 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
   const isAdmin = useIsAdmin();
   const { data, commit } = useSifupData(initialData);
   const [error, setError] = useState("");
+  const month = currentMonthKey();
+  const allMonthlyPayments = paymentsWithCurrentMonth(data, month);
+  const currentMonthlyPayments = allMonthlyPayments
+    .filter((payment) => payment.monthKey === month)
+    .sort((a, b) => {
+      const playerA = data.players.find((player) => player.id === a.playerId)?.name ?? "";
+      const playerB = data.players.find((player) => player.id === b.playerId)?.name ?? "";
+      return playerA.localeCompare(playerB);
+    });
   const perMatchPending = data.matchPlayers.filter((row) => row.amountDue > row.amountPaid);
   const courtBalance = data.clubFinance.prepaidTotal - data.matches.filter((match) => match.courtPrepaid).reduce((sum, match) => sum + match.courtCost, 0);
+  const collected = totalPayments(allMonthlyPayments, data.matchPlayers);
+  const pending = pendingPayments(currentMonthlyPayments, perMatchPending);
+  const expenseTotal = data.clubExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+  const balance = collected - expenseTotal;
+  const projectedBalance = balance + pending;
+  const expenses = [...data.clubExpenses].sort((a, b) => b.expenseDate.localeCompare(a.expenseDate) || a.label.localeCompare(b.label));
 
   function markPaid(row: MatchPlayer) {
     const updated = { ...row, paymentStatus: "paid" as const, amountPaid: row.amountDue, updatedAt: new Date().toISOString() };
@@ -1149,29 +1212,43 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
   function markMonthlyPaid(payment: MonthlyPayment) {
     const updated = { ...payment, paymentStatus: "paid" as const, amountPaid: payment.expectedAmount, updatedAt: new Date().toISOString() };
     saveMonthlyPaymentAction(updated)
-      .then(() => commit({ ...data, monthlyPayments: data.monthlyPayments.map((item) => (item.id === payment.id ? updated : item)) }))
+      .then(() => commit({ ...data, monthlyPayments: upsertMonthlyPayment(data.monthlyPayments, updated) }))
       .catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar la mensualidad."));
   }
 
   return (
     <>
-      <PageTitle title="Payments" description="Mensualidades, pagos por partido y estado de cancha." />
+      <PageTitle title="Payments" description={`Mensualidades con vencimiento los dias 10, pagos por partido y balance del club.`} />
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: el marcado de pagos queda reservado para admin." /> : null}
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
+      <div className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat label="Cobrado" value={formatCurrency(collected)} />
+        <Stat label="Gastado" value={formatCurrency(expenseTotal)} />
+        <Stat label="Balance" value={formatCurrency(balance)} />
+        <Stat label="Proyectado" value={formatCurrency(projectedBalance)} />
+      </div>
       <div className="mb-4 grid gap-4 lg:grid-cols-[1fr_0.7fr]">
         <PaymentAccountCard data={data} />
-        <Card><p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">Cancha</p><p className="mt-2 text-2xl font-semibold text-white">{formatCurrency(data.clubFinance.prepaidTotal)}</p><p className="mt-1 text-sm text-(--muted)">Pagado para {data.clubFinance.prepaidCourts} fechas. Saldo referencial: {formatCurrency(courtBalance)}.</p></Card>
+        <Card>
+          <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">Cancha</p>
+          <p className="mt-2 text-2xl font-semibold text-white">{formatCurrency(data.clubFinance.prepaidTotal)}</p>
+          <p className="mt-1 text-sm text-(--muted)">Pagado para {data.clubFinance.prepaidCourts} fechas. Saldo referencial: {formatCurrency(courtBalance)}.</p>
+          <p className="mt-3 rounded-md bg-(--cyan)/15 px-3 py-2 text-sm font-bold text-(--cyan)">Por cobrar ahora: {formatCurrency(pending)}.</p>
+        </Card>
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
         <Card className="space-y-3">
-          <h2 className="font-semibold">Mensualidad junio</h2>
-          {data.monthlyPayments.map((payment) => {
+          <div>
+            <h2 className="font-semibold">Mensualidad {monthLabel(month)}</h2>
+            <p className="text-sm text-(--muted)">Vence {paymentDueLabel(month)}. Si una cuota no existe en la base, se muestra como pendiente y se crea al marcarla pagada.</p>
+          </div>
+          {currentMonthlyPayments.map((payment) => {
             const player = data.players.find((item) => item.id === payment.playerId);
             const pending = Math.max(payment.expectedAmount - payment.amountPaid, 0);
             return (
               <div key={payment.id} className="flex flex-col gap-3 rounded-md border border-(--border) bg-white/[0.04] p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div><p className="font-semibold">{player?.name}</p><p className="text-sm text-(--muted)">{formatCurrency(payment.amountPaid)} / {formatCurrency(payment.expectedAmount)} - pendiente {formatCurrency(pending)}</p></div>
-                <div className="flex items-center gap-2"><PaymentBadge status={payment.paymentStatus} />{isAdmin && pending > 0 ? <Button onClick={() => markMonthlyPaid(payment)}>Mark as paid</Button> : null}</div>
+                <div className="flex items-center gap-2"><PaymentBadge status={payment.paymentStatus} />{isAdmin && pending > 0 ? <Button onClick={() => markMonthlyPaid(payment)}>Pagado</Button> : null}</div>
               </div>
             );
           })}
@@ -1183,14 +1260,45 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
             return (
               <div key={row.id} className="flex flex-col gap-3 rounded-md border border-(--border) bg-white/[0.04] p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div><p className="font-semibold">{row.name}</p><p className="mt-1 text-sm text-(--muted)">{match?.weekLabel || match?.date} - {match?.location}</p><p className="mt-1 text-sm font-medium">{formatCurrency(Math.max(row.amountDue - row.amountPaid, 0))}</p></div>
-                <div className="flex items-center gap-2"><PaymentBadge status={row.paymentStatus} />{isAdmin ? <Button onClick={() => markPaid(row)}>Mark as paid</Button> : null}</div>
+                <div className="flex items-center gap-2"><PaymentBadge status={row.paymentStatus} />{isAdmin ? <Button onClick={() => markPaid(row)}>Pagado</Button> : null}</div>
               </div>
             );
           })}
           {perMatchPending.length === 0 ? <p className="text-sm text-(--muted)">No hay pagos por partido pendientes.</p> : null}
         </Card>
+        <Card className="space-y-3 xl:col-span-2">
+          <div>
+            <h2 className="font-semibold">Gastos registrados</h2>
+            <p className="text-sm text-(--muted)">Incluye cancha, pelota nueva y petos para que el balance vaya fluyendo con lo cobrado.</p>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-3">
+            {expenses.map((expense) => (
+              <ExpenseRow key={expense.id} expense={expense} />
+            ))}
+          </div>
+        </Card>
       </div>
     </>
+  );
+}
+
+function ExpenseRow({ expense }: { expense: ClubExpense }) {
+  const category = {
+    court: "Cancha",
+    equipment: "Equipamiento",
+    other: "Otro",
+  }[expense.category];
+  return (
+    <div className="rounded-md border border-(--border) bg-white/[0.04] p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-semibold text-white">{expense.label}</p>
+          <p className="mt-1 text-xs font-bold uppercase tracking-wide text-(--muted)">{category} - {expense.expenseDate}</p>
+        </div>
+        <p className="font-black text-white">{formatCurrency(expense.amount)}</p>
+      </div>
+      {expense.note ? <p className="mt-2 text-sm text-(--muted)">{expense.note}</p> : null}
+    </div>
   );
 }
 
@@ -1240,9 +1348,9 @@ export function PlayersPage({ initialData }: InitialDataProps) {
           <h2 className="font-semibold">Oficiales</h2>
           <p className="text-xs text-(--muted)">Mensualidad de {month} y meses anteriores.</p>
           {oficiales.map((player) => {
-            const payment = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === month);
+            const payment = monthlyPaymentFor(player, month, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === month));
             const paid = payment?.paymentStatus === "paid";
-            const history = data.monthlyPayments.filter((item) => item.playerId === player.id);
+            const history = upsertMonthlyPayment(data.monthlyPayments.filter((item) => item.playerId === player.id), payment);
             return (
               <PlayerRow key={player.id} player={player} isAdmin={isAdmin} onEdit={() => setEditingPlayer(player)}>
                 <PaymentBadge status={paid ? "paid" : payment?.paymentStatus ?? "unpaid"} />

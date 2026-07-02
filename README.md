@@ -16,12 +16,18 @@ Open `http://localhost:3000`.
 
 ```bash
 npm run dev
+npm run dev:safe
+npm run dev:doctor
+npm run dev:stop:dry
+npm run dev:stop
 npm run build
 npm run start
 npm run db:schema
 npm run db:seed
 npm run db:setup
 ```
+
+Use `npm run dev:safe` on Windows when working locally. It starts Next.js through a small process-tree wrapper, so closing the command also stops child workers that can otherwise keep running in the background. If local builds become slow, run `npm run dev:doctor` to list Node processes and memory usage, then `npm run dev:stop:dry` to preview SIFUP dev processes that would be closed. `npm run dev:stop` only targets this repo's Next dev processes by default; pass `-IncludePlaywrightMcp` to `scripts/stop-node-dev.ps1` manually only when those browser MCP sessions are known to be disposable.
 
 ## Environment
 

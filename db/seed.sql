@@ -3,6 +3,7 @@ delete from match_players;
 delete from monthly_payments;
 delete from matches;
 delete from players;
+delete from club_expenses;
 delete from club_finances;
 
 insert into players (id, name, nickname, phone, payment_plan, skill_level, active)
@@ -72,7 +73,12 @@ values
   ('match-2026-06-09-player-10', 'match-2026-06-09', 'player-matias', 'Matias', 'confirmed', 'paid', 3000, 3000, 'primo Juanjo', 10, 'B');
 
 insert into monthly_payments (id, player_id, month_key, expected_amount, amount_paid, payment_status, note)
-select 'monthly-2026-06-' || id, id, '2026-06', 20000, 20000, 'paid', 'Mensualidad junio'
+select 'monthly-2026-06-' || id, id, '2026-06', 20000, 20000, 'paid', 'Mensualidad junio, vencimiento 10/06'
+from players
+where payment_plan = 'monthly';
+
+insert into monthly_payments (id, player_id, month_key, expected_amount, amount_paid, payment_status, note)
+select 'monthly-2026-07-' || id, id, '2026-07', 20000, 0, 'unpaid', 'Mensualidad julio, vencimiento 10/07'
 from players
 where payment_plan = 'monthly';
 
@@ -83,3 +89,9 @@ values
 
 insert into club_finances (id, bank, account, email, rut, court_cost, prepaid_courts, prepaid_total, notes)
 values ('club-finance-main', 'Cuenta vista Banco BCI MACH', '777915748221', 'vigomez@uchile.cl', '157482211', 35000, 5, 175000, '5 canchas pagadas en Club Sordos.');
+
+insert into club_expenses (id, expense_date, label, amount, category, note)
+values
+  ('expense-2026-06-courts', '2026-06-10', 'Paquete 5 canchas Club Sordos', 175000, 'court', 'Pago base relativo al ciclo 10/06.'),
+  ('expense-2026-07-ball', '2026-07-10', 'Pelota nueva', 20000, 'equipment', 'Estimado 20 lucas.'),
+  ('expense-2026-07-bibs', '2026-07-10', 'Petos', 20000, 'equipment', 'Estimado 20 lucas.');

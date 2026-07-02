@@ -2,7 +2,7 @@ import "server-only";
 
 import { seedData } from "./mock-data";
 import { getSql, hasDatabaseUrl } from "./db";
-import type { Match, MatchPlayer, MatchResult, MonthlyPayment, Player, SifupData } from "./types";
+import type { ClubExpense, Match, MatchPlayer, MatchResult, MonthlyPayment, Player, SifupData } from "./types";
 
 function iso(value: Date | string) {
   if (value instanceof Date) return value.toISOString();
@@ -95,17 +95,29 @@ type ClubFinanceRow = {
   updated_at: Date | string;
 };
 
+type ClubExpenseRow = {
+  id: string;
+  expense_date: Date | string;
+  label: string;
+  amount: number;
+  category: ClubExpense["category"];
+  note: string;
+  created_at: Date | string;
+  updated_at: Date | string;
+};
+
 export async function getSifupData(): Promise<SifupData> {
   if (!hasDatabaseUrl()) return seedData;
 
   const sql = getSql();
-  const [matches, players, matchPlayers, results, monthlyPayments, finances] = await Promise.all([
+  const [matches, players, matchPlayers, results, monthlyPayments, finances, clubExpenses] = await Promise.all([
     sql<MatchRow[]>`select * from matches order by match_date desc, match_time desc`,
     sql<PlayerRow[]>`select * from players order by name asc`,
     sql<MatchPlayerRow[]>`select * from match_players order by match_id desc, whatsapp_order asc nulls last, created_at asc, id asc`,
     sql<MatchResultRow[]>`select * from match_results`,
     sql<MonthlyPaymentRow[]>`select * from monthly_payments order by month_key desc, player_id asc`,
     sql<ClubFinanceRow[]>`select * from club_finances order by created_at asc limit 1`,
+    sql<ClubExpenseRow[]>`select * from club_expenses order by expense_date desc, created_at desc`,
   ]);
 
   return {
@@ -167,6 +179,16 @@ export async function getSifupData(): Promise<SifupData> {
       expectedAmount: row.expected_amount,
       amountPaid: row.amount_paid,
       paymentStatus: row.payment_status,
+      note: row.note,
+      createdAt: iso(row.created_at),
+      updatedAt: iso(row.updated_at),
+    })),
+    clubExpenses: clubExpenses.map((row) => ({
+      id: row.id,
+      expenseDate: dateOnly(row.expense_date),
+      label: row.label,
+      amount: row.amount,
+      category: row.category,
       note: row.note,
       createdAt: iso(row.created_at),
       updatedAt: iso(row.updated_at),

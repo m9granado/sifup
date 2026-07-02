@@ -1,6 +1,7 @@
 import type {
   AttendanceStatus,
   ClubFinance,
+  ClubExpense,
   Match,
   MatchPlayer,
   MonthlyPayment,
@@ -14,6 +15,7 @@ import type {
 const now = new Date().toISOString();
 
 const MONTH_KEY = "2026-06";
+const CURRENT_MONTH_KEY = "2026-07";
 const MONTHLY_AMOUNT = 20000;
 const PER_MATCH_AMOUNT = 3500;
 const COURT_COST = 35000;
@@ -198,17 +200,63 @@ const matchPlayers: MatchPlayer[] = [
 
 const monthlyPayments: MonthlyPayment[] = players
   .filter((player) => player.paymentPlan === "monthly")
-  .map((player) => ({
-    id: `monthly-${MONTH_KEY}-${player.id}`,
-    playerId: player.id,
-    monthKey: MONTH_KEY,
-    expectedAmount: MONTHLY_AMOUNT,
-    amountPaid: MONTHLY_AMOUNT,
-    paymentStatus: "paid",
-    note: "Mensualidad junio",
+  .flatMap((player) => [
+    {
+      id: `monthly-${MONTH_KEY}-${player.id}`,
+      playerId: player.id,
+      monthKey: MONTH_KEY,
+      expectedAmount: MONTHLY_AMOUNT,
+      amountPaid: MONTHLY_AMOUNT,
+      paymentStatus: "paid" as const,
+      note: "Mensualidad junio, vencimiento 10/06",
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: `monthly-${CURRENT_MONTH_KEY}-${player.id}`,
+      playerId: player.id,
+      monthKey: CURRENT_MONTH_KEY,
+      expectedAmount: MONTHLY_AMOUNT,
+      amountPaid: 0,
+      paymentStatus: "unpaid" as const,
+      note: "Mensualidad julio, vencimiento 10/07",
+      createdAt: now,
+      updatedAt: now,
+    },
+  ]);
+
+const clubExpenses: ClubExpense[] = [
+  {
+    id: "expense-2026-06-courts",
+    expenseDate: "2026-06-10",
+    label: "Paquete 5 canchas Club Sordos",
+    amount: 175000,
+    category: "court",
+    note: "Pago base relativo al ciclo 10/06.",
     createdAt: now,
     updatedAt: now,
-  }));
+  },
+  {
+    id: "expense-2026-07-ball",
+    expenseDate: "2026-07-10",
+    label: "Pelota nueva",
+    amount: 20000,
+    category: "equipment",
+    note: "Estimado 20 lucas.",
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
+    id: "expense-2026-07-bibs",
+    expenseDate: "2026-07-10",
+    label: "Petos",
+    amount: 20000,
+    category: "equipment",
+    note: "Estimado 20 lucas.",
+    createdAt: now,
+    updatedAt: now,
+  },
+];
 
 const clubFinance: ClubFinance = {
   id: "club-finance-main",
@@ -247,5 +295,6 @@ export const seedData: SifupData = {
     },
   ],
   monthlyPayments,
+  clubExpenses,
   clubFinance,
 };

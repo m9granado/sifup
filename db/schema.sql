@@ -93,8 +93,20 @@ create table if not exists club_finances (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists club_expenses (
+  id text primary key,
+  expense_date date not null,
+  label text not null,
+  amount integer not null,
+  category text not null check (category in ('court', 'equipment', 'other')),
+  note text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists idx_match_players_match_id on match_players(match_id);
 create index if not exists idx_match_players_player_id on match_players(player_id);
 create index if not exists idx_match_players_whatsapp_order on match_players(match_id, whatsapp_order);
 create index if not exists idx_matches_month_key on matches(month_key);
 create index if not exists idx_monthly_payments_month_key on monthly_payments(month_key);
+create index if not exists idx_club_expenses_expense_date on club_expenses(expense_date);

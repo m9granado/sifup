@@ -86,12 +86,24 @@ export type ClubFinance = {
   updatedAt: string;
 };
 
+export type ClubExpense = {
+  id: string;
+  expenseDate: string;
+  label: string;
+  amount: number;
+  category: "court" | "equipment" | "other";
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type SifupData = {
   matches: Match[];
   players: Player[];
   matchPlayers: MatchPlayer[];
   results: MatchResult[];
   monthlyPayments: MonthlyPayment[];
+  clubExpenses: ClubExpense[];
   clubFinance: ClubFinance;
 };
 

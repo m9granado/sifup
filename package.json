@@ -4,6 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:safe": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-safe.ps1",
+    "dev:doctor": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/node-doctor.ps1",
+    "dev:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-node-dev.ps1",
+    "dev:stop:dry": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-node-dev.ps1 -DryRun",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
