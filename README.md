@@ -36,10 +36,36 @@ Copy `.env.example` to `.env.local` and set:
 - `SIFUP_ADMIN_PASSWORD`: admin password used by the login form.
 - `SESSION_SECRET`: secret used to sign the session cookie.
 - `DATABASE_URL`: Supabase/Postgres connection string used by the server data repository.
+- `SIFUP_MCP_TOKEN`: bearer token required by the private MCP endpoint.
 
 Without `SESSION_SECRET`, local development falls back to a dev-only default, but production should always set it explicitly. Without `DATABASE_URL`, public pages fall back to the bundled seed data so builds still work, but admin mutations require a real database.
 
 Public users can open the dashboard, matches, payments, players, and standings without logging in. Phone numbers and WhatsApp links only render after admin login.
+
+## MCP
+
+SIFUP exposes a private MCP endpoint at:
+
+```text
+https://sifup.vercel.app/mcp
+```
+
+Every MCP request must include:
+
+```text
+Authorization: Bearer <SIFUP_MCP_TOKEN>
+```
+
+Initial tools:
+
+- `import_whatsapp_match`: imports a WhatsApp list into a match. Pass `matchId` to update a specific match, or omit it to match by date and time.
+- `get_next_match_summary`: returns the next match summary and copy-ready WhatsApp texts.
+
+OpenClaw registration:
+
+```bash
+openclaw mcp set sifup "{\"url\":\"https://sifup.vercel.app/mcp\",\"headers\":{\"Authorization\":\"Bearer <SIFUP_MCP_TOKEN>\"}}"
+```
 
 ## Deployment
 

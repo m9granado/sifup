@@ -4,6 +4,9 @@ import { getSifupData } from "@/lib/repository";
 import { formatCurrency, sortByWhatsappOrder, summarizeMatch } from "@/lib/store";
 import type { Match, MatchPlayer, MatchResult, Player, Winner } from "@/lib/types";
 
+const WIN_POINTS = 4;
+const DRAW_POINTS = 2;
+
 type ResultWithMatch = { result: MatchResult; match: Match };
 type PlayerStanding = {
   player: string;
@@ -32,8 +35,8 @@ function winnerLabel(winner: Winner) {
 }
 
 function teamPoints(team: "A" | "B", winner: Winner) {
-  if (winner === "draw") return 2;
-  return winner === team ? 3 : 1;
+  if (winner === "draw") return DRAW_POINTS;
+  return winner === team ? WIN_POINTS : 0;
 }
 
 function teamLabel(team: "A" | "B") {
@@ -82,7 +85,7 @@ function buildStandings(players: Player[], matchPlayers: MatchPlayer[], results:
         draws,
         losses,
         winRate,
-        points: wins * 3 + draws * 2 + losses,
+        points: wins * WIN_POINTS + draws * DRAW_POINTS,
         form: decided ? `${wins}-${draws}-${losses}` : "0-0-0",
       };
     })

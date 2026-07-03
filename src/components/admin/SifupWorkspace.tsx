@@ -36,6 +36,8 @@ const sampleInput = `martes 30 junio, 21 horas, agrupacion de sordos:
 const PER_MATCH_AMOUNT = 3500;
 const MONTHLY_AMOUNT = 20000;
 const COURT_COST = 35000;
+const WIN_POINTS = 4;
+const DRAW_POINTS = 2;
 
 type InitialDataProps = { initialData: SifupData };
 
@@ -1498,7 +1500,7 @@ export function StandingsPage({ initialData }: InitialDataProps) {
         losses,
         draws,
         winRate: appearances.length ? Math.round((wins / appearances.length) * 100) : 0,
-        points: wins * 3 + draws * 2 + losses,
+        points: wins * WIN_POINTS + draws * DRAW_POINTS,
         form: decided ? `${wins}-${draws}-${losses}` : "0-0-0",
         pendingDebt: matchDebt + monthlyDebt,
       };

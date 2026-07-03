@@ -8,6 +8,7 @@
     "dev:doctor": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/node-doctor.ps1",
     "dev:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-node-dev.ps1",
     "dev:stop:dry": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-node-dev.ps1 -DryRun",
+    "test": "tsx --test src/lib/parser.test.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -16,11 +17,13 @@
     "db:setup": "npm run db:schema && npm run db:seed"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "lucide-react": "^1.22.0",
     "next": "16.2.9",
     "postgres": "^3.4.9",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -30,6 +33,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
+    "tsx": "^4.23.0",
     "typescript": "^5"
   }
 }

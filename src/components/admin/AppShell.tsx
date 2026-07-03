@@ -40,7 +40,7 @@ export function AppShell({
             <Image src="/brand/sifup-logo-preferred.png" alt="SIFUP" width={1015} height={600} />
           </Link>
 
-          <MainNav nextMatchId={nextMatchId} />
+          <MainNav isAdmin={isAdmin} nextMatchId={nextMatchId} />
 
           <div className="sidebar-auth">
             {isAdmin ? (

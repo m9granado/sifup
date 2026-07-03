@@ -1,4 +1,5 @@
 import type { Match, MatchPlayer, PaymentStatus } from "./types";
+import { PER_MATCH_AMOUNT } from "./sifup-constants";
 
 const monthMap: Record<string, string> = {
   enero: "01",
@@ -50,7 +51,8 @@ function parseHeader(line: string) {
   const hourMatch =
     normalized.match(/(?:^|[,\s])(\d{1,2})(?::(\d{2}))?\s*(?:horas|hrs|h)\b/) ??
     normalized.match(/\b(?:a las|hora)\s+(\d{1,2})(?::(\d{2}))?\b/);
-  const location = line.split(":").slice(1).join(":").trim().replace(/\.$/, "");
+  const rawTail = line.split(":").slice(1).join(":").trim().replace(/\.$/, "");
+  const location = /(?:club|cancha|sordos|nunoa|ñuñoa|av\.?|avenida|calle)/i.test(rawTail) ? rawTail : "";
   const year = new Date().getFullYear();
   const month = dayMonthMatch ? monthMap[dayMonthMatch[2]] : undefined;
   const day = dayMonthMatch?.[1].padStart(2, "0");
@@ -70,40 +72,53 @@ function parseHeader(line: string) {
 export function parseWhatsAppList(input: string, amountDue = 4000): ParsedWhatsAppList {
   const lines = input
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .map((line) => line.replace(/[\u200B-\u200D\u2060\uFEFF]/g, "").trim())
     .filter(Boolean);
   const errors: string[] = [];
-  const header = lines.find((line) => !/^\d+[\).-]\s*/.test(line)) ?? "";
+  const header = lines.find((line) => !isListItem(line) && !isOutSection(line)) ?? "";
   const matchInfo = parseHeader(header);
 
   if (!matchInfo.date) errors.push("No se pudo detectar la fecha del partido.");
   if (!matchInfo.time) errors.push("No se pudo detectar la hora del partido.");
 
-  const players = lines
-    .filter((line) => /^\d+[\).-]\s*/.test(line))
-    .map((line) => {
+  const players: ParsedWhatsAppList["players"] = [];
+  let currentSection: "confirmed" | "out" = "confirmed";
+
+  for (const line of lines) {
+    if (line === header) continue;
+    if (isOutSection(line)) {
+      currentSection = "out";
+      continue;
+    }
+    if (!isListItem(line)) continue;
+
       const orderMatch = line.match(/^(\d+)[\).-]\s*/);
-      const withoutNumber = line.replace(/^\d+[\).-]\s*/, "").trim();
+    const order = players.length + 1;
+    const withoutNumber = line
+      .replace(/^\s*(?:[*\-•]\s*)?(\d+)[\).-]\s*/, "")
+      .replace(/^\s*[*\-•]\s*/, "")
+      .trim();
       const noteMatch = withoutNumber.match(/\(([^)]+)\)/);
       const rawNote = noteMatch?.[1] ?? "";
       const name = withoutNumber.replace(/\s*\([^)]+\)\s*/g, "").trim();
       const { paymentStatus, note } = parsePayment(rawNote);
+    if (!name) continue;
 
-      return {
-        name,
-        phone: "",
-        attendanceStatus: "confirmed" as const,
-        paymentStatus,
-        amountDue,
-        amountPaid: paymentStatus === "paid" ? amountDue : 0,
-        note,
-        team: "none" as const,
-        whatsappOrder: Number(orderMatch?.[1] ?? 0),
-        goals: 0,
-      };
+    players.push({
+      name,
+      phone: "",
+      attendanceStatus: currentSection,
+      paymentStatus: currentSection === "out" ? "paid" : paymentStatus,
+      amountDue: currentSection === "out" ? 0 : amountDue,
+      amountPaid: currentSection === "out" || paymentStatus !== "paid" ? 0 : amountDue,
+      note: currentSection === "out" ? "No puede" : note,
+      team: "none" as const,
+      whatsappOrder: Number(orderMatch?.[1] ?? order),
+      goals: 0,
     });
+  }
 
-  if (players.length === 0) errors.push("No se detectaron jugadores numerados.");
+  if (players.length === 0) errors.push("No se detectaron jugadores en la lista.");
 
   return {
     match: {
@@ -116,4 +131,16 @@ export function parseWhatsAppList(input: string, amountDue = 4000): ParsedWhatsA
     players,
     errors,
   };
+}
+
+function isOutSection(line: string) {
+  return /^no\s+pueden\s*:?\s*$/i.test(normalize(line));
+}
+
+function isListItem(line: string) {
+  return /^\s*(?:[*\-•]\s*)?(?:\d+[\).-]\s*)?\S+/.test(line) && !line.includes(":");
+}
+
+export function parseDefaultWhatsAppList(input: string) {
+  return parseWhatsAppList(input, PER_MATCH_AMOUNT);
 }

@@ -9,15 +9,15 @@ type NavItem = {
   icon: string;
 };
 
-export function MainNav({ nextMatchId }: { nextMatchId?: string }) {
+export function MainNav({ isAdmin, nextMatchId }: { isAdmin: boolean; nextMatchId?: string }) {
   const pathname = usePathname();
 
   const items: NavItem[] = [
     { href: "/dashboard", label: "Inicio", icon: "icon-home" },
-    { href: "/matches", label: "Partidos", icon: "icon-calendar" },
+    ...(isAdmin ? [{ href: "/matches", label: "Partidos", icon: "icon-calendar" }] : []),
     { href: "/players", label: "Jugadores", icon: "icon-users" },
-    ...(nextMatchId ? [{ href: `/matches/${nextMatchId}/teams`, label: "Equipos", icon: "icon-shield" }] : []),
-    { href: "/payments", label: "Pagos", icon: "icon-wallet" },
+    ...(isAdmin && nextMatchId ? [{ href: `/matches/${nextMatchId}/teams`, label: "Equipos", icon: "icon-shield" }] : []),
+    ...(isAdmin ? [{ href: "/payments", label: "Pagos", icon: "icon-wallet" }] : []),
     { href: "/standings", label: "Rankings", icon: "icon-trophy" },
   ];
 
