@@ -15,7 +15,7 @@ import {
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
 import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
-import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, teamsMessage } from "@/lib/whatsapp";
+import { matchSummaryMessage, pendingPaymentsMessage, teamsMessage } from "@/lib/whatsapp";
 import type { ClubExpense, Match, MatchPlayer, MatchResult, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
 
 const sampleInput = `martes 30 junio, 21 horas, agrupacion de sordos:
@@ -40,6 +40,10 @@ const WIN_POINTS = 4;
 const DRAW_POINTS = 2;
 
 type InitialDataProps = { initialData: SifupData };
+type PlayerStanding = {
+  rank: number;
+  points: number;
+};
 
 function useSifupData(initialData: SifupData) {
   const [data, setData] = useState<SifupData>(initialData);
@@ -85,6 +89,40 @@ function playerForMatchRow(row: MatchPlayer, players: Player[]) {
 
 function isMonthlyMatchRow(row: MatchPlayer, players: Player[]) {
   return playerForMatchRow(row, players)?.paymentPlan === "monthly" || row.note.toLowerCase().includes("mensualidad");
+}
+
+function buildPlayerStandings(data: SifupData) {
+  const ranked = data.players
+    .map((player) => {
+      const appearances = data.matchPlayers.filter((row) => (row.name === player.name || row.playerId === player.id) && row.attendanceStatus === "confirmed");
+      let wins = 0;
+      let draws = 0;
+      appearances.forEach((row) => {
+        const result = data.results.find((item) => item.matchId === row.matchId);
+        if (!result || row.team === "none") return;
+        if (result.winner === "draw") draws += 1;
+        else if (result.winner === row.team) wins += 1;
+      });
+      const winRate = appearances.length ? Math.round((wins / appearances.length) * 100) : 0;
+      return {
+        id: player.id,
+        name: player.name,
+        played: appearances.length,
+        winRate,
+        points: wins * WIN_POINTS + draws * DRAW_POINTS,
+      };
+    })
+    .sort((a, b) => b.points - a.points || b.winRate - a.winRate || b.played - a.played);
+
+  return new Map(ranked.flatMap((row, index) => {
+    const standing = { rank: index + 1, points: row.points };
+    return [[row.id, standing], [row.name.toLowerCase(), standing]] as const;
+  }));
+}
+
+function standingForMatchRow(row: MatchPlayer, players: Player[], standings: Map<string, PlayerStanding>) {
+  const player = playerForMatchRow(row, players);
+  return standings.get(player?.id ?? "") ?? standings.get(row.name.toLowerCase());
 }
 
 function pendingForMatchRow(row: MatchPlayer) {
@@ -740,13 +778,14 @@ function EditableRows({
   );
 }
 
-function PublicMatchRows({ rows, players }: { rows: MatchPlayer[]; players: Player[] }) {
+function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; players: Player[]; standings: Map<string, PlayerStanding> }) {
   const sortedRows = sortRowsWithMonthlyLast(rows, players);
   return (
     <div className="space-y-2">
       {sortedRows.map((row, index) => {
         const monthly = isMonthlyMatchRow(row, players);
         const pending = pendingForMatchRow(row);
+        const standing = standingForMatchRow(row, players, standings);
         return (
         <div key={row.id} className={`flex flex-col gap-2 rounded-md border px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between ${monthly ? "border-(--cyan)/45 bg-(--cyan)/10" : "border-(--border) bg-white/[0.04]"}`}>
           <div className="flex items-center gap-2">
@@ -755,6 +794,7 @@ function PublicMatchRows({ rows, players }: { rows: MatchPlayer[]; players: Play
             <div>
               <p className="font-semibold text-white">{row.name} {monthly ? <span className="ml-2 rounded bg-(--cyan)/20 px-1.5 py-0.5 text-[10px] font-black uppercase text-(--cyan)">Mensual</span> : null}</p>
               <p className="text-xs text-(--muted)">{teamLabel(row.team)} - Falta {formatCurrency(pending)}</p>
+              <p className="text-xs font-semibold text-(--gold)">{standing ? `Ranking #${standing.rank} - ${standing.points} pts` : "Sin ranking"}</p>
             </div>
           </div>
           <div className="flex items-center gap-2"><PaymentBadge status={row.paymentStatus} /><span className="rounded-full bg-white/[0.08] px-2 py-1 text-xs font-semibold text-(--muted) ring-1 ring-(--border)">{formatCurrency(pending)}</span></div>
@@ -768,12 +808,14 @@ function PublicMatchRows({ rows, players }: { rows: MatchPlayer[]; players: Play
 function PlayerRosterRow({
   row,
   monthly,
+  standing,
   onTeamChange,
   onOpenDetails,
   onRemove,
 }: {
   row: MatchPlayer;
   monthly: boolean;
+  standing?: PlayerStanding;
   onTeamChange: (team: Team) => void;
   onOpenDetails: () => void;
   onRemove: () => void;
@@ -786,6 +828,7 @@ function PlayerRosterRow({
         <div>
           <p className="font-semibold text-white"><span className="mr-2 text-xs text-(--muted)">#{row.whatsappOrder || "-"}</span>{row.name}</p>
           <p className="mt-0.5 text-xs text-(--muted)">Falta {formatCurrency(pending)} {monthly ? <span className="ml-2 rounded bg-(--cyan)/20 px-1.5 py-0.5 text-[10px] font-black uppercase text-(--cyan)">Mensual</span> : null}</p>
+          <p className="mt-0.5 text-xs font-semibold text-(--gold)">{standing ? `Ranking #${standing.rank} - ${standing.points} pts` : "Sin ranking"}</p>
         </div>
         <div className="flex items-center gap-1">
           {whatsapp ? (
@@ -809,6 +852,7 @@ function PlayerRosterRow({
 function TeamAssignmentBoard({
   rows,
   players,
+  standings,
   onTeamChange,
   onOpenDetails,
   onRemove,
@@ -816,6 +860,7 @@ function TeamAssignmentBoard({
 }: {
   rows: MatchPlayer[];
   players: Player[];
+  standings: Map<string, PlayerStanding>;
   onTeamChange: (rowId: string, team: Team) => void;
   onOpenDetails: (rowId: string) => void;
   onRemove: (rowId: string) => void;
@@ -843,7 +888,7 @@ function TeamAssignmentBoard({
           <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">Sin asignar ({unassigned.length})</p>
           <div className="space-y-2 sm:grid sm:grid-cols-2 sm:gap-2 sm:space-y-0 xl:grid-cols-3">
             {unassigned.map((row) => (
-              <PlayerRosterRow key={row.id} row={row} monthly={isMonthlyMatchRow(row, players)} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
+              <PlayerRosterRow key={row.id} row={row} monthly={isMonthlyMatchRow(row, players)} standing={standingForMatchRow(row, players, standings)} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
             ))}
           </div>
         </div>
@@ -853,7 +898,7 @@ function TeamAssignmentBoard({
           <p className="text-sm font-bold text-(--red)">Equipo Rojo ({teamA.length})</p>
           <div className="space-y-2">
             {teamA.map((row) => (
-              <PlayerRosterRow key={row.id} row={row} monthly={isMonthlyMatchRow(row, players)} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
+              <PlayerRosterRow key={row.id} row={row} monthly={isMonthlyMatchRow(row, players)} standing={standingForMatchRow(row, players, standings)} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
             ))}
             {teamA.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
           </div>
@@ -865,7 +910,7 @@ function TeamAssignmentBoard({
           <p className="text-sm font-bold text-(--gold)">Equipo Amarillo ({teamB.length})</p>
           <div className="space-y-2">
             {teamB.map((row) => (
-              <PlayerRosterRow key={row.id} row={row} monthly={isMonthlyMatchRow(row, players)} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
+              <PlayerRosterRow key={row.id} row={row} monthly={isMonthlyMatchRow(row, players)} standing={standingForMatchRow(row, players, standings)} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
             ))}
             {teamB.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
           </div>
@@ -987,6 +1032,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const [showAddPlayer, setShowAddPlayer] = useState(false);
   const summary = summarizeMatch(rows);
   const collectionRows = sortRowsWithMonthlyLast(rows, data.players);
+  const standings = useMemo(() => buildPlayerStandings(data), [data]);
 
   if (!match) return <PageTitle title="Match not found" description="No existe en la base de datos." />;
   const currentMatch = match;
@@ -1107,13 +1153,14 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
           <TeamAssignmentBoard
             rows={rows}
             players={data.players}
+            standings={standings}
             onTeamChange={(rowId, team) => updateRow(rows.findIndex((row) => row.id === rowId), { team })}
             onOpenDetails={(rowId) => setEditingIndex(rows.findIndex((row) => row.id === rowId))}
             onRemove={removeRow}
             onAddPlayer={() => setShowAddPlayer(true)}
           />
         ) : (
-          <PublicMatchRows rows={rows} players={data.players} />
+          <PublicMatchRows rows={rows} players={data.players} standings={standings} />
         )}
       </Card>
 
@@ -1132,7 +1179,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <CopyBlock title="Payment pending summary" text={pendingPaymentsMessage(currentMatch, rows)} />
         <CopyBlock title="Teams summary" text={teamsMessage(currentMatch, rows)} />
-        <CopyBlock title="Final result summary" text={finalResultMessage(currentMatch, { id: result?.id ?? "preview", matchId: currentMatch.id, scoreA, scoreB, winner: scoreA === scoreB ? "draw" : scoreA > scoreB ? "A" : "B", notes: resultNotes })} />
+        <CopyBlock title="Match summary" text={matchSummaryMessage(currentMatch, rows)} />
       </div>
 
       <Card className="mt-4 space-y-2">
