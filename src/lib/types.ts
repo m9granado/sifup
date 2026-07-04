@@ -68,6 +68,7 @@ export type MonthlyPayment = {
   amountPaid: number;
   paymentStatus: PaymentStatus;
   note: string;
+  paidAt?: string;
   createdAt: string;
   updatedAt: string;
 };

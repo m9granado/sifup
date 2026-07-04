@@ -77,6 +77,7 @@ type MonthlyPaymentRow = {
   amount_paid: number;
   payment_status: MonthlyPayment["paymentStatus"];
   note: string;
+  paid_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
 };
@@ -180,6 +181,7 @@ export async function getSifupData(): Promise<SifupData> {
       amountPaid: row.amount_paid,
       paymentStatus: row.payment_status,
       note: row.note,
+      paidAt: row.paid_at ? iso(row.paid_at) : undefined,
       createdAt: iso(row.created_at),
       updatedAt: iso(row.updated_at),
     })),
@@ -308,13 +310,14 @@ export async function savePlayer(player: Player) {
 export async function saveMonthlyPayment(payment: MonthlyPayment) {
   const sql = requireDatabase();
   await sql`
-    insert into monthly_payments (id, player_id, month_key, expected_amount, amount_paid, payment_status, note, created_at, updated_at)
-    values (${payment.id}, ${payment.playerId}, ${payment.monthKey}, ${payment.expectedAmount}, ${payment.amountPaid}, ${payment.paymentStatus}, ${payment.note}, ${payment.createdAt}, ${payment.updatedAt})
+    insert into monthly_payments (id, player_id, month_key, expected_amount, amount_paid, payment_status, note, paid_at, created_at, updated_at)
+    values (${payment.id}, ${payment.playerId}, ${payment.monthKey}, ${payment.expectedAmount}, ${payment.amountPaid}, ${payment.paymentStatus}, ${payment.note}, ${payment.paidAt ?? null}, ${payment.createdAt}, ${payment.updatedAt})
     on conflict (player_id, month_key) do update set
       expected_amount = excluded.expected_amount,
       amount_paid = excluded.amount_paid,
       payment_status = excluded.payment_status,
       note = excluded.note,
+      paid_at = excluded.paid_at,
       updated_at = excluded.updated_at
   `;
 }

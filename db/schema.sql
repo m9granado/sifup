@@ -74,10 +74,13 @@ create table if not exists monthly_payments (
   amount_paid integer not null default 0,
   payment_status text not null check (payment_status in ('paid', 'unpaid', 'promised')),
   note text not null default '',
+  paid_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (player_id, month_key)
 );
+
+alter table monthly_payments add column if not exists paid_at timestamptz;
 
 create table if not exists club_finances (
   id text primary key,

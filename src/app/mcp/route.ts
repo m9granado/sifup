@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { addPlayerToMatch, getNextMatchSummary, importWhatsAppMatch } from "@/lib/sifup-service";
+import { addPlayerToMatch, getNextMatchSummary, getPendingPayments, importWhatsAppMatch, registerMonthlyPayment } from "@/lib/sifup-service";
 import { PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "@/lib/sifup-constants";
 
 type ToolResult = {
@@ -78,6 +78,33 @@ function createServer() {
       },
     },
     (input) => runTool(() => addPlayerToMatch(input)),
+  );
+
+  server.registerTool(
+    "register_monthly_payment",
+    {
+      title: "Registrar pago mensual",
+      description: "Marca la mensualidad (oficial) de un jugador como pagada y registra la fecha. Usar cuando alguien avisa que pago. Por defecto usa el mes actual y monto de la cuota.",
+      inputSchema: {
+        name: z.string().optional().describe("Nombre del jugador que pago (o usa playerId)."),
+        playerId: z.string().optional().describe("ID del jugador si se conoce."),
+        monthKey: z.string().optional().describe("Mes YYYY-MM. Default: mes actual."),
+        paid: z.boolean().optional().describe("true para marcar pagado (default), false para revertir a pendiente."),
+      },
+    },
+    (input) => runTool(() => registerMonthlyPayment(input)),
+  );
+
+  server.registerTool(
+    "get_pending_payments",
+    {
+      title: "Pagos pendientes",
+      description: "Lista quien debe: mensualidades del mes y saldos por partido, con totales. Sirve para avisar y hacer seguimiento de cobranza.",
+      inputSchema: {
+        monthKey: z.string().optional().describe("Mes YYYY-MM a revisar. Default: mes actual."),
+      },
+    },
+    (input) => runTool(() => getPendingPayments(input)),
   );
 
   server.registerTool(

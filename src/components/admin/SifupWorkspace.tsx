@@ -401,6 +401,8 @@ function paymentDueLabel(key: string) {
   return `10/${key.slice(5)}`;
 }
 
+const MONTH_ABBR = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+
 function monthlyPaymentFor(player: Player, month: string, existing?: MonthlyPayment): MonthlyPayment {
   if (existing) return existing;
   const now = new Date().toISOString();
@@ -1586,6 +1588,10 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
   const { data, commit } = useSifupData(initialData);
   const [error, setError] = useState("");
   const month = currentMonthKey();
+  const [planYear, setPlanYear] = useState(() => Number(month.slice(0, 4)));
+  const monthlyPlayers = data.players
+    .filter((player) => player.active && player.paymentPlan === "monthly")
+    .sort((a, b) => a.name.localeCompare(b.name));
   const allMonthlyPayments = paymentsWithCurrentMonth(data, month);
   const currentMonthlyPayments = allMonthlyPayments
     .filter((payment) => payment.monthKey === month)
@@ -1610,11 +1616,16 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
       .catch((err) => setError(err instanceof Error ? err.message : "No se pudo marcar como pagado."));
   }
 
-  function markMonthlyPaid(payment: MonthlyPayment) {
-    const updated = { ...payment, paymentStatus: "paid" as const, amountPaid: payment.expectedAmount, updatedAt: new Date().toISOString() };
+  function toggleMonthly(player: Player, monthKey: string, paid: boolean) {
+    const existing = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey);
+    const base = monthlyPaymentFor(player, monthKey, existing);
+    const now = new Date().toISOString();
+    const updated: MonthlyPayment = paid
+      ? { ...base, paymentStatus: "unpaid", amountPaid: 0, paidAt: undefined, updatedAt: now }
+      : { ...base, paymentStatus: "paid", amountPaid: base.expectedAmount, paidAt: now, updatedAt: now };
     saveMonthlyPaymentAction(updated)
       .then(() => commit({ ...data, monthlyPayments: upsertMonthlyPayment(data.monthlyPayments, updated) }))
-      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar la mensualidad."));
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo registrar el pago."));
   }
 
   return (
@@ -1637,23 +1648,18 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
           <p className="mt-3 rounded-md bg-(--cyan)/15 px-3 py-2 text-sm font-bold text-(--cyan)">Por cobrar ahora: {formatCurrency(pending)}.</p>
         </Card>
       </div>
+      <div className="mb-4">
+        <MonthlyPaymentPlan
+          players={monthlyPlayers}
+          payments={data.monthlyPayments}
+          year={planYear}
+          currentMonthKey={month}
+          isAdmin={isAdmin}
+          onToggle={toggleMonthly}
+          onYear={setPlanYear}
+        />
+      </div>
       <div className="grid gap-4 xl:grid-cols-2">
-        <Card className="space-y-3">
-          <div>
-            <h2 className="font-semibold">Mensualidad {monthLabel(month)}</h2>
-            <p className="text-sm text-(--muted)">Vence {paymentDueLabel(month)}. Si una cuota no existe en la base, se muestra como pendiente y se crea al marcarla pagada.</p>
-          </div>
-          {currentMonthlyPayments.map((payment) => {
-            const player = data.players.find((item) => item.id === payment.playerId);
-            const pending = Math.max(payment.expectedAmount - payment.amountPaid, 0);
-            return (
-              <div key={payment.id} className="flex flex-col gap-3 rounded-md border border-(--border) bg-white/[0.04] p-3 sm:flex-row sm:items-center sm:justify-between">
-                <div><p className="font-semibold">{player?.name}</p><p className="text-sm text-(--muted)">{formatCurrency(payment.amountPaid)} / {formatCurrency(payment.expectedAmount)} - pendiente {formatCurrency(pending)}</p></div>
-                <div className="flex items-center gap-2"><PaymentBadge status={payment.paymentStatus} />{isAdmin && pending > 0 ? <Button onClick={() => markMonthlyPaid(payment)}>Pagado</Button> : null}</div>
-              </div>
-            );
-          })}
-        </Card>
         <Card className="space-y-3">
           <h2 className="font-semibold">Por partido</h2>
           {perMatchPending.map((row) => {
@@ -1680,6 +1686,99 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
         </Card>
       </div>
     </>
+  );
+}
+
+function MonthlyPaymentPlan({
+  players,
+  payments,
+  year,
+  currentMonthKey,
+  isAdmin,
+  onToggle,
+  onYear,
+}: {
+  players: Player[];
+  payments: MonthlyPayment[];
+  year: number;
+  currentMonthKey: string;
+  isAdmin: boolean;
+  onToggle: (player: Player, monthKey: string, paid: boolean) => void;
+  onYear: (year: number) => void;
+}) {
+  const months = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0"));
+  return (
+    <Card className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase tracking-wide text-(--cyan)">Plan de pagos mensual</p>
+          <h2 className="mt-1 text-xl font-black text-white">Calendario {year}</h2>
+          <p className="mt-1 text-sm text-(--muted)">Cuota de {formatCurrency(MONTHLY_AMOUNT)}, vence el 10 de cada mes. {isAdmin ? "Marca cada mes cuando el jugador paga: queda registrada la fecha." : "Verde pagado, rojo pendiente."}</p>
+        </div>
+        <div className="flex items-center gap-1">
+          <button type="button" onClick={() => onYear(year - 1)} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-(--border) bg-white/[0.06] text-white transition hover:bg-white/[0.12]" aria-label="Ano anterior">
+            <ChevronLeft size={16} />
+          </button>
+          <span className="min-w-16 rounded-md border border-(--border) bg-white/[0.04] px-3 py-1.5 text-center text-sm font-black text-white">{year}</span>
+          <button type="button" onClick={() => onYear(year + 1)} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-(--border) bg-white/[0.06] text-white transition hover:bg-white/[0.12]" aria-label="Ano siguiente">
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px] border-separate border-spacing-1 text-sm">
+          <thead>
+            <tr>
+              <th className="pr-2 text-left text-[11px] font-black uppercase tracking-wide text-(--muted)">Jugador</th>
+              {MONTH_ABBR.map((label) => (
+                <th key={label} className="text-center text-[11px] font-bold uppercase text-(--muted)">{label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {players.map((player) => (
+              <tr key={player.id}>
+                <td className="whitespace-nowrap pr-2 font-semibold text-white">{player.name}</td>
+                {months.map((mm) => {
+                  const key = `${year}-${mm}`;
+                  const payment = payments.find((item) => item.playerId === player.id && item.monthKey === key);
+                  const paid = payment?.paymentStatus === "paid";
+                  const future = key > currentMonthKey;
+                  const title = paid
+                    ? `Pagado${payment?.paidAt ? ` el ${payment.paidAt.slice(0, 10)}` : ""}`
+                    : future
+                      ? "Mes futuro"
+                      : "Pendiente";
+                  const cls = paid
+                    ? "border-(--green) bg-(--green)/20 text-(--green)"
+                    : future
+                      ? "border-(--border) bg-white/[0.02] text-(--muted)"
+                      : "border-(--red)/35 bg-(--red)/10 text-(--red)";
+                  return (
+                    <td key={mm} className="text-center">
+                      <button
+                        type="button"
+                        disabled={!isAdmin || future}
+                        title={title}
+                        onClick={() => onToggle(player, key, paid)}
+                        className={`h-8 w-full min-w-9 rounded-md border text-xs font-black transition disabled:cursor-not-allowed ${cls} ${isAdmin && !future ? "hover:opacity-80" : ""}`}
+                      >
+                        {paid ? "✓" : future ? "·" : "✗"}
+                      </button>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+            {players.length === 0 ? (
+              <tr>
+                <td colSpan={13} className="py-2 text-sm text-(--muted)">No hay jugadores mensuales activos.</td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 }
 

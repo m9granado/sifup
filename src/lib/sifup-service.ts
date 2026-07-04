@@ -1,13 +1,13 @@
 import "server-only";
 
 import { revalidatePath } from "next/cache";
-import { COURT_COST, PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "./sifup-constants";
+import { COURT_COST, MONTHLY_AMOUNT, PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "./sifup-constants";
 import { monthKey, weekLabel } from "./sifup-date";
 import { parseWhatsAppList } from "./parser";
-import { getSifupData, saveMatchPlayers, saveMatchWithPlayers } from "./repository";
+import { getSifupData, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment } from "./repository";
 import { newId, nextMatch, sortByWhatsappOrder, summarizeMatch } from "./store";
 import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, teamsMessage } from "./whatsapp";
-import type { AttendanceStatus, Match, MatchPlayer, Player, Team } from "./types";
+import type { AttendanceStatus, Match, MatchPlayer, MonthlyPayment, Player, Team } from "./types";
 
 export type ImportWhatsAppMatchInput = {
   message: string;
@@ -150,6 +150,93 @@ function resolveMatch(matches: Match[], input: { matchId?: string; date?: string
   );
 }
 
+function currentMonthKey() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+export type RegisterMonthlyPaymentInput = {
+  name?: string;
+  playerId?: string;
+  monthKey?: string;
+  paid?: boolean;
+};
+
+export async function registerMonthlyPayment(input: RegisterMonthlyPaymentInput) {
+  const data = await getSifupData();
+  const player = input.playerId
+    ? data.players.find((item) => item.id === input.playerId)
+    : input.name
+      ? findKnownPlayer(data.players, input.name)
+      : undefined;
+  if (!player) throw new Error("Jugador no encontrado.");
+  if (player.paymentPlan !== "monthly") throw new Error(`${player.name} no es jugador mensual (oficial).`);
+
+  const targetMonth = input.monthKey ?? currentMonthKey();
+  const paid = input.paid ?? true;
+  const existing = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === targetMonth);
+  const expected = existing?.expectedAmount ?? MONTHLY_AMOUNT;
+  const now = new Date().toISOString();
+  const payment: MonthlyPayment = {
+    id: existing?.id ?? `monthly-${targetMonth}-${player.id}`,
+    playerId: player.id,
+    monthKey: targetMonth,
+    expectedAmount: expected,
+    amountPaid: paid ? expected : 0,
+    paymentStatus: paid ? "paid" : "unpaid",
+    note: existing?.note ?? `Mensualidad ${targetMonth}, vencimiento 10/${targetMonth.slice(5)}`,
+    paidAt: paid ? now : undefined,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+
+  await saveMonthlyPayment(payment);
+  revalidateSifupViews();
+
+  return {
+    status: paid ? "paid" : "unpaid",
+    player: player.name,
+    monthKey: targetMonth,
+    expectedAmount: expected,
+    amountPaid: payment.amountPaid,
+    paidAt: payment.paidAt ?? null,
+    note: paid
+      ? `${player.name} pago la mensualidad de ${targetMonth}.`
+      : `Se marco pendiente la mensualidad de ${player.name} para ${targetMonth}.`,
+  };
+}
+
+export async function getPendingPayments(input: { monthKey?: string } = {}) {
+  const data = await getSifupData();
+  const targetMonth = input.monthKey ?? currentMonthKey();
+
+  const monthlyPending = data.players
+    .filter((player) => player.active && player.paymentPlan === "monthly")
+    .map((player) => {
+      const payment = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === targetMonth);
+      const expected = payment?.expectedAmount ?? MONTHLY_AMOUNT;
+      const amountPaid = payment?.paymentStatus === "paid" ? expected : payment?.amountPaid ?? 0;
+      return { player: player.name, monthKey: targetMonth, expected, pending: Math.max(expected - amountPaid, 0), status: payment?.paymentStatus ?? "unpaid" };
+    })
+    .filter((item) => item.pending > 0);
+
+  const perMatchPending = data.matchPlayers
+    .filter((row) => row.amountDue > row.amountPaid)
+    .map((row) => {
+      const match = data.matches.find((item) => item.id === row.matchId);
+      return { player: row.name, match: match?.weekLabel || match?.date || row.matchId, matchId: row.matchId, pending: Math.max(row.amountDue - row.amountPaid, 0), status: row.paymentStatus };
+    });
+
+  return {
+    monthKey: targetMonth,
+    totals: {
+      monthly: monthlyPending.reduce((sum, item) => sum + item.pending, 0),
+      perMatch: perMatchPending.reduce((sum, item) => sum + item.pending, 0),
+    },
+    monthlyPending,
+    perMatchPending,
+  };
+}
+
 function buildMatchPayload(match: Match, rows: MatchPlayer[], result: Parameters<typeof finalResultMessage>[1], status: "created" | "updated" | "summary" | "unchanged") {
   const sortedRows = sortByWhatsappOrder(rows);
   const summary = summarizeMatch(sortedRows);
@@ -213,12 +300,12 @@ function normalizeName(value: string) {
     .trim();
 }
 
-function revalidateSifupViews(matchId: string) {
+function revalidateSifupViews(matchId?: string) {
   revalidatePath("/dashboard");
   revalidatePath("/matches");
   revalidatePath("/payments");
   revalidatePath("/players");
   revalidatePath("/standings");
-  revalidatePath(`/matches/${matchId}`);
+  if (matchId) revalidatePath(`/matches/${matchId}`);
 }
 
