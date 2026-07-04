@@ -16,7 +16,7 @@ import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
 import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
 import { matchSummaryMessage, pendingPaymentsMessage, teamsMessage } from "@/lib/whatsapp";
-import { COURT_COST, DRAW_POINTS, MONTHLY_AMOUNT, PER_MATCH_AMOUNT, WIN_POINTS } from "@/lib/sifup-constants";
+import { COURT_COST, DRAW_POINTS, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, WIN_POINTS } from "@/lib/sifup-constants";
 import type { ClubExpense, Match, MatchPlayer, MatchResult, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
 
 const sampleInput = `martes 30 junio, 21 horas, agrupacion de sordos:
@@ -83,6 +83,10 @@ function teamLabel(team: Team) {
   if (team === "A") return "Rojo";
   if (team === "B") return "Amarillo";
   return "Sin equipo";
+}
+
+function matchStatusLabel(status: string) {
+  return { open: "Abierto", confirmed: "Confirmado", played: "Jugado", closed: "Cerrado" }[status] ?? status;
 }
 
 function playerForMatchRow(row: Pick<MatchPlayer, "playerId" | "name">, players: Player[]) {
@@ -267,7 +271,7 @@ function PaymentBadge({ status }: { status: PaymentStatus }) {
     unpaid: "bg-(--red)/15 text-(--red) ring-(--red)/30",
     promised: "bg-(--gold)/15 text-(--gold) ring-(--gold)/30",
   };
-  return <span className={`rounded-full px-2 py-1 text-xs font-bold ring-1 ${styles[status]}`}>{status}</span>;
+  return <span className={`rounded-full px-2 py-1 text-xs font-bold ring-1 ${styles[status]}`}>{PAYMENT_STATUS_LABEL[status]}</span>;
 }
 
 function StatusBadge({ value }: { value: string }) {
@@ -491,7 +495,7 @@ export function DashboardPage({ initialData }: InitialDataProps) {
         </div>
       </section>
       <div className="mt-5 flex items-center justify-end">
-        {isAdmin ? <CtaLink href="/matches/new"><Plus size={16} />New match</CtaLink> : null}
+        {isAdmin ? <CtaLink href="/matches/new"><Plus size={16} />Nuevo partido</CtaLink> : null}
       </div>
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: entra como admin para crear partidos y editar pagos." /> : null}
       <div className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
@@ -501,7 +505,7 @@ export function DashboardPage({ initialData }: InitialDataProps) {
               <h2 className="text-lg font-semibold">{match?.weekLabel || match?.date} - {match?.time}</h2>
               <p className="mt-1 text-sm text-(--muted)">{match?.location}</p>
             </div>
-            {match ? <StatusBadge value={match.status} /> : null}
+            {match ? <StatusBadge value={matchStatusLabel(match.status)} /> : null}
           </div>
           <div className="mt-4 divide-y divide-white/10">
             {rows.slice(0, 8).map((row) => (
@@ -512,7 +516,7 @@ export function DashboardPage({ initialData }: InitialDataProps) {
             ))}
           </div>
         </Card>
-        {match ? <CopyBlock title="Clean match summary" text={matchSummaryMessage(match, rows)} /> : null}
+        {match ? <CopyBlock title="Resumen del partido" text={matchSummaryMessage(match, rows)} /> : null}
       </div>
       <div className="mt-4"><PaymentAccountCard data={data} /></div>
     </>
@@ -564,7 +568,7 @@ export function MatchesPage({ initialData }: InitialDataProps) {
   return (
     <>
       <PageTitle
-        title="Matches"
+        title="Partidos"
         description="Martes registrados por semana, pagos y asistencia."
         action={
           isAdmin ? (
@@ -573,7 +577,7 @@ export function MatchesPage({ initialData }: InitialDataProps) {
                 <CalendarPlus size={16} />
                 Crear proximas 2 fechas
               </Button>
-              <CtaLink href="/matches/new"><Plus size={16} />New match</CtaLink>
+              <CtaLink href="/matches/new"><Plus size={16} />Nuevo partido</CtaLink>
             </div>
           ) : undefined
         }
@@ -602,7 +606,7 @@ export function MatchesPage({ initialData }: InitialDataProps) {
                       <p className="mt-1 text-sm text-(--muted)">{match.location}</p>
                     </div>
                     <div className="flex flex-col items-end gap-2">
-                      <StatusBadge value={match.status} />
+                      <StatusBadge value={matchStatusLabel(match.status)} />
                       {match.courtPrepaid ? <span className="rounded-full bg-(--green)/15 px-2 py-1 text-xs font-bold text-(--green) ring-1 ring-(--green)/30">cancha pagada</span> : null}
                     </div>
                   </div>
@@ -743,7 +747,7 @@ export function NewMatchPage({ initialData }: InitialDataProps) {
 
   return (
     <>
-      <PageTitle title="New match" description="Pega la lista WhatsApp, revisa la tabla editable y guarda en la base." />
+      <PageTitle title="Nuevo partido" description="Pega la lista WhatsApp, revisa la tabla editable y guarda en la base." />
       <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
         <Card className="space-y-3">
           <textarea
@@ -752,8 +756,8 @@ export function NewMatchPage({ initialData }: InitialDataProps) {
             className="min-h-72 w-full rounded-md border border-(--border) bg-(--panel-strong) p-3 text-sm text-white outline-none focus:border-(--green) focus:ring-4 focus:ring-(--green)/20"
           />
           <div className="flex flex-wrap gap-2">
-            <Button onClick={parse}><WalletCards size={16} />Paste WhatsApp list</Button>
-            <Button onClick={save} variant="secondary" disabled={isPending}><Save size={16} />Save match</Button>
+            <Button onClick={parse}><WalletCards size={16} />Pegar lista WhatsApp</Button>
+            <Button onClick={save} variant="secondary" disabled={isPending}><Save size={16} />Guardar partido</Button>
           </div>
           {errors.map((error) => <p key={error} className="rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p>)}
         </Card>
@@ -799,11 +803,11 @@ function MatchEditor({
   return (
     <Card className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2">
-        <Input label="Date" type="date" value={match.date} onChange={(date) => setMatch({ ...match, date })} />
-        <Input label="Time" type="time" value={match.time} onChange={(time) => setMatch({ ...match, time })} />
+        <Input label="Fecha" type="date" value={match.date} onChange={(date) => setMatch({ ...match, date })} />
+        <Input label="Hora" type="time" value={match.time} onChange={(time) => setMatch({ ...match, time })} />
         <div className="space-y-1 sm:col-span-2">
           <label className="space-y-1 text-sm font-medium text-(--muted)">
-            <span>Location</span>
+            <span>Ubicacion</span>
             <div className="flex flex-wrap gap-2">
               <input
                 list="known-locations"
@@ -822,7 +826,7 @@ function MatchEditor({
             </div>
           </label>
         </div>
-        <Input label="Total cost" type="number" value={String(match.totalCost)} onChange={(totalCost) => setMatch({ ...match, totalCost: Number(totalCost) })} />
+        <Input label="Costo total" type="number" value={String(match.totalCost)} onChange={(totalCost) => setMatch({ ...match, totalCost: Number(totalCost) })} />
       </div>
       <EditableRows rows={rows} updateRow={updateRow} />
     </Card>
@@ -843,24 +847,24 @@ function EditableRows({
           <div key={`${row.name}-${index}-card`} className="rounded-md border border-(--border) bg-white/[0.04] p-3">
             <div className="grid gap-3">
               <Input label="# WhatsApp" type="number" value={String(row.whatsappOrder || index + 1)} onChange={(value) => updateRow(index, { whatsappOrder: Number(value) })} />
-              <Input label="Player" value={row.name} onChange={(value) => updateRow(index, { name: value })} />
+              <Input label="Jugador" value={row.name} onChange={(value) => updateRow(index, { name: value })} />
               <label className="space-y-1 text-sm font-medium text-(--muted)">
-                <span>Payment</span>
+                <span>Pago</span>
                 <select className="h-10 w-full rounded-md border border-(--border) bg-(--panel-strong) px-3 text-sm text-white" value={row.paymentStatus} onChange={(event) => updateRow(index, { paymentStatus: event.target.value as PaymentStatus })}>
-                  <option value="paid">paid</option><option value="unpaid">unpaid</option><option value="promised">promised</option>
+                  <option value="paid">Pagado</option><option value="unpaid">No pagado</option><option value="promised">Prometido</option>
                 </select>
               </label>
               <div className="grid grid-cols-2 gap-3">
-                <Input label="Due" type="number" value={String(row.amountDue)} onChange={(value) => updateRow(index, { amountDue: Number(value) })} />
-                <Input label="Paid" type="number" value={String(row.amountPaid)} onChange={(value) => updateRow(index, { amountPaid: Number(value) })} />
+                <Input label="Debe" type="number" value={String(row.amountDue)} onChange={(value) => updateRow(index, { amountDue: Number(value) })} />
+                <Input label="Pagado" type="number" value={String(row.amountPaid)} onChange={(value) => updateRow(index, { amountPaid: Number(value) })} />
               </div>
               <label className="space-y-1 text-sm font-medium text-(--muted)">
-                <span>Team</span>
+                <span>Equipo</span>
                 <select className="h-10 w-full rounded-md border border-(--border) bg-(--panel-strong) px-3 text-sm text-white" value={row.team} onChange={(event) => updateRow(index, { team: event.target.value as Team })}>
                   <option value="none">Sin equipo</option><option value="A">Rojo</option><option value="B">Amarillo</option>
                 </select>
               </label>
-              <Input label="Note" value={row.note} onChange={(value) => updateRow(index, { note: value })} />
+              <Input label="Nota" value={row.note} onChange={(value) => updateRow(index, { note: value })} />
             </div>
           </div>
         ))}
@@ -868,14 +872,14 @@ function EditableRows({
       <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[780px] text-left text-sm">
           <thead className="border-b border-(--border) text-xs uppercase text-(--muted)">
-            <tr><th className="py-2 pr-2">#</th><th className="py-2 pr-2">Player</th><th className="py-2 pr-2">Payment</th><th className="py-2 pr-2">Due</th><th className="py-2 pr-2">Paid</th><th className="py-2 pr-2">Team</th><th className="py-2 pr-2">Note</th></tr>
+            <tr><th className="py-2 pr-2">#</th><th className="py-2 pr-2">Jugador</th><th className="py-2 pr-2">Pago</th><th className="py-2 pr-2">Debe</th><th className="py-2 pr-2">Pagado</th><th className="py-2 pr-2">Equipo</th><th className="py-2 pr-2">Nota</th></tr>
           </thead>
           <tbody className="divide-y divide-white/10">
             {rows.map((row, index) => (
               <tr key={`${row.name}-${index}`}>
                 <td className="py-2 pr-2"><input className="h-9 w-16 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" type="number" value={row.whatsappOrder || index + 1} onChange={(event) => updateRow(index, { whatsappOrder: Number(event.target.value) })} /></td>
                 <td className="py-2 pr-2"><input className="h-9 w-44 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" value={row.name} onChange={(event) => updateRow(index, { name: event.target.value })} /></td>
-                <td className="py-2 pr-2"><select className="h-9 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" value={row.paymentStatus} onChange={(event) => updateRow(index, { paymentStatus: event.target.value as PaymentStatus })}><option value="paid">paid</option><option value="unpaid">unpaid</option><option value="promised">promised</option></select></td>
+                <td className="py-2 pr-2"><select className="h-9 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" value={row.paymentStatus} onChange={(event) => updateRow(index, { paymentStatus: event.target.value as PaymentStatus })}><option value="paid">Pagado</option><option value="unpaid">No pagado</option><option value="promised">Prometido</option></select></td>
                 <td className="py-2 pr-2"><input className="h-9 w-24 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" type="number" value={row.amountDue} onChange={(event) => updateRow(index, { amountDue: Number(event.target.value) })} /></td>
                 <td className="py-2 pr-2"><input className="h-9 w-24 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" type="number" value={row.amountPaid} onChange={(event) => updateRow(index, { amountPaid: Number(event.target.value) })} /></td>
                 <td className="py-2 pr-2"><select className="h-9 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" value={row.team} onChange={(event) => updateRow(index, { team: event.target.value as Team })}><option value="none">Sin equipo</option><option value="A">Rojo</option><option value="B">Amarillo</option></select></td>
@@ -1107,16 +1111,16 @@ function PlayerDetailModal({
         <label className="space-y-1 text-sm font-medium text-(--muted)">
           <span>Asistencia</span>
           <select className="h-10 w-full rounded-md border border-(--border) bg-(--panel-strong) px-3 text-sm text-white" value={draft.attendanceStatus} onChange={(event) => setDraft({ ...draft, attendanceStatus: event.target.value as MatchPlayer["attendanceStatus"] })}>
-            <option value="confirmed">confirmed</option>
-            <option value="maybe">maybe</option>
-            <option value="out">out</option>
-            <option value="waitlist">waitlist</option>
+            <option value="confirmed">Confirmado</option>
+            <option value="maybe">Tal vez</option>
+            <option value="out">No puede</option>
+            <option value="waitlist">En espera</option>
           </select>
         </label>
         <Input label="# WhatsApp" type="number" value={String(draft.whatsappOrder)} onChange={(value) => setDraft({ ...draft, whatsappOrder: Number(value) })} />
         <div className="grid grid-cols-2 gap-3">
-          <Input label="Due" type="number" value={String(draft.amountDue)} onChange={(value) => setDraft({ ...draft, amountDue: Number(value) })} />
-          <Input label="Paid" type="number" value={String(draft.amountPaid)} onChange={(value) => setDraft({ ...draft, amountPaid: Number(value) })} />
+          <Input label="Debe" type="number" value={String(draft.amountDue)} onChange={(value) => setDraft({ ...draft, amountDue: Number(value) })} />
+          <Input label="Pagado" type="number" value={String(draft.amountPaid)} onChange={(value) => setDraft({ ...draft, amountPaid: Number(value) })} />
         </div>
         <Input label="Nota" value={draft.note} onChange={(value) => setDraft({ ...draft, note: value })} />
         <Button onClick={() => onSave(draft)}><Save size={16} />Guardar</Button>
@@ -1384,7 +1388,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const collectionRows = sortRowsWithMonthlyLast(rows, data.players);
   const standings = useMemo(() => buildPlayerStandings(data), [data]);
 
-  if (!match) return <PageTitle title="Match not found" description="No existe en la base de datos." />;
+  if (!match) return <PageTitle title="Partido no encontrado" description="No existe en la base de datos." />;
   const currentMatch = match;
   const { previous, next } = adjacentMatches(data.matches, currentMatch.id);
 
@@ -1521,9 +1525,9 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       <div className="mt-4">
         {isAdmin ? (
           <Card className="space-y-3">
-            <h2 className="font-semibold">Final score</h2>
+            <h2 className="font-semibold">Marcador final</h2>
             <div className="grid grid-cols-2 gap-3"><Input label="Rojo" type="number" value={String(scoreA)} onChange={(value) => setScoreA(Number(value))} /><Input label="Amarillo" type="number" value={String(scoreB)} onChange={(value) => setScoreB(Number(value))} /></div>
-            <textarea className="min-h-20 w-full rounded-md border border-(--border) bg-(--panel-strong) p-2 text-sm text-white" value={resultNotes} onChange={(event) => setResultNotes(event.target.value)} placeholder="Result notes" />
+            <textarea className="min-h-20 w-full rounded-md border border-(--border) bg-(--panel-strong) p-2 text-sm text-white" value={resultNotes} onChange={(event) => setResultNotes(event.target.value)} placeholder="Notas del resultado" />
           </Card>
         ) : result && !matchIsUpcoming(currentMatch) ? (
           <Card><h2 className="font-semibold">Resultado final</h2><p className="mt-2 text-2xl font-semibold">Rojo {result.scoreA} - {result.scoreB} Amarillo</p><p className="mt-1 text-sm text-(--muted)">{result.winner === "draw" ? "Empate" : `Gana ${teamLabel(result.winner)}`}</p></Card>
@@ -1531,9 +1535,9 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       </div>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <CopyBlock title="Payment pending summary" text={pendingPaymentsMessage(currentMatch, rows)} />
-        <CopyBlock title="Teams summary" text={teamsMessage(currentMatch, rows)} />
-        <CopyBlock title="Match summary" text={matchSummaryMessage(currentMatch, rows)} />
+        <CopyBlock title="Resumen de pagos pendientes" text={pendingPaymentsMessage(currentMatch, rows)} />
+        <CopyBlock title="Resumen de equipos" text={teamsMessage(currentMatch, rows)} />
+        <CopyBlock title="Resumen del partido" text={matchSummaryMessage(currentMatch, rows)} />
       </div>
 
       <Card className="mt-4 space-y-2">
@@ -1630,7 +1634,7 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
 
   return (
     <>
-      <PageTitle title="Payments" description={`Mensualidades con vencimiento los dias 10, pagos por partido y balance del club.`} />
+      <PageTitle title="Pagos" description={`Mensualidades con vencimiento los dias 10, pagos por partido y balance del club.`} />
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: el marcado de pagos queda reservado para admin." /> : null}
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
       <div className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -1839,10 +1843,10 @@ export function PlayersPage({ initialData }: InitialDataProps) {
 
   return (
     <>
-      <PageTitle title="Players" description={isAdmin ? "Oficiales: mensualidad del mes actual e historico de pagos. Galletas: deuda acumulada por partido." : "Lista publica de jugadores activos."} />
+      <PageTitle title="Jugadores" description={isAdmin ? "Oficiales: mensualidad del mes actual e historico de pagos. Galletas: deuda acumulada por partido." : "Lista publica de jugadores activos."} />
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: telefonos, WhatsApp y edicion quedan ocultos." /> : null}
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
-      {isAdmin ? <Card className="mb-4 flex gap-2"><input className="h-10 min-w-0 flex-1 rounded-md border border-(--border) bg-(--panel-strong) px-3 text-sm text-white" value={name} onChange={(event) => setName(event.target.value)} placeholder="New player name" /><Button onClick={addPlayer}><Plus size={16} />Add</Button></Card> : null}
+      {isAdmin ? <Card className="mb-4 flex gap-2"><input className="h-10 min-w-0 flex-1 rounded-md border border-(--border) bg-(--panel-strong) px-3 text-sm text-white" value={name} onChange={(event) => setName(event.target.value)} placeholder="Nombre del jugador nuevo" /><Button onClick={addPlayer}><Plus size={16} />Agregar</Button></Card> : null}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="space-y-3">
           <h2 className="font-semibold">Oficiales</h2>
@@ -2165,7 +2169,7 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
   const match = data.matches.find((item) => item.id === id);
   const rows = data.matchPlayers.filter((row) => row.matchId === id);
 
-  if (!match) return <PageTitle title="Match not found" description="No existe en la base de datos." />;
+  if (!match) return <PageTitle title="Partido no encontrado" description="No existe en la base de datos." />;
 
   const teamA = rows.filter((row) => row.team === "A");
   const teamB = rows.filter((row) => row.team === "B");
