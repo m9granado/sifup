@@ -16,7 +16,7 @@ import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
 import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
 import { matchSummaryMessage, pendingPaymentsMessage, teamsMessage } from "@/lib/whatsapp";
-import { COURT_COST, DRAW_POINTS, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, WIN_POINTS } from "@/lib/sifup-constants";
+import { COURT_COST, DRAW_POINTS, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, SQUAD_TARGET, WIN_POINTS } from "@/lib/sifup-constants";
 import type { ClubExpense, Match, MatchPlayer, MatchResult, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
 
 const sampleInput = `martes 30 junio, 21 horas, agrupacion de sordos:
@@ -894,10 +894,11 @@ function EditableRows({
 }
 
 function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; players: Player[]; standings: Map<string, PlayerStanding> }) {
-  const sortedRows = sortRowsWithMonthlyLast(rows, players);
+  const confirmedRows = sortRowsWithMonthlyLast(rows.filter((row) => row.attendanceStatus === "confirmed"), players);
+  const outRows = rows.filter((row) => row.attendanceStatus === "out");
   return (
     <div className="space-y-2">
-      {sortedRows.map((row, index) => {
+      {confirmedRows.map((row, index) => {
         const monthly = isMonthlyMatchRow(row, players);
         const pending = pendingForMatchRow(row);
         const standing = standingForMatchRow(row, players, standings);
@@ -916,6 +917,16 @@ function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; pl
         </div>
         );
       })}
+      {outRows.length > 0 ? (
+        <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">No pueden ({outRows.length})</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {outRows.map((row) => (
+              <span key={row.id} className="rounded-md border border-white/10 bg-black/15 px-2 py-1 text-xs font-bold text-(--muted)">{row.name}</span>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -983,25 +994,27 @@ function TeamAssignmentBoard({
   onAddPlayer: () => void;
   onResetTeams: () => void;
 }) {
-  const teamA = sortRowsWithMonthlyLast(rows.filter((row) => row.team === "A"), players);
-  const teamB = sortRowsWithMonthlyLast(rows.filter((row) => row.team === "B"), players);
-  const unassigned = sortRowsWithMonthlyLast(rows.filter((row) => row.team === "none"), players);
-  const pendingAmount = summarizeMatch(rows).pendingAmount;
+  const teamA = sortRowsWithMonthlyLast(rows.filter((row) => row.team === "A" && row.attendanceStatus === "confirmed"), players);
+  const teamB = sortRowsWithMonthlyLast(rows.filter((row) => row.team === "B" && row.attendanceStatus === "confirmed"), players);
+  const unassigned = sortRowsWithMonthlyLast(rows.filter((row) => row.team === "none" && row.attendanceStatus === "confirmed"), players);
+  const outRows = sortRowsWithMonthlyLast(rows.filter((row) => row.attendanceStatus === "out"), players);
   const pointsA = teamRankingPoints(rows, players, standings, "A");
   const pointsB = teamRankingPoints(rows, players, standings, "B");
+  const confirmedCount = teamA.length + teamB.length + unassigned.length;
+  const missing = Math.max(SQUAD_TARGET - confirmedCount, 0);
 
   return (
     <div className="space-y-4">
       <TeamSuggestionPreview rows={rows} players={players} standings={standings} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="rounded-md border border-(--pink)/35 bg-(--pink)/10 px-3 py-2">
-          <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Falta recaudar</p>
-          <p className="text-xl font-black text-(--pink)">{formatCurrency(pendingAmount)}</p>
+        <div className={`rounded-md border px-3 py-2 ${missing > 0 ? "border-(--gold)/40 bg-(--gold)/10" : "border-(--green)/40 bg-(--green)/10"}`}>
+          <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Plantel</p>
+          <p className={`text-xl font-black ${missing > 0 ? "text-(--gold)" : "text-(--green)"}`}>{confirmedCount}/{SQUAD_TARGET} · faltan {missing}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={onResetTeams}>
+          <Button onClick={onResetTeams}>
             <Sparkles size={16} />
-            Reiniciar equipos equilibrados
+            Reiniciar equipos
           </Button>
           <Button variant="secondary" onClick={onAddPlayer}>
             <UserPlus size={16} />
@@ -1041,6 +1054,38 @@ function TeamAssignmentBoard({
             {teamB.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
           </div>
         </div>
+      </div>
+      {outRows.length > 0 ? (
+        <div className="space-y-2 rounded-md border border-white/10 bg-white/[0.03] p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">No pueden ({outRows.length})</p>
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {outRows.map((row) => (
+              <OutPlayerRow key={row.id} row={row} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function OutPlayerRow({ row, onOpenDetails, onRemove }: { row: MatchPlayer; onOpenDetails: () => void; onRemove: () => void }) {
+  const whatsapp = whatsappHref(row.phone);
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-md border border-white/10 bg-black/15 px-3 py-2">
+      <p className="min-w-0 truncate text-sm font-semibold text-(--muted)"><span className="mr-2 text-xs">#{row.whatsappOrder || "-"}</span>{row.name}</p>
+      <div className="flex items-center gap-1">
+        {whatsapp ? (
+          <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15" aria-label={`WhatsApp ${row.name}`}>
+            <MessageCircle size={16} />
+          </a>
+        ) : null}
+        <button type="button" onClick={onOpenDetails} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14]" aria-label={`Editar ${row.name}`}>
+          <Pencil size={16} />
+        </button>
+        <button type="button" onClick={onRemove} className="rounded-md p-1.5 text-(--red) hover:bg-(--red)/15" aria-label={`Quitar ${row.name} del partido`}>
+          <UserMinus size={16} />
+        </button>
       </div>
     </div>
   );
@@ -1199,6 +1244,12 @@ function MatchHero({
   const pointsB = teamRankingTotal(rows, players, standings, "B");
   const topRanked = rankedConfirmedRows(rows, players, standings)[0];
   const topStanding = topRanked ? standingForMatchRow(topRanked, players, standings) : undefined;
+  const confirmed = summary.confirmedCount;
+  const missing = Math.max(SQUAD_TARGET - confirmed, 0);
+  const monthlyConfirmed = rows.filter((row) => row.attendanceStatus === "confirmed" && isMonthlyMatchRow(row, players)).length;
+  const galletasConfirmed = confirmed - monthlyConfirmed;
+  const activeMonthly = players.filter((player) => player.active && player.paymentPlan === "monthly").length;
+  const galletasNeeded = Math.max(SQUAD_TARGET - activeMonthly, 0);
 
   return (
     <section className="overflow-hidden rounded-xl border border-(--border) bg-(--panel) shadow-(--shadow)">
@@ -1248,21 +1299,22 @@ function MatchHero({
           <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-lg border border-(--cyan)/40 bg-(--cyan)/12 p-4">
               <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Confirmados</p>
-              <p className="mt-2 text-5xl font-black leading-none text-white">{summary.confirmedCount}</p>
+              <p className="mt-2 text-5xl font-black leading-none text-white">{confirmed}<span className="text-2xl text-(--muted)">/{SQUAD_TARGET}</span></p>
+            </div>
+            <div className={`rounded-lg border p-4 ${missing > 0 ? "border-(--gold)/45 bg-(--gold)/12" : "border-(--green)/45 bg-(--green)/12"}`}>
+              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Faltan para 12</p>
+              <p className={`mt-2 text-5xl font-black leading-none ${missing > 0 ? "text-(--gold)" : "text-(--green)"}`}>{missing}</p>
+              <p className="mt-1 text-sm font-bold text-(--muted)">{missing > 0 ? "jugadores por sumar" : "plantel completo"}</p>
+            </div>
+            <div className="rounded-lg border border-(--cyan)/40 bg-(--cyan)/12 p-4">
+              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Mensuales</p>
+              <p className="mt-2 text-5xl font-black leading-none text-white">{monthlyConfirmed}</p>
+              <p className="mt-1 text-sm font-bold text-(--muted)">oficiales confirmados</p>
             </div>
             <div className="rounded-lg border border-(--pink)/40 bg-(--pink)/12 p-4">
-              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Falta cobrar</p>
-              <p className="mt-2 text-3xl font-black leading-none text-(--pink)">{formatCurrency(summary.pendingAmount)}</p>
-            </div>
-            <div className="rounded-lg border border-(--red)/35 bg-(--red)/12 p-4">
-              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Rojo</p>
-              <p className="mt-2 text-3xl font-black leading-none text-white">{teamA.length} jug.</p>
-              <p className="mt-1 text-sm font-bold text-(--red)">{pointsA} pts ranking</p>
-            </div>
-            <div className="rounded-lg border border-(--gold)/45 bg-(--gold)/12 p-4">
-              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Amarillo</p>
-              <p className="mt-2 text-3xl font-black leading-none text-white">{teamB.length} jug.</p>
-              <p className="mt-1 text-sm font-bold text-(--gold)">{pointsB} pts ranking</p>
+              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Galletas</p>
+              <p className="mt-2 text-5xl font-black leading-none text-white">{galletasConfirmed}</p>
+              <p className="mt-1 text-sm font-bold text-(--pink)">necesitas {galletasNeeded} si o si</p>
             </div>
           </div>
 
@@ -1270,7 +1322,7 @@ function MatchHero({
             <div className="rounded-lg border border-(--red)/35 bg-(--red)/10 p-4">
               <p className="text-sm font-black uppercase tracking-wide text-(--red)">Equipo Rojo</p>
               <p className="mt-2 text-5xl font-black leading-none text-white">{showResult ? result?.scoreA : teamA.length}</p>
-              <p className="mt-1 text-xs font-bold uppercase text-(--muted)">{showResult ? "goles" : "jugadores"}</p>
+              <p className="mt-1 text-xs font-bold uppercase text-(--muted)">{showResult ? "goles" : `jugadores · ${pointsA} pts`}</p>
             </div>
             <div className="grid place-items-center">
               <span className="rounded-full border border-white/15 bg-white/[0.08] px-4 py-2 text-sm font-black text-white">VS</span>
@@ -1278,7 +1330,7 @@ function MatchHero({
             <div className="rounded-lg border border-(--gold)/45 bg-(--gold)/10 p-4 lg:text-right">
               <p className="text-sm font-black uppercase tracking-wide text-(--gold)">Equipo Amarillo</p>
               <p className="mt-2 text-5xl font-black leading-none text-white">{showResult ? result?.scoreB : teamB.length}</p>
-              <p className="mt-1 text-xs font-bold uppercase text-(--muted)">{showResult ? "goles" : "jugadores"}</p>
+              <p className="mt-1 text-xs font-bold uppercase text-(--muted)">{showResult ? "goles" : `jugadores · ${pointsB} pts`}</p>
             </div>
           </div>
 
@@ -1292,81 +1344,6 @@ function MatchHero({
         </div>
       </div>
     </section>
-  );
-}
-
-function MatchPlayerCard({ row, players, standings }: { row: MatchPlayer; players: Player[]; standings: Map<string, PlayerStanding> }) {
-  const standing = standingForMatchRow(row, players, standings);
-  const monthly = isMonthlyMatchRow(row, players);
-  const pending = pendingForMatchRow(row);
-  return (
-    <article className="rounded-lg border border-white/10 bg-black/15 p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-base font-black text-white"><span className="mr-2 text-xs text-(--muted)">#{row.whatsappOrder || "-"}</span>{row.name}</p>
-          <p className="mt-1 text-xs font-bold uppercase tracking-wide text-(--gold)">{standing ? `Ranking #${standing.rank} · ${standing.points} pts` : "Sin ranking"}</p>
-        </div>
-        <span className="shrink-0 rounded-md bg-white/[0.08] px-2 py-1 text-xs font-black text-white">{standing?.points ?? 0}</span>
-      </div>
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        {monthly ? <span className="rounded bg-(--cyan)/20 px-1.5 py-0.5 text-[10px] font-black uppercase text-(--cyan)">Mensual</span> : null}
-        <PaymentBadge status={row.paymentStatus} />
-        <span className="rounded-full bg-white/[0.08] px-2 py-1 text-xs font-semibold text-(--muted) ring-1 ring-(--border)">{formatCurrency(pending)}</span>
-      </div>
-    </article>
-  );
-}
-
-function MatchTeamsShowcase({ rows, players, standings }: { rows: MatchPlayer[]; players: Player[]; standings: Map<string, PlayerStanding> }) {
-  const teamA = rankedConfirmedRows(rows.filter((row) => row.team === "A"), players, standings);
-  const teamB = rankedConfirmedRows(rows.filter((row) => row.team === "B"), players, standings);
-  const outRows = rows.filter((row) => row.attendanceStatus === "out");
-  const unassigned = rankedConfirmedRows(rows.filter((row) => row.team === "none"), players, standings);
-  return (
-    <Card className="mt-4 space-y-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-xs font-black uppercase tracking-wide text-(--lime)">Alineacion por ranking</p>
-          <h2 className="mt-1 text-2xl font-black text-white">Jugadores del partido</h2>
-        </div>
-        <p className="text-sm font-bold text-(--muted)">Ordenado por ranking actual dentro de cada equipo.</p>
-      </div>
-      <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr] lg:items-start">
-        <div className="space-y-2 rounded-lg border-2 border-(--red)/35 bg-(--red)/10 p-3">
-          <p className="text-sm font-black uppercase tracking-wide text-(--red)">Rojo · {teamA.length}</p>
-          <div className="space-y-2">
-            {teamA.map((row) => <MatchPlayerCard key={row.id} row={row} players={players} standings={standings} />)}
-            {teamA.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
-          </div>
-        </div>
-        <div className="hidden justify-center pt-8 lg:flex">
-          <span className="rounded-full bg-white/[0.12] px-3 py-1 text-xs font-black text-(--muted)">VS</span>
-        </div>
-        <div className="space-y-2 rounded-lg border-2 border-(--gold)/45 bg-(--gold)/10 p-3">
-          <p className="text-sm font-black uppercase tracking-wide text-(--gold)">Amarillo · {teamB.length}</p>
-          <div className="space-y-2">
-            {teamB.map((row) => <MatchPlayerCard key={row.id} row={row} players={players} standings={standings} />)}
-            {teamB.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
-          </div>
-        </div>
-      </div>
-      {unassigned.length > 0 ? (
-        <div className="rounded-lg border border-(--border) bg-white/[0.04] p-3">
-          <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Sin equipo</p>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {unassigned.map((row) => <MatchPlayerCard key={row.id} row={row} players={players} standings={standings} />)}
-          </div>
-        </div>
-      ) : null}
-      {outRows.length > 0 ? (
-        <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
-          <p className="text-xs font-black uppercase tracking-wide text-(--muted)">No pueden</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {outRows.map((row) => <span key={row.id} className="rounded-md border border-white/10 bg-black/15 px-2 py-1 text-xs font-bold text-(--muted)">{row.name}</span>)}
-          </div>
-        </div>
-      ) : null}
-    </Card>
   );
 }
 
@@ -1499,12 +1476,10 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: equipos, resultado y pagos son solo lectura." /> : null}
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
-      <MatchTeamsShowcase rows={rows} players={data.players} standings={standings} />
-
       <Card className="mt-4 space-y-3">
         <div>
-          <p className="text-xs font-black uppercase tracking-wide text-(--muted)">{isAdmin ? "Admin" : "Detalle"}</p>
-          <h2 className="mt-1 text-xl font-black text-white">{isAdmin ? "Editar equipos y jugadores" : "Lista de jugadores"}</h2>
+          <p className="text-xs font-black uppercase tracking-wide text-(--muted)">{isAdmin ? "Plantel y equipos" : "Jugadores"}</p>
+          <h2 className="mt-1 text-xl font-black text-white">{isAdmin ? "Arma el partido" : "Lista de jugadores"}</h2>
         </div>
         {isAdmin ? (
           <TeamAssignmentBoard
