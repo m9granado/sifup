@@ -1,9 +1,9 @@
 import type { Match, MatchPlayer, MatchResult } from "./types";
 import { formatCurrency, sortByWhatsappOrder, whatsappOrderFor } from "./store";
+import { PUBLIC_BASE_URL } from "./sifup-constants";
 
 const MINIMUM_PLAYERS = 12;
 const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
-const PUBLIC_BASE_URL = "https://sifup.vercel.app";
 
 export function matchSummaryMessage(match: Match, players: MatchPlayer[]) {
   const confirmed = sortByWhatsappOrder(players.filter((player) => player.attendanceStatus === "confirmed"));

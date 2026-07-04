@@ -1,7 +1,30 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { getNextMatchSummary, importWhatsAppMatch } from "@/lib/sifup-service";
+import { addPlayerToMatch, getNextMatchSummary, importWhatsAppMatch } from "@/lib/sifup-service";
+import { PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "@/lib/sifup-constants";
+
+type ToolResult = {
+  content: { type: "text"; text: string }[];
+  structuredContent?: Record<string, unknown>;
+  isError?: boolean;
+};
+
+async function runTool(handler: () => Promise<unknown>): Promise<ToolResult> {
+  try {
+    const result = await handler();
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result as Record<string, unknown>,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Error desconocido en la herramienta.";
+    return {
+      content: [{ type: "text", text: `Error: ${message}` }],
+      isError: true,
+    };
+  }
+}
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -21,7 +44,7 @@ function createServer() {
     name: "sifup",
     title: "SIFUP",
     version: "0.1.0",
-    websiteUrl: "https://sifup.vercel.app",
+    websiteUrl: PUBLIC_BASE_URL,
     description: "MCP para gestionar partidos, listas WhatsApp y resumenes operativos de SIFUP.",
   });
 
@@ -29,20 +52,32 @@ function createServer() {
     "import_whatsapp_match",
     {
       title: "Importar lista WhatsApp",
-      description: "Parsea una lista de WhatsApp y crea o reemplaza los jugadores de un partido SIFUP.",
+      description: "Parsea una lista de WhatsApp y crea o REEMPLAZA por completo los jugadores de un partido (borra equipos y pagos previos). Para sumar una sola persona sin perder la lista, usa add_player_to_match.",
       inputSchema: {
         message: z.string().min(1).describe("Mensaje completo de WhatsApp."),
         matchId: z.string().optional().describe("ID del partido a actualizar. Si se omite, se busca por fecha y hora."),
-        amountDue: z.number().int().positive().optional().describe("Monto por jugador no mensual. Default: 3500."),
+        amountDue: z.number().int().positive().optional().describe(`Monto por jugador no mensual. Default: ${PER_MATCH_AMOUNT}.`),
       },
     },
-    async (input) => {
-      const result = await importWhatsAppMatch(input);
-      return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        structuredContent: result,
-      };
+    (input) => runTool(() => importWhatsAppMatch(input)),
+  );
+
+  server.registerTool(
+    "add_player_to_match",
+    {
+      title: "Agregar jugador al partido",
+      description: "Suma un jugador al partido indicado (o al proximo si no se entrega uno) sin tocar al resto de la lista, los equipos ni los pagos. Vincula al jugador si ya existe en el club.",
+      inputSchema: {
+        name: z.string().min(1).describe("Nombre del jugador a agregar."),
+        matchId: z.string().optional().describe("ID del partido. Si se omite, se usa el proximo partido."),
+        date: z.string().optional().describe("Fecha YYYY-MM-DD del partido si no se entrega matchId."),
+        phone: z.string().optional().describe("Telefono del jugador (opcional)."),
+        attendanceStatus: z.enum(["confirmed", "maybe", "out", "waitlist"]).optional().describe("Estado de asistencia. Default: confirmed."),
+        team: z.enum(["A", "B", "none"]).optional().describe("Equipo: A (Rojo), B (Amarillo) o none. Default: none."),
+        amountDue: z.number().int().positive().optional().describe(`Monto a cobrar si no es mensual. Default: ${PER_MATCH_AMOUNT}.`),
+      },
     },
+    (input) => runTool(() => addPlayerToMatch(input)),
   );
 
   server.registerTool(
@@ -55,13 +90,7 @@ function createServer() {
         date: z.string().optional().describe("Fecha YYYY-MM-DD a consultar si no se entrega matchId."),
       },
     },
-    async (input) => {
-      const result = await getNextMatchSummary(input);
-      return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        structuredContent: result,
-      };
-    },
+    (input) => runTool(() => getNextMatchSummary(input)),
   );
 
   return server;

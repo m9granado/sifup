@@ -16,6 +16,7 @@ import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
 import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
 import { matchSummaryMessage, pendingPaymentsMessage, teamsMessage } from "@/lib/whatsapp";
+import { COURT_COST, DRAW_POINTS, MONTHLY_AMOUNT, PER_MATCH_AMOUNT, WIN_POINTS } from "@/lib/sifup-constants";
 import type { ClubExpense, Match, MatchPlayer, MatchResult, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
 
 const sampleInput = `martes 30 junio, 21 horas, agrupacion de sordos:
@@ -32,12 +33,6 @@ const sampleInput = `martes 30 junio, 21 horas, agrupacion de sordos:
 10. Mario Quintana (pagado)
 11. Alonso Duran (pago manana)
 12. Felipe arquero (galleta Cooper)`;
-
-const PER_MATCH_AMOUNT = 3500;
-const MONTHLY_AMOUNT = 20000;
-const COURT_COST = 35000;
-const WIN_POINTS = 4;
-const DRAW_POINTS = 2;
 
 type InitialDataProps = { initialData: SifupData };
 type PlayerStanding = {

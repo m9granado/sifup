@@ -1,13 +1,13 @@
 import "server-only";
 
 import { revalidatePath } from "next/cache";
-import { COURT_COST, PER_MATCH_AMOUNT } from "./sifup-constants";
+import { COURT_COST, PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "./sifup-constants";
 import { monthKey, weekLabel } from "./sifup-date";
 import { parseWhatsAppList } from "./parser";
-import { getSifupData, saveMatchWithPlayers } from "./repository";
+import { getSifupData, saveMatchPlayers, saveMatchWithPlayers } from "./repository";
 import { newId, nextMatch, sortByWhatsappOrder, summarizeMatch } from "./store";
 import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, teamsMessage } from "./whatsapp";
-import type { Match, MatchPlayer, Player } from "./types";
+import type { AttendanceStatus, Match, MatchPlayer, Player, Team } from "./types";
 
 export type ImportWhatsAppMatchInput = {
   message: string;
@@ -73,10 +73,7 @@ export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MA
 
 export async function getNextMatchSummary(input: { matchId?: string; date?: string } = {}) {
   const data = await getSifupData();
-  const match =
-    (input.matchId ? data.matches.find((item) => item.id === input.matchId) : undefined) ??
-    (input.date ? data.matches.find((item) => item.date === input.date) : undefined) ??
-    nextMatch(data.matches);
+  const match = resolveMatch(data.matches, input);
 
   if (!match) throw new Error("No hay partidos registrados.");
 
@@ -85,7 +82,75 @@ export async function getNextMatchSummary(input: { matchId?: string; date?: stri
   return buildMatchPayload(match, rows, result, "summary");
 }
 
-function buildMatchPayload(match: Match, rows: MatchPlayer[], result: Parameters<typeof finalResultMessage>[1], status: "created" | "updated" | "summary") {
+export type AddPlayerToMatchInput = {
+  name: string;
+  matchId?: string;
+  date?: string;
+  phone?: string;
+  attendanceStatus?: AttendanceStatus;
+  team?: Team;
+  amountDue?: number;
+};
+
+export async function addPlayerToMatch(input: AddPlayerToMatchInput) {
+  const name = input.name?.trim();
+  if (!name) throw new Error("Falta el nombre del jugador.");
+
+  const data = await getSifupData();
+  const match = resolveMatch(data.matches, input);
+  if (!match) throw new Error("No hay partido para actualizar.");
+
+  const currentRows = data.matchPlayers.filter((row) => row.matchId === match.id);
+  const result = data.results.find((item) => item.matchId === match.id);
+  const known = findKnownPlayer(data.players, name);
+  const already = currentRows.find(
+    (row) => (known && row.playerId === known.id) || normalizeName(row.name) === normalizeName(name),
+  );
+  if (already) {
+    const payload = buildMatchPayload(match, currentRows, result, "unchanged");
+    return { ...payload, note: `${already.name} ya estaba en la lista del partido.` };
+  }
+
+  const attendanceStatus = input.attendanceStatus ?? "confirmed";
+  const out = attendanceStatus === "out";
+  const monthly = known?.paymentPlan === "monthly";
+  const amountDue = input.amountDue ?? PER_MATCH_AMOUNT;
+  const now = new Date().toISOString();
+  const newRow: MatchPlayer = {
+    id: newId("mp"),
+    matchId: match.id,
+    playerId: known?.id,
+    name: known?.name ?? name,
+    phone: input.phone ?? known?.phone ?? "",
+    attendanceStatus,
+    paymentStatus: out || monthly ? "paid" : "unpaid",
+    amountDue: out || monthly ? 0 : amountDue,
+    amountPaid: 0,
+    note: out ? "No puede" : monthly ? "mensualidad" : "",
+    team: out ? "none" : input.team ?? "none",
+    whatsappOrder: Math.max(0, ...currentRows.map((row) => row.whatsappOrder || 0)) + 1,
+    goals: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const nextRows = [...currentRows, newRow];
+  await saveMatchPlayers(match.id, nextRows);
+  revalidateSifupViews(match.id);
+
+  const payload = buildMatchPayload(match, nextRows, result, "updated");
+  return { ...payload, note: `${newRow.name} agregado al partido en el puesto #${newRow.whatsappOrder}.` };
+}
+
+function resolveMatch(matches: Match[], input: { matchId?: string; date?: string }) {
+  return (
+    (input.matchId ? matches.find((item) => item.id === input.matchId) : undefined) ??
+    (input.date ? matches.find((item) => item.date === input.date) : undefined) ??
+    nextMatch(matches)
+  );
+}
+
+function buildMatchPayload(match: Match, rows: MatchPlayer[], result: Parameters<typeof finalResultMessage>[1], status: "created" | "updated" | "summary" | "unchanged") {
   const sortedRows = sortByWhatsappOrder(rows);
   const summary = summarizeMatch(sortedRows);
   const confirmed = sortedRows.filter((row) => row.attendanceStatus === "confirmed");
@@ -106,7 +171,7 @@ function buildMatchPayload(match: Match, rows: MatchPlayer[], result: Parameters
       teams: teamsMessage(match, sortedRows),
       finalResult: finalResultMessage(match, result),
     },
-    url: `https://sifup.vercel.app/matches/${match.id}`,
+    url: `${PUBLIC_BASE_URL}/matches/${match.id}`,
   };
 }
 
