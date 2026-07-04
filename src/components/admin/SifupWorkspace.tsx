@@ -44,6 +44,13 @@ type PlayerStanding = {
   rank: number;
   points: number;
 };
+type TeamAssignableRow = Pick<MatchPlayer, "attendanceStatus" | "name" | "playerId" | "team" | "whatsappOrder">;
+type RankedTeamRow<T extends TeamAssignableRow> = {
+  row: T;
+  index: number;
+  standing?: PlayerStanding;
+  suggestedTeam: Team;
+};
 
 function useSifupData(initialData: SifupData) {
   const [data, setData] = useState<SifupData>(initialData);
@@ -83,7 +90,7 @@ function teamLabel(team: Team) {
   return "Sin equipo";
 }
 
-function playerForMatchRow(row: MatchPlayer, players: Player[]) {
+function playerForMatchRow(row: Pick<MatchPlayer, "playerId" | "name">, players: Player[]) {
   return players.find((player) => player.id === row.playerId) ?? findKnownPlayer(players, row.name);
 }
 
@@ -120,9 +127,62 @@ function buildPlayerStandings(data: SifupData) {
   }));
 }
 
-function standingForMatchRow(row: MatchPlayer, players: Player[], standings: Map<string, PlayerStanding>) {
+function standingForMatchRow(row: Pick<MatchPlayer, "playerId" | "name">, players: Player[], standings: Map<string, PlayerStanding>) {
   const player = playerForMatchRow(row, players);
   return standings.get(player?.id ?? "") ?? standings.get(row.name.toLowerCase());
+}
+
+function rowOrder(row: Pick<MatchPlayer, "whatsappOrder"> & Partial<Pick<MatchPlayer, "id">>, index: number) {
+  if (row.whatsappOrder || row.id) return whatsappOrderFor(row as MatchPlayer);
+  return index + 1;
+}
+
+function suggestedTeamForRank(pairIndex: number, positionInPair: number): Team {
+  if (positionInPair > 1) return "none";
+  const invertedPair = pairIndex % 2 === 1;
+  if (!invertedPair) return positionInPair === 0 ? "A" : "B";
+  return positionInPair === 0 ? "B" : "A";
+}
+
+function buildRankedTeamRows<T extends TeamAssignableRow>(rows: T[], players: Player[], standings: Map<string, PlayerStanding>) {
+  const rankedRows = rows
+    .map((row, index) => ({
+      row,
+      index,
+      standing: standingForMatchRow(row, players, standings),
+    }))
+    .filter((item) => item.row.attendanceStatus === "confirmed")
+    .sort((a, b) => {
+      const rankA = a.standing?.rank ?? Number.MAX_SAFE_INTEGER;
+      const rankB = b.standing?.rank ?? Number.MAX_SAFE_INTEGER;
+      if (rankA !== rankB) return rankA - rankB;
+      const pointsA = a.standing?.points ?? -1;
+      const pointsB = b.standing?.points ?? -1;
+      if (pointsA !== pointsB) return pointsB - pointsA;
+      return rowOrder(a.row, a.index) - rowOrder(b.row, b.index) || a.row.name.localeCompare(b.row.name);
+    });
+
+  return rankedRows.map((item, rankedIndex): RankedTeamRow<T> => ({
+    ...item,
+    suggestedTeam: suggestedTeamForRank(Math.floor(rankedIndex / 2), rankedIndex % 2),
+  }));
+}
+
+function applyBalancedTeams<T extends TeamAssignableRow>(rows: T[], players: Player[], standings: Map<string, PlayerStanding>) {
+  const assignments = new Map<number, Team>();
+  buildRankedTeamRows(rows, players, standings).forEach((item) => {
+    assignments.set(item.index, item.suggestedTeam);
+  });
+  return rows.map((row, index) => ({
+    ...row,
+    team: row.attendanceStatus === "confirmed" ? assignments.get(index) ?? "none" : "none",
+  }));
+}
+
+function teamRankingPoints<T extends TeamAssignableRow>(rows: T[], players: Player[], standings: Map<string, PlayerStanding>, team: "A" | "B") {
+  return rows
+    .filter((row) => row.team === team && row.attendanceStatus === "confirmed")
+    .reduce((sum, row) => sum + (standingForMatchRow(row, players, standings)?.points ?? 0), 0);
 }
 
 function pendingForMatchRow(row: MatchPlayer) {
@@ -564,6 +624,52 @@ export function MatchesPage({ initialData }: InitialDataProps) {
   );
 }
 
+function TeamSuggestionPreview<T extends TeamAssignableRow>({ rows, players, standings }: { rows: T[]; players: Player[]; standings: Map<string, PlayerStanding> }) {
+  const rankedRows = buildRankedTeamRows(rows, players, standings);
+  const teamA = rankedRows.filter((item) => item.suggestedTeam === "A");
+  const teamB = rankedRows.filter((item) => item.suggestedTeam === "B");
+  const pointsA = teamA.reduce((sum, item) => sum + (item.standing?.points ?? 0), 0);
+  const pointsB = teamB.reduce((sum, item) => sum + (item.standing?.points ?? 0), 0);
+  const pairs = Array.from({ length: Math.ceil(rankedRows.length / 2) }, (_, index) => rankedRows.slice(index * 2, index * 2 + 2));
+
+  if (rankedRows.length === 0) {
+    return (
+      <div className="rounded-md border border-(--border) bg-white/[0.04] p-3">
+        <p className="text-sm font-semibold text-white">Sin jugadores confirmados para sugerir equipos.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 rounded-md border border-(--border) bg-white/[0.04] p-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-black uppercase tracking-wide text-white">Sugerencia automatica por ranking</p>
+          <p className="mt-1 text-xs text-(--muted)">El #1 enfrenta al #2, el #3 al #4, y asi sigue. Los colores se alternan por pareja para equilibrar puntos.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-right text-xs font-black uppercase">
+          <span className="rounded-md border border-(--red)/35 bg-(--red)/10 px-3 py-2 text-(--red)">Rojo {teamA.length} - {pointsA} pts</span>
+          <span className="rounded-md border border-(--gold)/40 bg-(--gold)/10 px-3 py-2 text-(--gold)">Amarillo {teamB.length} - {pointsB} pts</span>
+        </div>
+      </div>
+      <div className="grid gap-2 lg:grid-cols-2">
+        {pairs.map((pair, pairIndex) => (
+          <div key={pairIndex} className="grid gap-2 rounded-md border border-white/10 bg-black/10 p-2 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+            {pair.map((item) => (
+              <div key={`${item.index}-${item.row.name}`} className={`rounded-md border px-3 py-2 ${item.suggestedTeam === "A" ? "border-(--red)/35 bg-(--red)/10" : "border-(--gold)/40 bg-(--gold)/10"}`}>
+                <p className="text-xs font-black uppercase tracking-wide text-(--muted)">#{item.standing?.rank ?? "SR"} - {teamLabel(item.suggestedTeam)}</p>
+                <p className="truncate font-semibold text-white">{item.row.name}</p>
+                <p className="text-xs font-semibold text-(--gold)">{item.standing?.points ?? 0} pts</p>
+              </div>
+            ))}
+            {pair.length === 2 ? <span className="hidden rounded-full bg-white/[0.1] px-2 py-1 text-center text-[10px] font-black text-(--muted) sm:block">VS</span> : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function NewMatchPage({ initialData }: InitialDataProps) {
   const router = useRouter();
   const { data, commit } = useSifupData(initialData);
@@ -572,16 +678,20 @@ export function NewMatchPage({ initialData }: InitialDataProps) {
   const [match, setMatch] = useState({ date: "", time: "21:00", location: "", totalCost: COURT_COST, notes: "" });
   const [rows, setRows] = useState<Omit<MatchPlayer, "id" | "matchId" | "createdAt" | "updatedAt">[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
+  const standings = useMemo(() => buildPlayerStandings(data), [data]);
 
   function parse() {
     const parsed = parseWhatsAppList(raw, PER_MATCH_AMOUNT);
     setMatch({ ...parsed.match, totalCost: COURT_COST });
-    setRows(parsed.players);
+    setRows(applyBalancedTeams(parsed.players, data.players, standings));
     setErrors(parsed.errors);
   }
 
   function updateRow(index: number, patch: Partial<(typeof rows)[number]>) {
-    setRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)));
+    setRows((current) => {
+      const nextRows = current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row));
+      return applyBalancedTeams(nextRows, data.players, standings);
+    });
   }
 
   function save() {
@@ -606,7 +716,8 @@ export function NewMatchPage({ initialData }: InitialDataProps) {
       createdAt: now,
       updatedAt: now,
     };
-    const nextRows: MatchPlayer[] = rows.map((row) => {
+    const balancedRows = applyBalancedTeams(rows, data.players, standings);
+    const nextRows: MatchPlayer[] = balancedRows.map((row) => {
       const player = findKnownPlayer(data.players, row.name);
       const monthly = player?.paymentPlan === "monthly";
       return {
@@ -649,7 +760,10 @@ export function NewMatchPage({ initialData }: InitialDataProps) {
           </div>
           {errors.map((error) => <p key={error} className="rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p>)}
         </Card>
-        <MatchEditor match={match} setMatch={setMatch} rows={rows} updateRow={updateRow} knownLocations={data.matches.map((item) => item.location)} lastLocation={data.matches[0]?.location ?? ""} />
+        <div className="space-y-4">
+          <TeamSuggestionPreview rows={rows} players={data.players} standings={standings} />
+          <MatchEditor match={match} setMatch={setMatch} rows={rows} updateRow={updateRow} knownLocations={data.matches.map((item) => item.location)} lastLocation={data.matches[0]?.location ?? ""} />
+        </div>
       </div>
     </>
   );
@@ -857,6 +971,7 @@ function TeamAssignmentBoard({
   onOpenDetails,
   onRemove,
   onAddPlayer,
+  onResetTeams,
 }: {
   rows: MatchPlayer[];
   players: Player[];
@@ -865,23 +980,33 @@ function TeamAssignmentBoard({
   onOpenDetails: (rowId: string) => void;
   onRemove: (rowId: string) => void;
   onAddPlayer: () => void;
+  onResetTeams: () => void;
 }) {
   const teamA = sortRowsWithMonthlyLast(rows.filter((row) => row.team === "A"), players);
   const teamB = sortRowsWithMonthlyLast(rows.filter((row) => row.team === "B"), players);
   const unassigned = sortRowsWithMonthlyLast(rows.filter((row) => row.team === "none"), players);
   const pendingAmount = summarizeMatch(rows).pendingAmount;
+  const pointsA = teamRankingPoints(rows, players, standings, "A");
+  const pointsB = teamRankingPoints(rows, players, standings, "B");
 
   return (
     <div className="space-y-4">
+      <TeamSuggestionPreview rows={rows} players={players} standings={standings} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="rounded-md border border-(--pink)/35 bg-(--pink)/10 px-3 py-2">
           <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Falta recaudar</p>
           <p className="text-xl font-black text-(--pink)">{formatCurrency(pendingAmount)}</p>
         </div>
-        <Button variant="secondary" onClick={onAddPlayer}>
-          <UserPlus size={16} />
-          Agregar jugador
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={onResetTeams}>
+            <Sparkles size={16} />
+            Reiniciar equipos equilibrados
+          </Button>
+          <Button variant="secondary" onClick={onAddPlayer}>
+            <UserPlus size={16} />
+            Agregar jugador
+          </Button>
+        </div>
       </div>
       {unassigned.length > 0 ? (
         <div className="space-y-2 rounded-md border border-(--border) bg-white/[0.04] p-3">
@@ -895,7 +1020,7 @@ function TeamAssignmentBoard({
       ) : null}
       <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr] lg:items-start">
         <div className="space-y-2 rounded-md border-2 border-(--red)/35 bg-(--red)/10 p-3">
-          <p className="text-sm font-bold text-(--red)">Equipo Rojo ({teamA.length})</p>
+          <p className="text-sm font-bold text-(--red)">Equipo Rojo ({teamA.length}) - {pointsA} pts ranking</p>
           <div className="space-y-2">
             {teamA.map((row) => (
               <PlayerRosterRow key={row.id} row={row} monthly={isMonthlyMatchRow(row, players)} standing={standingForMatchRow(row, players, standings)} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
@@ -907,7 +1032,7 @@ function TeamAssignmentBoard({
           <span className="rounded-full bg-white/[0.12] px-3 py-1 text-xs font-bold text-(--muted)">VS</span>
         </div>
         <div className="space-y-2 rounded-md border-2 border-(--gold)/35 bg-(--gold)/10 p-3">
-          <p className="text-sm font-bold text-(--gold)">Equipo Amarillo ({teamB.length})</p>
+          <p className="text-sm font-bold text-(--gold)">Equipo Amarillo ({teamB.length}) - {pointsB} pts ranking</p>
           <div className="space-y-2">
             {teamB.map((row) => (
               <PlayerRosterRow key={row.id} row={row} monthly={isMonthlyMatchRow(row, players)} standing={standingForMatchRow(row, players, standings)} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
@@ -1100,6 +1225,20 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
     });
   }
 
+  function resetBalancedTeams() {
+    const nextRows = applyBalancedTeams(rows, data.players, standings).map((row) => ({ ...row, updatedAt: new Date().toISOString() }));
+    setRows(nextRows);
+    startTransition(async () => {
+      try {
+        await saveMatchDetailAction(currentMatch.id, nextRows, result);
+        commit(replaceMatchPlayers(data, currentMatch.id, nextRows));
+        setError("");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo reiniciar los equipos.");
+      }
+    });
+  }
+
   function togglePayment(row: MatchPlayer, index: number) {
     const nextStatus = row.paymentStatus === "paid" ? "unpaid" : "paid";
     setPaymentPending(row.id);
@@ -1158,6 +1297,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             onOpenDetails={(rowId) => setEditingIndex(rows.findIndex((row) => row.id === rowId))}
             onRemove={removeRow}
             onAddPlayer={() => setShowAddPlayer(true)}
+            onResetTeams={resetBalancedTeams}
           />
         ) : (
           <PublicMatchRows rows={rows} players={data.players} standings={standings} />

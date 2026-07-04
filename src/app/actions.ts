@@ -48,7 +48,7 @@ export async function createMatchAction(match: Match, rows: MatchPlayer[]) {
   revalidateAdminViews(match.id);
 }
 
-export async function saveMatchDetailAction(matchId: string, rows: MatchPlayer[], result: MatchResult) {
+export async function saveMatchDetailAction(matchId: string, rows: MatchPlayer[], result?: MatchResult) {
   await requireAdmin();
   await saveMatchPlayers(matchId, rows, result);
   revalidateAdminViews(matchId);
