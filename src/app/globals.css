@@ -2,8 +2,8 @@
 @import "./admin-theme.css";
 
 :root {
-  --background: #ffffff;
-  --foreground: #111827;
+  --background: #030706;
+  --foreground: #ffffff;
 }
 
 @theme inline {
