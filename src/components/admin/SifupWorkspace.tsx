@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, ChevronLeft, ChevronRight, Clipboard, Medal, MessageCircle, Pencil, Plus, Save, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
+import { CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, Clipboard, MapPin, Medal, MessageCircle, Pencil, Plus, Save, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
 import {
   createMatchAction,
   markMatchPlayerPaidAction,
@@ -1141,6 +1141,234 @@ function PaymentCollectionRow({ row, monthly, onToggle, disabled }: { row: Match
   );
 }
 
+function matchDateTime(match: Match) {
+  return new Date(`${match.date}T${match.time || "00:00"}`);
+}
+
+function matchIsUpcoming(match: Match) {
+  return matchDateTime(match) >= new Date();
+}
+
+function rankedConfirmedRows(rows: MatchPlayer[], players: Player[], standings: Map<string, PlayerStanding>) {
+  return rows
+    .filter((row) => row.attendanceStatus === "confirmed")
+    .sort((a, b) => {
+      const rankA = standingForMatchRow(a, players, standings)?.rank ?? Number.MAX_SAFE_INTEGER;
+      const rankB = standingForMatchRow(b, players, standings)?.rank ?? Number.MAX_SAFE_INTEGER;
+      if (rankA !== rankB) return rankA - rankB;
+      return whatsappOrderFor(a) - whatsappOrderFor(b) || a.name.localeCompare(b.name);
+    });
+}
+
+function teamRankingTotal(rows: MatchPlayer[], players: Player[], standings: Map<string, PlayerStanding>, team: "A" | "B") {
+  return rows
+    .filter((row) => row.team === team && row.attendanceStatus === "confirmed")
+    .reduce((sum, row) => sum + (standingForMatchRow(row, players, standings)?.points ?? 0), 0);
+}
+
+function MatchHero({
+  match,
+  rows,
+  result,
+  players,
+  standings,
+  isAdmin,
+  onSave,
+  isPending,
+  previous,
+  next,
+}: {
+  match: Match;
+  rows: MatchPlayer[];
+  result?: MatchResult;
+  players: Player[];
+  standings: Map<string, PlayerStanding>;
+  isAdmin: boolean;
+  onSave: () => void;
+  isPending: boolean;
+  previous?: Match;
+  next?: Match;
+}) {
+  const summary = summarizeMatch(rows);
+  const upcoming = matchIsUpcoming(match);
+  const showResult = Boolean(result && !upcoming);
+  const teamA = rows.filter((row) => row.team === "A" && row.attendanceStatus === "confirmed");
+  const teamB = rows.filter((row) => row.team === "B" && row.attendanceStatus === "confirmed");
+  const pointsA = teamRankingTotal(rows, players, standings, "A");
+  const pointsB = teamRankingTotal(rows, players, standings, "B");
+  const topRanked = rankedConfirmedRows(rows, players, standings)[0];
+  const topStanding = topRanked ? standingForMatchRow(topRanked, players, standings) : undefined;
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-(--border) bg-(--panel) shadow-(--shadow)">
+      <div className="relative overflow-hidden border-b border-(--border) p-5 sm:p-6">
+        <div className="absolute inset-0 bg-[url('/brand/sifup-keyvisual-v1.png')] bg-cover bg-center opacity-20" aria-hidden="true" />
+        <div className="absolute inset-0 bg-gradient-to-r from-(--bg-deep) via-(--bg-deep)/90 to-(--bg-deep)/55" aria-hidden="true" />
+        <div className="relative">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0">
+              <div className="label-row mb-3">
+                <span>SIFUP</span>
+                <strong>{upcoming ? "Partido por jugar" : showResult ? "Resultado cerrado" : "Partido"}</strong>
+              </div>
+              <h1 className="max-w-3xl text-4xl font-black uppercase leading-none text-white sm:text-6xl">{match.weekLabel || match.date}</h1>
+              <div className="mt-4 flex flex-wrap gap-3 text-sm font-bold">
+                <p className="flex items-center gap-2 text-white">
+                  <CalendarDays size={16} className="text-(--cyan)" />
+                  <span>{match.date} · {match.time}</span>
+                </p>
+                <p className="flex items-start gap-2 text-(--muted)">
+                  <MapPin size={16} className="mt-0.5 text-(--gold)" />
+                  <span>{match.location}</span>
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {previous ? (
+                <Link href={`/matches/${previous.id}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
+                  <ChevronLeft size={16} />
+                  Anterior
+                </Link>
+              ) : null}
+              {next ? (
+                <Link href={`/matches/${next.id}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
+                  Proximo
+                  <ChevronRight size={16} />
+                </Link>
+              ) : null}
+              <Link href={`/matches/${match.id}/teams`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
+                <Users size={16} />
+                Equipos
+              </Link>
+              {isAdmin ? <Button onClick={onSave} disabled={isPending}><Save size={16} />Guardar</Button> : null}
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-lg border border-(--cyan)/40 bg-(--cyan)/12 p-4">
+              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Confirmados</p>
+              <p className="mt-2 text-5xl font-black leading-none text-white">{summary.confirmedCount}</p>
+            </div>
+            <div className="rounded-lg border border-(--pink)/40 bg-(--pink)/12 p-4">
+              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Falta cobrar</p>
+              <p className="mt-2 text-3xl font-black leading-none text-(--pink)">{formatCurrency(summary.pendingAmount)}</p>
+            </div>
+            <div className="rounded-lg border border-(--red)/35 bg-(--red)/12 p-4">
+              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Rojo</p>
+              <p className="mt-2 text-3xl font-black leading-none text-white">{teamA.length} jug.</p>
+              <p className="mt-1 text-sm font-bold text-(--red)">{pointsA} pts ranking</p>
+            </div>
+            <div className="rounded-lg border border-(--gold)/45 bg-(--gold)/12 p-4">
+              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Amarillo</p>
+              <p className="mt-2 text-3xl font-black leading-none text-white">{teamB.length} jug.</p>
+              <p className="mt-1 text-sm font-bold text-(--gold)">{pointsB} pts ranking</p>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
+            <div className="rounded-lg border border-(--red)/35 bg-(--red)/10 p-4">
+              <p className="text-sm font-black uppercase tracking-wide text-(--red)">Equipo Rojo</p>
+              <p className="mt-2 text-5xl font-black leading-none text-white">{showResult ? result?.scoreA : teamA.length}</p>
+              <p className="mt-1 text-xs font-bold uppercase text-(--muted)">{showResult ? "goles" : "jugadores"}</p>
+            </div>
+            <div className="grid place-items-center">
+              <span className="rounded-full border border-white/15 bg-white/[0.08] px-4 py-2 text-sm font-black text-white">VS</span>
+            </div>
+            <div className="rounded-lg border border-(--gold)/45 bg-(--gold)/10 p-4 lg:text-right">
+              <p className="text-sm font-black uppercase tracking-wide text-(--gold)">Equipo Amarillo</p>
+              <p className="mt-2 text-5xl font-black leading-none text-white">{showResult ? result?.scoreB : teamB.length}</p>
+              <p className="mt-1 text-xs font-bold uppercase text-(--muted)">{showResult ? "goles" : "jugadores"}</p>
+            </div>
+          </div>
+
+          {topRanked ? (
+            <div className="mt-5 rounded-lg border border-(--gold)/35 bg-black/25 p-4">
+              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Jugador mejor rankeado del partido</p>
+              <p className="mt-2 text-xl font-black text-white">{topRanked.name}</p>
+              <p className="mt-1 text-sm font-bold text-(--gold)">Ranking #{topStanding?.rank ?? "SR"} · {topStanding?.points ?? 0} pts · {teamLabel(topRanked.team)}</p>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MatchPlayerCard({ row, players, standings }: { row: MatchPlayer; players: Player[]; standings: Map<string, PlayerStanding> }) {
+  const standing = standingForMatchRow(row, players, standings);
+  const monthly = isMonthlyMatchRow(row, players);
+  const pending = pendingForMatchRow(row);
+  return (
+    <article className="rounded-lg border border-white/10 bg-black/15 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-base font-black text-white"><span className="mr-2 text-xs text-(--muted)">#{row.whatsappOrder || "-"}</span>{row.name}</p>
+          <p className="mt-1 text-xs font-bold uppercase tracking-wide text-(--gold)">{standing ? `Ranking #${standing.rank} · ${standing.points} pts` : "Sin ranking"}</p>
+        </div>
+        <span className="shrink-0 rounded-md bg-white/[0.08] px-2 py-1 text-xs font-black text-white">{standing?.points ?? 0}</span>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {monthly ? <span className="rounded bg-(--cyan)/20 px-1.5 py-0.5 text-[10px] font-black uppercase text-(--cyan)">Mensual</span> : null}
+        <PaymentBadge status={row.paymentStatus} />
+        <span className="rounded-full bg-white/[0.08] px-2 py-1 text-xs font-semibold text-(--muted) ring-1 ring-(--border)">{formatCurrency(pending)}</span>
+      </div>
+    </article>
+  );
+}
+
+function MatchTeamsShowcase({ rows, players, standings }: { rows: MatchPlayer[]; players: Player[]; standings: Map<string, PlayerStanding> }) {
+  const teamA = rankedConfirmedRows(rows.filter((row) => row.team === "A"), players, standings);
+  const teamB = rankedConfirmedRows(rows.filter((row) => row.team === "B"), players, standings);
+  const outRows = rows.filter((row) => row.attendanceStatus === "out");
+  const unassigned = rankedConfirmedRows(rows.filter((row) => row.team === "none"), players, standings);
+  return (
+    <Card className="mt-4 space-y-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase tracking-wide text-(--lime)">Alineacion por ranking</p>
+          <h2 className="mt-1 text-2xl font-black text-white">Jugadores del partido</h2>
+        </div>
+        <p className="text-sm font-bold text-(--muted)">Ordenado por ranking actual dentro de cada equipo.</p>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr] lg:items-start">
+        <div className="space-y-2 rounded-lg border-2 border-(--red)/35 bg-(--red)/10 p-3">
+          <p className="text-sm font-black uppercase tracking-wide text-(--red)">Rojo · {teamA.length}</p>
+          <div className="space-y-2">
+            {teamA.map((row) => <MatchPlayerCard key={row.id} row={row} players={players} standings={standings} />)}
+            {teamA.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
+          </div>
+        </div>
+        <div className="hidden justify-center pt-8 lg:flex">
+          <span className="rounded-full bg-white/[0.12] px-3 py-1 text-xs font-black text-(--muted)">VS</span>
+        </div>
+        <div className="space-y-2 rounded-lg border-2 border-(--gold)/45 bg-(--gold)/10 p-3">
+          <p className="text-sm font-black uppercase tracking-wide text-(--gold)">Amarillo · {teamB.length}</p>
+          <div className="space-y-2">
+            {teamB.map((row) => <MatchPlayerCard key={row.id} row={row} players={players} standings={standings} />)}
+            {teamB.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
+          </div>
+        </div>
+      </div>
+      {unassigned.length > 0 ? (
+        <div className="rounded-lg border border-(--border) bg-white/[0.04] p-3">
+          <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Sin equipo</p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {unassigned.map((row) => <MatchPlayerCard key={row.id} row={row} players={players} standings={standings} />)}
+          </div>
+        </div>
+      ) : null}
+      {outRows.length > 0 ? (
+        <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+          <p className="text-xs font-black uppercase tracking-wide text-(--muted)">No pueden</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {outRows.map((row) => <span key={row.id} className="rounded-md border border-white/10 bg-black/15 px-2 py-1 text-xs font-bold text-(--muted)">{row.name}</span>)}
+          </div>
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
 export function MatchDetailPage({ id, initialData }: { id: string } & InitialDataProps) {
   const isAdmin = useIsAdmin();
   const { data, commit } = useSifupData(initialData);
@@ -1255,39 +1483,28 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
 
   return (
     <>
-      <PageTitle
-        title={`${currentMatch.weekLabel || currentMatch.date} - ${currentMatch.time}`}
-        description={`${currentMatch.date} - ${currentMatch.location}`}
-        action={
-          <div className="flex flex-wrap gap-2">
-            {previous ? (
-              <Link href={`/matches/${previous.id}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
-                <ChevronLeft size={16} />
-                Anterior
-              </Link>
-            ) : null}
-            {next ? (
-              <Link href={`/matches/${next.id}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
-                Proximo
-                <ChevronRight size={16} />
-              </Link>
-            ) : null}
-            <Link href={`/matches/${currentMatch.id}/teams`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
-              <Users size={16} />
-              Ver equipos
-            </Link>
-            {isAdmin ? <Button onClick={save} disabled={isPending}><Save size={16} />Save match</Button> : null}
-          </div>
-        }
+      <MatchHero
+        match={currentMatch}
+        rows={rows}
+        result={result}
+        players={data.players}
+        standings={standings}
+        isAdmin={isAdmin}
+        onSave={save}
+        isPending={isPending}
+        previous={previous}
+        next={next}
       />
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: equipos, resultado y pagos son solo lectura." /> : null}
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Confirmed" value={summary.confirmedCount} /><Stat label="Paid" value={summary.paidCount} /><Stat label="Unpaid/promised" value={summary.unpaidCount + summary.promisedCount} /><Stat label="Pending" value={formatCurrency(summary.pendingAmount)} />
-      </div>
 
-      <Card className="mt-4">
-        <h2 className="mb-3 font-semibold">Jugadores y equipos</h2>
+      <MatchTeamsShowcase rows={rows} players={data.players} standings={standings} />
+
+      <Card className="mt-4 space-y-3">
+        <div>
+          <p className="text-xs font-black uppercase tracking-wide text-(--muted)">{isAdmin ? "Admin" : "Detalle"}</p>
+          <h2 className="mt-1 text-xl font-black text-white">{isAdmin ? "Editar equipos y jugadores" : "Lista de jugadores"}</h2>
+        </div>
         {isAdmin ? (
           <TeamAssignmentBoard
             rows={rows}
@@ -1311,7 +1528,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             <div className="grid grid-cols-2 gap-3"><Input label="Rojo" type="number" value={String(scoreA)} onChange={(value) => setScoreA(Number(value))} /><Input label="Amarillo" type="number" value={String(scoreB)} onChange={(value) => setScoreB(Number(value))} /></div>
             <textarea className="min-h-20 w-full rounded-md border border-(--border) bg-(--panel-strong) p-2 text-sm text-white" value={resultNotes} onChange={(event) => setResultNotes(event.target.value)} placeholder="Result notes" />
           </Card>
-        ) : result ? (
+        ) : result && !matchIsUpcoming(currentMatch) ? (
           <Card><h2 className="font-semibold">Resultado final</h2><p className="mt-2 text-2xl font-semibold">Rojo {result.scoreA} - {result.scoreB} Amarillo</p><p className="mt-1 text-sm text-(--muted)">{result.winner === "draw" ? "Empate" : `Gana ${teamLabel(result.winner)}`}</p></Card>
         ) : null}
       </div>
