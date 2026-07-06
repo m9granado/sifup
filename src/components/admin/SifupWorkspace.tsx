@@ -1859,7 +1859,7 @@ function GalletaMatchBreakdown({
   isAdmin: boolean;
   onMarkPaid: (row: MatchPlayer) => void;
 }) {
-  const allowedMonths = new Set(recentMonthKeys(2));
+  const allowedMonths = new Set(recentMonthKeys(4));
   const matches = [...data.matches].filter((match) => allowedMonths.has(match.monthKey)).sort((a, b) => a.date.localeCompare(b.date));
 
   const playersByKey = new Map<string, GalletaPlayerRow>();
@@ -1879,7 +1879,7 @@ function GalletaMatchBreakdown({
     <Card className="space-y-4">
       <div>
         <h2 className="font-semibold">Galletas por partido</h2>
-        <p className="text-sm text-(--muted)">Cobro por partido de los ultimos dos meses. {isAdmin ? "Toca una celda pendiente para marcarla pagada." : ""}</p>
+        <p className="text-sm text-(--muted)">Cobro por partido de los ultimos meses. {isAdmin ? "Toca una celda pendiente para marcarla pagada." : ""}</p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[520px] border-separate border-spacing-x-1 border-spacing-y-1.5 text-sm">
@@ -1888,17 +1888,20 @@ function GalletaMatchBreakdown({
               <th className="pr-2 text-left text-[11px] font-black uppercase tracking-wide text-(--muted)">Jugador</th>
               {matches.map((match) => (
                 <th key={match.id} title={match.weekLabel} className="text-center text-[11px] font-bold uppercase text-(--muted)">
-                  {matchDateLabel(match.date)}
+                  <Link href={`/matches/${match.id}`} className="hover:text-(--cyan)">{matchDateLabel(match.date)}</Link>
                 </th>
               ))}
+              <th className="text-center text-[11px] font-black uppercase tracking-wide text-(--muted)">Total</th>
             </tr>
           </thead>
           <tbody>
             {players.map((player) => (
               <tr key={player.key}>
                 <td className="whitespace-nowrap pr-2">
-                  <p className="font-semibold text-white">{player.name}</p>
-                  {player.pending > 0 ? <p className="text-xs font-bold text-(--gold)">Debe {formatCurrency(player.pending)}</p> : null}
+                  <p className="font-semibold text-white">
+                    {player.name}
+                    {player.pending > 0 ? <span className="ml-1.5 font-bold text-(--red)">({formatCurrency(player.pending)})</span> : null}
+                  </p>
                 </td>
                 {matches.map((match) => {
                   const row = player.byMatch.get(match.id);
@@ -1929,11 +1932,14 @@ function GalletaMatchBreakdown({
                     </td>
                   );
                 })}
+                <td className={`text-center text-sm font-black ${player.pending > 0 ? "text-(--red)" : "text-(--green)"}`}>
+                  {player.pending > 0 ? formatCurrency(player.pending) : "-"}
+                </td>
               </tr>
             ))}
             {players.length === 0 ? (
               <tr>
-                <td colSpan={matches.length + 1} className="py-2 text-sm text-(--muted)">No hay galletas registradas en los ultimos dos meses.</td>
+                <td colSpan={matches.length + 2} className="py-2 text-sm text-(--muted)">No hay galletas registradas en los ultimos meses.</td>
               </tr>
             ) : null}
           </tbody>
