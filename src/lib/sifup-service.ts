@@ -276,6 +276,73 @@ function publicMatchPlayer(row: MatchPlayer) {
   };
 }
 
+export type FindPlayerInput = {
+  query: string;
+  limit?: number;
+};
+
+export async function findPlayer({ query, limit = 5 }: FindPlayerInput) {
+  const data = await getSifupData();
+  const candidates = rankPlayerCandidates(data.players, query).slice(0, limit);
+
+  return {
+    query,
+    matches: candidates.map(({ player, matchType, score }) => ({
+      id: player.id,
+      name: player.name,
+      nickname: player.nickname,
+      active: player.active,
+      paymentPlan: player.paymentPlan,
+      skillLevel: player.skillLevel,
+      matchType,
+      score,
+    })),
+  };
+}
+
+type PlayerMatchType = "exact" | "prefix" | "nickname" | "contains" | "nickname-contains" | "token";
+
+function rankPlayerCandidates(players: Player[], name: string) {
+  const target = normalizeName(name);
+  const ranked: { player: Player; matchType: PlayerMatchType; score: number }[] = [];
+
+  for (const player of players) {
+    const match = scorePlayerMatch(player, target);
+    if (match) ranked.push({ player, ...match });
+  }
+
+  return ranked.sort((a, b) => b.score - a.score);
+}
+
+function scorePlayerMatch(player: Player, target: string): { matchType: PlayerMatchType; score: number } | null {
+  const playerName = normalizeName(player.name);
+  const nickname = normalizeName(player.nickname);
+
+  if (target === playerName || (nickname && target === nickname)) return { matchType: "exact", score: 100 };
+
+  if (target.length >= 3 && (playerName.startsWith(target) || target.startsWith(playerName))) {
+    return { matchType: "prefix", score: 85 };
+  }
+
+  if (nickname && target.length >= 2 && (nickname.startsWith(target) || target.startsWith(nickname))) {
+    return { matchType: "nickname", score: 80 };
+  }
+
+  if (playerName.includes(target) || target.includes(playerName)) {
+    return { matchType: "contains", score: 65 };
+  }
+
+  if (nickname && (nickname.includes(target) || target.includes(nickname))) {
+    return { matchType: "nickname-contains", score: 60 };
+  }
+
+  const targetTokens = new Set(target.split(" ").filter(Boolean));
+  const overlap = playerName.split(" ").filter((token) => token && targetTokens.has(token)).length;
+  if (overlap > 0) return { matchType: "token", score: 40 + overlap * 10 };
+
+  return null;
+}
+
 function findKnownPlayer(players: Player[], name: string) {
   const target = normalizeName(name);
   return players.find((player) => {

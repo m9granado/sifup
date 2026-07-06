@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { addPlayerToMatch, getNextMatchSummary, getPendingPayments, importWhatsAppMatch, registerMonthlyPayment } from "@/lib/sifup-service";
+import { addPlayerToMatch, findPlayer, getNextMatchSummary, getPendingPayments, importWhatsAppMatch, registerMonthlyPayment } from "@/lib/sifup-service";
 import { PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "@/lib/sifup-constants";
 
 type ToolResult = {
@@ -60,6 +60,19 @@ function createServer() {
       },
     },
     (input) => runTool(() => importWhatsAppMatch(input)),
+  );
+
+  server.registerTool(
+    "find_player",
+    {
+      title: "Buscar jugador",
+      description: "Busca jugadores existentes del club por nombre o apodo y devuelve candidatos ordenados por coincidencia (exacta, apodo, prefijo, token). Usalo para validar a que jugador corresponde un nombre de WhatsApp antes de importar la lista o agregar a alguien, y asi evitar duplicados.",
+      inputSchema: {
+        query: z.string().min(1).describe("Nombre o apodo a buscar."),
+        limit: z.number().int().positive().max(20).optional().describe("Cantidad maxima de candidatos. Default: 5."),
+      },
+    },
+    (input) => runTool(() => findPlayer(input)),
   );
 
   server.registerTool(
