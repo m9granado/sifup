@@ -1829,6 +1829,27 @@ function recentMonthKeys(count: number) {
   return keys;
 }
 
+function normalizeName(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function matchDateLabel(date: string) {
+  const parsed = new Date(`${date}T12:00:00`);
+  return `${parsed.getDate()} ${MONTH_ABBR[parsed.getMonth()].toLowerCase()}`;
+}
+
+type GalletaPlayerRow = {
+  key: string;
+  name: string;
+  byMatch: Map<string, MatchPlayer>;
+  pending: number;
+};
+
 function GalletaMatchBreakdown({
   data,
   isAdmin,
@@ -1839,50 +1860,90 @@ function GalletaMatchBreakdown({
   onMarkPaid: (row: MatchPlayer) => void;
 }) {
   const allowedMonths = new Set(recentMonthKeys(2));
-  const matches = [...data.matches].filter((match) => allowedMonths.has(match.monthKey)).sort((a, b) => b.date.localeCompare(a.date));
-  const matchRows = matches
-    .map((match) => ({
-      match,
-      rows: data.matchPlayers.filter((row) => row.matchId === match.id && isGalletaRow(row, data.players)).sort((a, b) => a.whatsappOrder - b.whatsappOrder),
-    }))
-    .filter((entry) => entry.rows.length > 0);
+  const matches = [...data.matches].filter((match) => allowedMonths.has(match.monthKey)).sort((a, b) => a.date.localeCompare(b.date));
+
+  const playersByKey = new Map<string, GalletaPlayerRow>();
+  for (const match of matches) {
+    const rows = data.matchPlayers.filter((row) => row.matchId === match.id && isGalletaRow(row, data.players));
+    for (const row of rows) {
+      const key = row.playerId ?? `name:${normalizeName(row.name)}`;
+      const entry = playersByKey.get(key) ?? { key, name: row.name, byMatch: new Map(), pending: 0 };
+      entry.byMatch.set(match.id, row);
+      if (row.attendanceStatus !== "out") entry.pending += Math.max(row.amountDue - row.amountPaid, 0);
+      playersByKey.set(key, entry);
+    }
+  }
+  const players = [...playersByKey.values()].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <Card className="space-y-4">
       <div>
         <h2 className="font-semibold">Galletas por partido</h2>
-        <p className="text-sm text-(--muted)">Cobro por partido de los ultimos dos meses. {isAdmin ? "Marca pagado cuando alguien te transfiere." : ""}</p>
+        <p className="text-sm text-(--muted)">Cobro por partido de los ultimos dos meses. {isAdmin ? "Toca una celda pendiente para marcarla pagada." : ""}</p>
       </div>
-      {matchRows.map(({ match, rows }) => {
-        const collected = rows.reduce((sum, row) => sum + row.amountPaid, 0);
-        const expected = rows.reduce((sum, row) => sum + row.amountDue, 0);
-        return (
-          <div key={match.id} className="rounded-md border border-(--border) bg-white/[0.03] p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="font-semibold text-white">{match.weekLabel || match.date}</p>
-                <p className="text-xs text-(--muted)">{match.location} - {match.date}</p>
-              </div>
-              <p className="text-sm font-black text-(--cyan)">{formatCurrency(collected)} / {formatCurrency(expected)}</p>
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {rows.map((row) => (
-                <div key={row.id} className="flex flex-col gap-2 rounded-md border border-(--border) bg-white/[0.04] p-2.5 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="font-medium text-white">{row.name}</p>
-                    <p className="text-xs text-(--muted)">{formatCurrency(row.amountPaid)} / {formatCurrency(row.amountDue)}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <PaymentBadge status={row.paymentStatus} />
-                    {isAdmin && row.paymentStatus !== "paid" ? <Button onClick={() => onMarkPaid(row)}>Pagado</Button> : null}
-                  </div>
-                </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[520px] border-separate border-spacing-x-1 border-spacing-y-1.5 text-sm">
+          <thead>
+            <tr>
+              <th className="pr-2 text-left text-[11px] font-black uppercase tracking-wide text-(--muted)">Jugador</th>
+              {matches.map((match) => (
+                <th key={match.id} title={match.weekLabel} className="text-center text-[11px] font-bold uppercase text-(--muted)">
+                  {matchDateLabel(match.date)}
+                </th>
               ))}
-            </div>
-          </div>
-        );
-      })}
-      {matchRows.length === 0 ? <p className="text-sm text-(--muted)">No hay galletas registradas en los ultimos dos meses.</p> : null}
+            </tr>
+          </thead>
+          <tbody>
+            {players.map((player) => (
+              <tr key={player.key}>
+                <td className="whitespace-nowrap pr-2">
+                  <p className="font-semibold text-white">{player.name}</p>
+                  {player.pending > 0 ? <p className="text-xs font-bold text-(--gold)">Debe {formatCurrency(player.pending)}</p> : null}
+                </td>
+                {matches.map((match) => {
+                  const row = player.byMatch.get(match.id);
+                  const played = row && row.attendanceStatus !== "out";
+                  const paid = played && row.paymentStatus === "paid";
+                  const pending = played ? Math.max(row.amountDue - row.amountPaid, 0) : 0;
+                  const title = !played
+                    ? "No jugo este partido"
+                    : paid
+                      ? `Pagado ${formatCurrency(row.amountPaid)}`
+                      : `Pendiente ${formatCurrency(pending)}${isAdmin ? " - toca para marcar pagado" : ""}`;
+                  const cls = !played
+                    ? "border-(--border) bg-white/[0.02] text-(--muted)"
+                    : paid
+                      ? "border-(--green)/35 bg-(--green)/15 text-(--green)"
+                      : "border-(--red)/35 bg-(--red)/10 text-(--red)";
+                  return (
+                    <td key={match.id} className="text-center">
+                      <button
+                        type="button"
+                        disabled={!played || paid || !isAdmin}
+                        title={title}
+                        onClick={() => row && onMarkPaid(row)}
+                        className={`h-8 w-9 rounded-md border text-xs font-black transition disabled:cursor-not-allowed ${cls} ${isAdmin && played && !paid ? "hover:opacity-80" : ""}`}
+                      >
+                        {!played ? "-" : paid ? "✓" : "✗"}
+                      </button>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+            {players.length === 0 ? (
+              <tr>
+                <td colSpan={matches.length + 1} className="py-2 text-sm text-(--muted)">No hay galletas registradas en los ultimos dos meses.</td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex flex-wrap gap-4 text-xs text-(--muted)">
+        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-(--green)" />Jugo y pago</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-(--red)" />Jugo, debe{isAdmin ? " (toca para marcar pagado)" : ""}</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-white/15" />No jugo ese partido</span>
+      </div>
     </Card>
   );
 }
