@@ -56,16 +56,32 @@ Every MCP request must include:
 Authorization: Bearer <SIFUP_MCP_TOKEN>
 ```
 
-Initial tools:
+Tools:
 
-- `import_whatsapp_match`: imports a WhatsApp list into a match. Pass `matchId` to update a specific match, or omit it to match by date and time.
+- `import_whatsapp_match`: imports a WhatsApp list into a match, replacing players/teams/payments. Pass `matchId` to update a specific match, or omit it to match by date and time.
+- `add_player_to_match`: adds a single player to a match without touching the rest of the list, teams, or payments.
+- `register_monthly_payment`: marks a player's monthly fee as paid/unpaid.
+- `get_pending_payments`: lists who owes money (monthly fees and per-match balances) with totals.
 - `get_next_match_summary`: returns the next match summary and copy-ready WhatsApp texts.
 
-OpenClaw registration:
+### OpenClaw / static bearer token clients
+
+Clients that let you set a raw header can skip OAuth entirely:
 
 ```bash
 openclaw mcp set sifup "{\"url\":\"https://sifup.vercel.app/mcp\",\"headers\":{\"Authorization\":\"Bearer <SIFUP_MCP_TOKEN>\"}}"
 ```
+
+### claude.ai / ChatGPT (OAuth)
+
+Consumer connector UIs (claude.ai, chatgpt.com) require OAuth discovery instead of a manual header. SIFUP implements a minimal single-user OAuth 2.1 shim that wraps the same `SIFUP_MCP_TOKEN`:
+
+- `GET /.well-known/oauth-protected-resource` and `GET /.well-known/oauth-authorization-server`: discovery metadata.
+- `POST /register`: dynamic client registration (RFC 7591). No storage — the issued `client_id` is a signed token encoding the client's `redirect_uris`.
+- `GET/POST /authorize`: shows a password form (reuses `SIFUP_ADMIN_PASSWORD`); on success issues a short-lived authorization code (PKCE `S256` required) and redirects back to the client.
+- `POST /token`: exchanges the code (or a `refresh_token`) for an access token, which is simply `SIFUP_MCP_TOKEN` itself.
+
+Just add `https://sifup.vercel.app/mcp` as a custom connector in claude.ai or chatgpt.com; the client discovers and drives the OAuth flow automatically, prompting for the admin password once.
 
 ## Deployment
 
