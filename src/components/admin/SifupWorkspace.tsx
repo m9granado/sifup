@@ -445,6 +445,31 @@ function pendingPayments(payments: MonthlyPayment[], rows: MatchPlayer[]) {
   return payments.reduce((sum, payment) => sum + Math.max(payment.expectedAmount - payment.amountPaid, 0), 0) + rows.reduce((sum, row) => sum + Math.max(row.amountDue - row.amountPaid, 0), 0);
 }
 
+type MonthlyFinanceRow = {
+  key: string;
+  galletas: number;
+  mensual: number;
+  gastosCancha: number;
+  otrosGastos: number;
+  running: number;
+};
+
+function monthlyFinanceSummary(year: number, data: SifupData): MonthlyFinanceRow[] {
+  const months = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0"));
+  let running = 0;
+  return months.map((mm) => {
+    const key = `${year}-${mm}`;
+    const galletas = data.matches
+      .filter((match) => match.monthKey === key)
+      .reduce((sum, match) => sum + data.matchPlayers.filter((row) => row.matchId === match.id).reduce((rowSum, row) => rowSum + row.amountPaid, 0), 0);
+    const mensual = data.monthlyPayments.filter((payment) => payment.monthKey === key).reduce((sum, payment) => sum + payment.amountPaid, 0);
+    const gastosCancha = data.clubExpenses.filter((expense) => expense.category === "court" && expense.expenseDate.slice(0, 7) === key).reduce((sum, expense) => sum + expense.amount, 0);
+    const otrosGastos = data.clubExpenses.filter((expense) => expense.category !== "court" && expense.expenseDate.slice(0, 7) === key).reduce((sum, expense) => sum + expense.amount, 0);
+    running += galletas + mensual - gastosCancha - otrosGastos;
+    return { key, galletas, mensual, gastosCancha, otrosGastos, running };
+  });
+}
+
 function nextWeekDates(latestDate: string, count: number) {
   const base = new Date(`${latestDate}T12:00:00`);
   const dates: string[] = [];
@@ -1587,6 +1612,7 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
   const balance = collected - expenseTotal;
   const projectedBalance = balance + pending;
   const expenses = [...data.clubExpenses].sort((a, b) => b.expenseDate.localeCompare(a.expenseDate) || a.label.localeCompare(b.label));
+  const financeSummary = monthlyFinanceSummary(planYear, data);
 
   function markPaid(row: MatchPlayer) {
     const updated = { ...row, paymentStatus: "paid" as const, amountPaid: row.amountDue, updatedAt: new Date().toISOString() };
@@ -1636,22 +1662,13 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
           isAdmin={isAdmin}
           onToggle={toggleMonthly}
           onYear={setPlanYear}
+          financeSummary={financeSummary}
         />
       </div>
+      <div className="mb-4">
+        <GalletaMatchBreakdown data={data} isAdmin={isAdmin} onMarkPaid={markPaid} />
+      </div>
       <div className="grid gap-4 xl:grid-cols-2">
-        <Card className="space-y-3">
-          <h2 className="font-semibold">Por partido</h2>
-          {perMatchPending.map((row) => {
-            const match = data.matches.find((item) => item.id === row.matchId);
-            return (
-              <div key={row.id} className="flex flex-col gap-3 rounded-md border border-(--border) bg-white/[0.04] p-3 sm:flex-row sm:items-center sm:justify-between">
-                <div><p className="font-semibold">{row.name}</p><p className="mt-1 text-sm text-(--muted)">{match?.weekLabel || match?.date} - {match?.location}</p><p className="mt-1 text-sm font-medium">{formatCurrency(Math.max(row.amountDue - row.amountPaid, 0))}</p></div>
-                <div className="flex items-center gap-2"><PaymentBadge status={row.paymentStatus} />{isAdmin ? <Button onClick={() => markPaid(row)}>Pagado</Button> : null}</div>
-              </div>
-            );
-          })}
-          {perMatchPending.length === 0 ? <p className="text-sm text-(--muted)">No hay pagos por partido pendientes.</p> : null}
-        </Card>
         <Card className="space-y-3 xl:col-span-2">
           <div>
             <h2 className="font-semibold">Gastos registrados</h2>
@@ -1676,6 +1693,7 @@ function MonthlyPaymentPlan({
   isAdmin,
   onToggle,
   onYear,
+  financeSummary,
 }: {
   players: Player[];
   payments: MonthlyPayment[];
@@ -1684,6 +1702,7 @@ function MonthlyPaymentPlan({
   isAdmin: boolean;
   onToggle: (player: Player, monthKey: string, paid: boolean) => void;
   onYear: (year: number) => void;
+  financeSummary: MonthlyFinanceRow[];
 }) {
   const months = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0"));
   return (
@@ -1754,9 +1773,116 @@ function MonthlyPaymentPlan({
                 <td colSpan={13} className="py-2 text-sm text-(--muted)">No hay jugadores mensuales activos.</td>
               </tr>
             ) : null}
+            <tr>
+              <td colSpan={13} className="pt-3 pb-1 text-[11px] font-black uppercase tracking-wide text-(--muted)">Flujo del club</td>
+            </tr>
+            <FinanceRow label="Ingresos galletas" values={financeSummary.map((row) => row.galletas)} tone="green" />
+            <FinanceRow label="Ingresos mensuales" values={financeSummary.map((row) => row.mensual)} tone="green" />
+            <FinanceRow label="Gastos cancha" values={financeSummary.map((row) => -row.gastosCancha)} tone="red" />
+            <FinanceRow label="Otros gastos" values={financeSummary.map((row) => -row.otrosGastos)} tone="red" />
+            <FinanceRow label="Total acumulado" values={financeSummary.map((row) => row.running)} tone="auto" bold />
           </tbody>
         </table>
       </div>
+    </Card>
+  );
+}
+
+function FinanceRow({
+  label,
+  values,
+  tone,
+  bold,
+}: {
+  label: string;
+  values: number[];
+  tone: "green" | "red" | "auto";
+  bold?: boolean;
+}) {
+  return (
+    <tr>
+      <td className={`whitespace-nowrap pr-2 text-xs ${bold ? "font-black text-white" : "font-semibold text-(--muted)"}`}>{label}</td>
+      {values.map((value, index) => {
+        const color = tone === "auto" ? (value >= 0 ? "text-(--green)" : "text-(--red)") : tone === "green" ? "text-(--green)" : "text-(--red)";
+        return (
+          <td key={index} className={`whitespace-nowrap text-center text-[11px] ${bold ? "font-black" : "font-bold"} ${color}`}>
+            {value === 0 && !bold ? "-" : formatCurrency(value)}
+          </td>
+        );
+      })}
+    </tr>
+  );
+}
+
+function isGalletaRow(row: MatchPlayer, players: Player[]) {
+  const player = players.find((item) => item.id === row.playerId);
+  return !player || player.paymentPlan !== "monthly";
+}
+
+function recentMonthKeys(count: number) {
+  const now = new Date();
+  const keys: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    keys.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`);
+  }
+  return keys;
+}
+
+function GalletaMatchBreakdown({
+  data,
+  isAdmin,
+  onMarkPaid,
+}: {
+  data: SifupData;
+  isAdmin: boolean;
+  onMarkPaid: (row: MatchPlayer) => void;
+}) {
+  const allowedMonths = new Set(recentMonthKeys(2));
+  const matches = [...data.matches].filter((match) => allowedMonths.has(match.monthKey)).sort((a, b) => b.date.localeCompare(a.date));
+  const matchRows = matches
+    .map((match) => ({
+      match,
+      rows: data.matchPlayers.filter((row) => row.matchId === match.id && isGalletaRow(row, data.players)).sort((a, b) => a.whatsappOrder - b.whatsappOrder),
+    }))
+    .filter((entry) => entry.rows.length > 0);
+
+  return (
+    <Card className="space-y-4">
+      <div>
+        <h2 className="font-semibold">Galletas por partido</h2>
+        <p className="text-sm text-(--muted)">Cobro por partido de los ultimos dos meses. {isAdmin ? "Marca pagado cuando alguien te transfiere." : ""}</p>
+      </div>
+      {matchRows.map(({ match, rows }) => {
+        const collected = rows.reduce((sum, row) => sum + row.amountPaid, 0);
+        const expected = rows.reduce((sum, row) => sum + row.amountDue, 0);
+        return (
+          <div key={match.id} className="rounded-md border border-(--border) bg-white/[0.03] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="font-semibold text-white">{match.weekLabel || match.date}</p>
+                <p className="text-xs text-(--muted)">{match.location} - {match.date}</p>
+              </div>
+              <p className="text-sm font-black text-(--cyan)">{formatCurrency(collected)} / {formatCurrency(expected)}</p>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {rows.map((row) => (
+                <div key={row.id} className="flex flex-col gap-2 rounded-md border border-(--border) bg-white/[0.04] p-2.5 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-medium text-white">{row.name}</p>
+                    <p className="text-xs text-(--muted)">{formatCurrency(row.amountPaid)} / {formatCurrency(row.amountDue)}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <PaymentBadge status={row.paymentStatus} />
+                    {isAdmin && row.paymentStatus !== "paid" ? <Button onClick={() => onMarkPaid(row)}>Pagado</Button> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {matchRows.length === 0 ? <p className="text-sm text-(--muted)">No hay galletas registradas en los ultimos dos meses.</p> : null}
     </Card>
   );
 }

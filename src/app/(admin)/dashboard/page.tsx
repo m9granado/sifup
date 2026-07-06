@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CalendarDays, CircleDollarSign, MapPin, Medal, Trophy } from "lucide-react";
 import { getSifupData } from "@/lib/repository";
+import { SQUAD_TARGET } from "@/lib/sifup-constants";
 import { formatCurrency, sortByWhatsappOrder, summarizeMatch, whatsappOrderFor } from "@/lib/store";
 import type { Match, MatchPlayer, MatchResult, Player, Team, Winner } from "@/lib/types";
 
@@ -142,6 +143,7 @@ export default async function Page() {
   const nextMatch = upcomingMatch(data.matches, now);
   const nextMatchRows = nextMatch ? sortByWhatsappOrder(data.matchPlayers.filter((row) => row.matchId === nextMatch.id && row.attendanceStatus === "confirmed")) : [];
   const nextMatchSummary = summarizeMatch(nextMatchRows);
+  const nextMatchMissing = Math.max(SQUAD_TARGET - nextMatchSummary.confirmedCount, 0);
 
   const resultItems: ResultWithMatch[] = data.results.flatMap((result) => {
     const match = data.matches.find((item) => item.id === result.matchId);
@@ -195,13 +197,45 @@ export default async function Page() {
                     Ver partido
                   </Link>
                 </div>
-                <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-lg border border-(--cyan)/40 bg-(--cyan)/12 p-4">
-                    <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Confirmados</p>
-                    <p className="mt-2 text-6xl font-black leading-none text-white">{nextMatchSummary.confirmedCount}</p>
-                    <p className="mt-2 text-sm font-semibold text-(--muted)">jugadores listos</p>
+                <div className="mt-5 space-y-3">
+                  <div className={`relative overflow-hidden rounded-xl border p-5 sm:p-6 ${nextMatchMissing > 0 ? "border-(--red)/50 bg-(--red)/14" : "border-(--green)/45 bg-(--green)/12"}`}>
+                    <div className={`absolute inset-y-0 left-0 w-2 ${nextMatchMissing > 0 ? "bg-(--red)" : "bg-(--green)"}`} aria-hidden="true" />
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.16),transparent_34%)]" aria-hidden="true" />
+                    <div className="relative grid gap-5 lg:grid-cols-[minmax(0,1fr)_220px] lg:items-end">
+                      <div className="max-w-2xl">
+                        <p className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black uppercase tracking-[0.24em] ${nextMatchMissing > 0 ? "border-(--red)/40 bg-(--red)/18 text-(--red)" : "border-(--green)/40 bg-(--green)/18 text-(--green)"}`}>
+                          {nextMatchMissing > 0 ? `Falta para ${SQUAD_TARGET}` : "Plantel listo"}
+                        </p>
+                        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-5">
+                          <p className={`text-7xl font-black leading-none sm:text-8xl ${nextMatchMissing > 0 ? "text-(--red)" : "text-(--green)"}`}>
+                            {nextMatchMissing > 0 ? nextMatchMissing : SQUAD_TARGET}
+                          </p>
+                          <div className="pb-1">
+                            <p className={`text-3xl font-black uppercase leading-none sm:text-5xl ${nextMatchMissing > 0 ? "text-(--red)" : "text-(--green)"}`}>
+                              {nextMatchMissing > 0 ? "faltan" : "completos"}
+                            </p>
+                            <p className="mt-2 text-sm font-black uppercase tracking-[0.2em] text-white/55">
+                              para cerrar el partido
+                            </p>
+                          </div>
+                        </div>
+                        <p className="mt-4 max-w-xl text-sm font-bold text-white/80 sm:text-base">
+                          {nextMatchMissing > 0 ? "Todavia no llegamos al minimo fuerte para armar el partido con holgura." : "Ya esta el cupo completo para cerrar el partido sin depender de nadie mas."}
+                        </p>
+                      </div>
+                      <div className="grid min-w-[160px] gap-2 rounded-lg border border-white/10 bg-black/20 p-4 text-right backdrop-blur-[2px]">
+                        <p className="text-[11px] font-black uppercase tracking-[0.24em] text-white/55">Confirmados</p>
+                        <p className="text-4xl font-black leading-none text-white sm:text-5xl">
+                          {nextMatchSummary.confirmedCount}
+                          <span className="ml-1 text-xl text-white/45">/ {SQUAD_TARGET}</span>
+                        </p>
+                        <p className="text-xs font-bold uppercase tracking-wide text-white/55">
+                          {nextMatchMissing > 0 ? "objetivo de cancha" : "plantel completo"}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="rounded-lg border border-(--pink)/45 bg-(--pink)/12 p-4">
+                  <div className="ml-auto max-w-sm rounded-lg border border-(--pink)/45 bg-(--pink)/12 p-4">
                     <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Falta cobrar</p>
                     <p className="mt-2 text-4xl font-black leading-none text-(--pink)">{formatCurrency(nextMatchSummary.pendingAmount)}</p>
                     <p className="mt-2 text-sm font-semibold text-(--muted)">saldo pendiente del partido</p>

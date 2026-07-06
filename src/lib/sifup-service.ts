@@ -205,6 +205,69 @@ export async function registerMonthlyPayment(input: RegisterMonthlyPaymentInput)
   };
 }
 
+export type RegisterMatchPaymentInput = {
+  name?: string;
+  playerId?: string;
+  matchId?: string;
+  amount?: number;
+};
+
+export async function registerMatchPayment(input: RegisterMatchPaymentInput) {
+  const data = await getSifupData();
+  const player = input.playerId
+    ? data.players.find((item) => item.id === input.playerId)
+    : input.name
+      ? findKnownPlayer(data.players, input.name)
+      : undefined;
+
+  const target = normalizeName(input.name ?? "");
+  const candidates = data.matchPlayers.filter((row) => {
+    if (input.matchId && row.matchId !== input.matchId) return false;
+    if (player) return row.playerId === player.id;
+    return target.length > 0 && normalizeName(row.name) === target;
+  });
+
+  if (candidates.length === 0) throw new Error("No se encontro al jugador en ningun partido.");
+
+  const row = input.matchId
+    ? candidates[0]
+    : candidates
+        .filter((item) => item.amountDue > item.amountPaid)
+        .sort((a, b) => {
+          const matchA = data.matches.find((item) => item.id === a.matchId);
+          const matchB = data.matches.find((item) => item.id === b.matchId);
+          return (matchB?.date ?? "").localeCompare(matchA?.date ?? "");
+        })[0];
+
+  if (!row) throw new Error(`${input.name ?? player?.name ?? "El jugador"} no tiene saldo pendiente por partido.`);
+
+  const match = data.matches.find((item) => item.id === row.matchId);
+  const amount = input.amount ?? Math.max(row.amountDue - row.amountPaid, 0);
+  const now = new Date().toISOString();
+  const updatedAmountPaid = Math.min(row.amountDue, row.amountPaid + amount);
+  const updatedRow: MatchPlayer = {
+    ...row,
+    amountPaid: updatedAmountPaid,
+    paymentStatus: updatedAmountPaid >= row.amountDue ? "paid" : row.paymentStatus,
+    updatedAt: now,
+  };
+
+  const matchRows = data.matchPlayers.filter((item) => item.matchId === row.matchId).map((item) => (item.id === row.id ? updatedRow : item));
+  await saveMatchPlayers(row.matchId, matchRows);
+  revalidateSifupViews(row.matchId);
+
+  return {
+    player: row.name,
+    match: match?.weekLabel || match?.date || row.matchId,
+    matchId: row.matchId,
+    amountPaid: updatedRow.amountPaid,
+    amountDue: updatedRow.amountDue,
+    pending: Math.max(updatedRow.amountDue - updatedRow.amountPaid, 0),
+    status: updatedRow.paymentStatus,
+    note: `${row.name} pago ${amount} para el partido ${match?.weekLabel || match?.date}. Saldo pendiente: ${Math.max(updatedRow.amountDue - updatedRow.amountPaid, 0)}.`,
+  };
+}
+
 export async function getPendingPayments(input: { monthKey?: string } = {}) {
   const data = await getSifupData();
   const targetMonth = input.monthKey ?? currentMonthKey();

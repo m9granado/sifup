@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { addPlayerToMatch, findPlayer, getNextMatchSummary, getPendingPayments, importWhatsAppMatch, registerMonthlyPayment } from "@/lib/sifup-service";
+import { addPlayerToMatch, findPlayer, getNextMatchSummary, getPendingPayments, importWhatsAppMatch, registerMatchPayment, registerMonthlyPayment } from "@/lib/sifup-service";
 import { PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "@/lib/sifup-constants";
 
 type ToolResult = {
@@ -106,6 +106,21 @@ function createServer() {
       },
     },
     (input) => runTool(() => registerMonthlyPayment(input)),
+  );
+
+  server.registerTool(
+    "register_match_payment",
+    {
+      title: "Registrar pago por partido (galleta)",
+      description: "Marca un pago por partido (galleta) como recibido, total o parcial. Si no se entrega matchId, busca entre los partidos del jugador el que tenga saldo pendiente mas reciente. Si no se entrega amount, salda el total pendiente de ese partido.",
+      inputSchema: {
+        name: z.string().optional().describe("Nombre o apodo del jugador que pago (o usa playerId)."),
+        playerId: z.string().optional().describe("ID del jugador si se conoce."),
+        matchId: z.string().optional().describe("ID del partido especifico. Si se omite, se busca el partido con saldo pendiente mas reciente."),
+        amount: z.number().int().positive().optional().describe("Monto recibido. Default: el saldo pendiente completo de ese partido."),
+      },
+    },
+    (input) => runTool(() => registerMatchPayment(input)),
   );
 
   server.registerTool(
