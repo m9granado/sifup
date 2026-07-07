@@ -45,14 +45,15 @@ function parsePayment(raw: string): { paymentStatus: PaymentStatus; note: string
   return { paymentStatus: "unpaid", note: raw.trim() };
 }
 
-function parseHeader(line: string) {
-  const normalized = normalize(line);
-  const dayMonthMatch = normalized.match(/(\d{1,2})\s+([a-z]+)/);
+function parseHeader(headerLines: string[]) {
+  const joined = normalize(headerLines.join(" "));
+  const monthNames = Object.keys(monthMap).join("|");
+  const dayMonthMatch = joined.match(new RegExp(`(\\d{1,2})\\s+(${monthNames})\\b`));
   const hourMatch =
-    normalized.match(/(?:^|[,\s])(\d{1,2})(?::(\d{2}))?\s*(?:horas|hrs|h)\b/) ??
-    normalized.match(/\b(?:a las|hora)\s+(\d{1,2})(?::(\d{2}))?\b/);
-  const rawTail = line.split(":").slice(1).join(":").trim().replace(/\.$/, "");
-  const location = /(?:club|cancha|sordos|nunoa|ñuñoa|av\.?|avenida|calle)/i.test(rawTail) ? rawTail : "";
+    joined.match(/(?:^|[,\s])(\d{1,2})(?::(\d{2}))?\s*(?:horas|hrs|h)\b/) ??
+    joined.match(/\b(?:a las|hora)\s+(\d{1,2})(?::(\d{2}))?\b/);
+  const locationLine = headerLines.find((line) => /(?:club|cancha|sordos|nunoa|ñuñoa|av\.?|avenida|calle)/i.test(line));
+  const location = locationLine ? locationLine.replace(/:\s*$/, "").trim() : "";
   const year = new Date().getFullYear();
   const month = dayMonthMatch ? monthMap[dayMonthMatch[2]] : undefined;
   const day = dayMonthMatch?.[1].padStart(2, "0");
@@ -75,8 +76,14 @@ export function parseWhatsAppList(input: string, amountDue = 4000): ParsedWhatsA
     .map((line) => line.replace(/[\u200B-\u200D\u2060\uFEFF]/g, "").trim())
     .filter(Boolean);
   const errors: string[] = [];
-  const header = lines.find((line) => !isListItem(line) && !isOutSection(line)) ?? "";
-  const matchInfo = parseHeader(header);
+  const headerLines: string[] = [];
+  for (const line of lines) {
+    if (isListItem(line) || isOutSection(line)) break;
+    if (/^jugadores\s*:?$/i.test(normalize(line))) continue;
+    headerLines.push(line);
+  }
+  const headerSet = new Set(headerLines);
+  const matchInfo = parseHeader(headerLines);
 
   if (!matchInfo.date) errors.push("No se pudo detectar la fecha del partido.");
   if (!matchInfo.time) errors.push("No se pudo detectar la hora del partido.");
@@ -85,7 +92,7 @@ export function parseWhatsAppList(input: string, amountDue = 4000): ParsedWhatsA
   let currentSection: "confirmed" | "out" = "confirmed";
 
   for (const line of lines) {
-    if (line === header) continue;
+    if (headerSet.has(line)) continue;
     if (isOutSection(line)) {
       currentSection = "out";
       continue;
@@ -138,7 +145,7 @@ function isOutSection(line: string) {
 }
 
 function isListItem(line: string) {
-  return /^\s*(?:[*\-•]\s*)?(?:\d+[\).-]\s*)?\S+/.test(line) && !line.includes(":");
+  return /^\s*(?:[*\-•]\s*\S|\d+[\).-]\s*\S)/.test(line);
 }
 
 export function parseDefaultWhatsAppList(input: string) {
