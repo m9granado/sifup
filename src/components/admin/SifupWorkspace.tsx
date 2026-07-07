@@ -1333,8 +1333,6 @@ function MatchHero({
   const teamB = rows.filter((row) => row.team === "B" && row.attendanceStatus === "confirmed");
   const pointsA = teamRankingTotal(rows, players, standings, "A");
   const pointsB = teamRankingTotal(rows, players, standings, "B");
-  const topRanked = rankedConfirmedRows(rows, players, standings)[0];
-  const topStanding = topRanked ? standingForMatchRow(topRanked, players, standings) : undefined;
   const confirmed = summary.confirmedCount;
   const missing = Math.max(SQUAD_TARGET - confirmed, 0);
   const monthlyConfirmed = rows.filter((row) => row.attendanceStatus === "confirmed" && isMonthlyMatchRow(row, players)).length;
@@ -1421,14 +1419,6 @@ function MatchHero({
               <p className="mt-1 text-xs font-bold uppercase text-(--muted)">{showResult ? "goles" : `jugadores · ${pointsB} pts`}</p>
             </div>
           </div>
-          ) : null}
-
-          {topRanked ? (
-            <div className="mt-5 rounded-lg border border-(--gold)/35 bg-black/25 p-4">
-              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Jugador mejor rankeado del partido</p>
-              <p className="mt-2 text-xl font-black text-white">{topRanked.name}</p>
-              <p className="mt-1 text-sm font-bold text-(--gold)">Ranking #{topStanding?.rank ?? "SR"} · {topStanding?.points ?? 0} pts · {teamLabel(topRanked.team)}</p>
-            </div>
           ) : null}
         </div>
       </div>
