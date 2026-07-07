@@ -79,6 +79,11 @@ function whatsappHref(phone: string) {
   return `https://wa.me/${withCountry}`;
 }
 
+function googleMapsHref(location: string) {
+  if (!location.trim()) return "";
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location)}`;
+}
+
 function teamLabel(team: Team) {
   if (team === "A") return "Rojo";
   if (team === "B") return "Amarillo";
@@ -124,6 +129,34 @@ function buildPlayerStandings(data: SifupData) {
     const standing = { rank: index + 1, points: row.points };
     return [[row.id, standing], [row.name.toLowerCase(), standing]] as const;
   }));
+}
+
+function computePlayerStats(player: Player, data: SifupData) {
+  const appearances = data.matchPlayers.filter((row) => (row.name === player.name || row.playerId === player.id) && row.attendanceStatus === "confirmed");
+  let wins = 0;
+  let losses = 0;
+  let draws = 0;
+  appearances.forEach((row) => {
+    const result = data.results.find((item) => item.matchId === row.matchId);
+    if (!result || row.team === "none") return;
+    if (result.winner === "draw") draws += 1;
+    else if (result.winner === row.team) wins += 1;
+    else losses += 1;
+  });
+  const matchDebt = appearances.reduce((sum, row) => sum + Math.max(row.amountDue - row.amountPaid, 0), 0);
+  const monthlyDebt = data.monthlyPayments.filter((payment) => payment.playerId === player.id).reduce((sum, payment) => sum + Math.max(payment.expectedAmount - payment.amountPaid, 0), 0);
+  const decided = wins + losses + draws;
+  return {
+    appearances,
+    played: appearances.length,
+    wins,
+    losses,
+    draws,
+    winRate: appearances.length ? Math.round((wins / appearances.length) * 100) : 0,
+    points: wins * WIN_POINTS + draws * DRAW_POINTS,
+    form: decided ? `${wins}-${draws}-${losses}` : "0-0-0",
+    pendingDebt: matchDebt + monthlyDebt,
+  };
 }
 
 function standingForMatchRow(row: Pick<MatchPlayer, "playerId" | "name">, players: Player[], standings: Map<string, PlayerStanding>) {
@@ -919,29 +952,22 @@ function EditableRows({
 }
 
 function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; players: Player[]; standings: Map<string, PlayerStanding> }) {
-  const confirmedRows = sortRowsWithMonthlyLast(rows.filter((row) => row.attendanceStatus === "confirmed"), players);
+  const confirmedRows = rankedConfirmedRows(rows, players, standings);
   const outRows = rows.filter((row) => row.attendanceStatus === "out");
+  const teamsAssigned = hasTeamsAssigned(rows);
   return (
     <div className="space-y-2">
-      {confirmedRows.map((row, index) => {
-        const monthly = isMonthlyMatchRow(row, players);
-        const pending = pendingForMatchRow(row);
-        const standing = standingForMatchRow(row, players, standings);
-        return (
-        <div key={row.id} className={`flex flex-col gap-2 rounded-md border px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between ${monthly ? "border-(--cyan)/45 bg-(--cyan)/10" : "border-(--border) bg-white/[0.04]"}`}>
-          <div className="flex items-center gap-2">
-            <span className="flex h-7 min-w-7 items-center justify-center rounded-full bg-white/[0.08] px-2 text-xs font-bold text-(--muted) ring-1 ring-(--border)">{row.whatsappOrder || index + 1}</span>
-            <span className={`h-3 w-3 shrink-0 rounded-full ${teamDot(row.team)}`} />
-            <div>
-              <p className="font-semibold text-white">{row.name} {monthly ? <span className="ml-2 rounded bg-(--cyan)/20 px-1.5 py-0.5 text-[10px] font-black uppercase text-(--cyan)">Mensual</span> : null}</p>
-              <p className="text-xs text-(--muted)">{teamLabel(row.team)} - Falta {formatCurrency(pending)}</p>
-              <p className="text-xs font-semibold text-(--gold)">{standing ? `Ranking #${standing.rank} - ${standing.points} pts` : "Sin ranking"}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2"><PaymentBadge status={row.paymentStatus} /><span className="rounded-full bg-white/[0.08] px-2 py-1 text-xs font-semibold text-(--muted) ring-1 ring-(--border)">{formatCurrency(pending)}</span></div>
-        </div>
-        );
-      })}
+      {confirmedRows.map((row) => (
+        <PlayerCollectionRow
+          key={row.id}
+          row={row}
+          players={players}
+          standings={standings}
+          monthly={isMonthlyMatchRow(row, players)}
+          teamsAssigned={teamsAssigned}
+          isAdmin={false}
+        />
+      ))}
       {outRows.length > 0 ? (
         <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">No pueden ({outRows.length})</p>
@@ -956,46 +982,67 @@ function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; pl
   );
 }
 
-function PlayerRosterRow({
+function PlayerCollectionRow({
   row,
+  players,
+  standings,
   monthly,
-  standing,
+  teamsAssigned,
+  isAdmin,
   onTeamChange,
+  onTogglePaid,
   onOpenDetails,
   onRemove,
+  disabled,
 }: {
   row: MatchPlayer;
+  players: Player[];
+  standings: Map<string, PlayerStanding>;
   monthly: boolean;
-  standing?: PlayerStanding;
-  onTeamChange: (team: Team) => void;
-  onOpenDetails: () => void;
-  onRemove: () => void;
+  teamsAssigned: boolean;
+  isAdmin: boolean;
+  onTeamChange?: (team: Team) => void;
+  onTogglePaid?: () => void;
+  onOpenDetails?: () => void;
+  onRemove?: () => void;
+  disabled?: boolean;
 }) {
-  const whatsapp = whatsappHref(row.phone);
+  const standing = standingForMatchRow(row, players, standings);
   const pending = pendingForMatchRow(row);
+  const whatsapp = whatsappHref(row.phone);
+  const playerId = playerForMatchRow(row, players)?.id;
   return (
-    <div className={`space-y-2 rounded-md border p-3 ${monthly ? "border-(--cyan)/45 bg-(--cyan)/10" : "border-(--border) bg-white/[0.04]"}`}>
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <p className="font-semibold text-white"><span className="mr-2 text-xs text-(--muted)">#{row.whatsappOrder || "-"}</span>{row.name}</p>
-          <p className="mt-0.5 text-xs text-(--muted)">Falta {formatCurrency(pending)} {monthly ? <span className="ml-2 rounded bg-(--cyan)/20 px-1.5 py-0.5 text-[10px] font-black uppercase text-(--cyan)">Mensual</span> : null}</p>
-          <p className="mt-0.5 text-xs font-semibold text-(--gold)">{standing ? `Ranking #${standing.rank} - ${standing.points} pts` : "Sin ranking"}</p>
+    <div className={`flex flex-col gap-2 rounded-md border px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between ${monthly ? "border-(--cyan)/45 bg-(--cyan)/10" : "border-(--border) bg-white/[0.04]"}`}>
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="flex h-7 min-w-7 items-center justify-center rounded-full bg-white/[0.08] px-2 text-xs font-bold text-(--muted) ring-1 ring-(--border)">{standing ? `#${standing.rank}` : "-"}</span>
+        {teamsAssigned ? <span className={`h-3 w-3 shrink-0 rounded-full ${teamDot(row.team)}`} /> : null}
+        <div className="min-w-0">
+          <p className="truncate font-semibold text-white">
+            {playerId ? <Link href={`/players/${playerId}`} className="hover:underline">{row.name}</Link> : row.name}
+            {monthly ? <span className="ml-2 rounded bg-(--cyan)/20 px-1.5 py-0.5 text-[10px] font-black uppercase text-(--cyan)">Mensual</span> : null}
+          </p>
+          <p className="text-xs text-(--muted)">{standing ? `${standing.points} pts` : "Sin ranking"}{pending > 0 ? ` · Falta ${formatCurrency(pending)}` : ""}</p>
         </div>
-        <div className="flex items-center gap-1">
-          {whatsapp ? (
-            <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15" aria-label={`WhatsApp ${row.name}`}>
-              <MessageCircle size={16} />
-            </a>
-          ) : null}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {isAdmin && onTeamChange ? <TeamToggle value={row.team} onChange={onTeamChange} /> : null}
+        {isAdmin && onTogglePaid ? <PaymentToggle status={row.paymentStatus} onToggle={onTogglePaid} disabled={disabled} /> : <PaymentBadge status={row.paymentStatus} />}
+        {whatsapp ? (
+          <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15" aria-label={`WhatsApp ${row.name}`}>
+            <MessageCircle size={16} />
+          </a>
+        ) : null}
+        {isAdmin && onOpenDetails ? (
           <button type="button" onClick={onOpenDetails} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14]" aria-label={`Editar ${row.name}`}>
             <Pencil size={16} />
           </button>
+        ) : null}
+        {isAdmin && onRemove ? (
           <button type="button" onClick={onRemove} className="rounded-md p-1.5 text-(--red) hover:bg-(--red)/15" aria-label={`Quitar ${row.name} del partido`}>
             <UserMinus size={16} />
           </button>
-        </div>
+        ) : null}
       </div>
-      <TeamToggle value={row.team} onChange={onTeamChange} />
     </div>
   );
 }
@@ -1005,28 +1052,51 @@ function TeamAssignmentBoard({
   players,
   standings,
   onTeamChange,
+  onTogglePaid,
   onOpenDetails,
   onRemove,
   onAddPlayer,
   onResetTeams,
+  paymentPendingId,
 }: {
   rows: MatchPlayer[];
   players: Player[];
   standings: Map<string, PlayerStanding>;
   onTeamChange: (rowId: string, team: Team) => void;
+  onTogglePaid: (rowId: string) => void;
   onOpenDetails: (rowId: string) => void;
   onRemove: (rowId: string) => void;
   onAddPlayer: () => void;
   onResetTeams: () => void;
+  paymentPendingId: string | null;
 }) {
-  const teamA = sortRowsWithMonthlyLast(rows.filter((row) => row.team === "A" && row.attendanceStatus === "confirmed"), players);
-  const teamB = sortRowsWithMonthlyLast(rows.filter((row) => row.team === "B" && row.attendanceStatus === "confirmed"), players);
-  const unassigned = sortRowsWithMonthlyLast(rows.filter((row) => row.team === "none" && row.attendanceStatus === "confirmed"), players);
+  const teamsAssigned = hasTeamsAssigned(rows);
+  const confirmedRanked = rankedConfirmedRows(rows, players, standings);
+  const teamA = confirmedRanked.filter((row) => row.team === "A");
+  const teamB = confirmedRanked.filter((row) => row.team === "B");
+  const unassigned = confirmedRanked.filter((row) => row.team === "none");
   const outRows = sortRowsWithMonthlyLast(rows.filter((row) => row.attendanceStatus === "out"), players);
   const pointsA = teamRankingPoints(rows, players, standings, "A");
   const pointsB = teamRankingPoints(rows, players, standings, "B");
-  const confirmedCount = teamA.length + teamB.length + unassigned.length;
+  const confirmedCount = confirmedRanked.length;
   const missing = Math.max(SQUAD_TARGET - confirmedCount, 0);
+
+  const renderRow = (row: MatchPlayer) => (
+    <PlayerCollectionRow
+      key={row.id}
+      row={row}
+      players={players}
+      standings={standings}
+      monthly={isMonthlyMatchRow(row, players)}
+      teamsAssigned={teamsAssigned}
+      isAdmin
+      onTeamChange={(team) => onTeamChange(row.id, team)}
+      onTogglePaid={() => onTogglePaid(row.id)}
+      onOpenDetails={() => onOpenDetails(row.id)}
+      onRemove={() => onRemove(row.id)}
+      disabled={paymentPendingId === row.id}
+    />
+  );
 
   return (
     <div className="space-y-4">
@@ -1047,39 +1117,37 @@ function TeamAssignmentBoard({
           </Button>
         </div>
       </div>
-      {unassigned.length > 0 ? (
-        <div className="space-y-2 rounded-md border border-(--border) bg-white/[0.04] p-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">Sin asignar ({unassigned.length})</p>
-          <div className="space-y-2 sm:grid sm:grid-cols-2 sm:gap-2 sm:space-y-0 xl:grid-cols-3">
-            {unassigned.map((row) => (
-              <PlayerRosterRow key={row.id} row={row} monthly={isMonthlyMatchRow(row, players)} standing={standingForMatchRow(row, players, standings)} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
-            ))}
+      {teamsAssigned ? (
+        <>
+          {unassigned.length > 0 ? (
+            <div className="space-y-2 rounded-md border border-(--border) bg-white/[0.04] p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">Sin asignar ({unassigned.length})</p>
+              <div className="space-y-2">{unassigned.map(renderRow)}</div>
+            </div>
+          ) : null}
+          <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr] lg:items-start">
+            <div className="space-y-2 rounded-md border-2 border-(--red)/35 bg-(--red)/10 p-3">
+              <p className="text-sm font-bold text-(--red)">Equipo Rojo ({teamA.length}) - {pointsA} pts ranking</p>
+              <div className="space-y-2">
+                {teamA.map(renderRow)}
+                {teamA.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
+              </div>
+            </div>
+            <div className="hidden items-center justify-center px-2 lg:flex">
+              <span className="rounded-full bg-white/[0.12] px-3 py-1 text-xs font-bold text-(--muted)">VS</span>
+            </div>
+            <div className="space-y-2 rounded-md border-2 border-(--gold)/35 bg-(--gold)/10 p-3">
+              <p className="text-sm font-bold text-(--gold)">Equipo Amarillo ({teamB.length}) - {pointsB} pts ranking</p>
+              <div className="space-y-2">
+                {teamB.map(renderRow)}
+                {teamB.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
+              </div>
+            </div>
           </div>
-        </div>
-      ) : null}
-      <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr] lg:items-start">
-        <div className="space-y-2 rounded-md border-2 border-(--red)/35 bg-(--red)/10 p-3">
-          <p className="text-sm font-bold text-(--red)">Equipo Rojo ({teamA.length}) - {pointsA} pts ranking</p>
-          <div className="space-y-2">
-            {teamA.map((row) => (
-              <PlayerRosterRow key={row.id} row={row} monthly={isMonthlyMatchRow(row, players)} standing={standingForMatchRow(row, players, standings)} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
-            ))}
-            {teamA.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
-          </div>
-        </div>
-        <div className="hidden items-center justify-center px-2 lg:flex">
-          <span className="rounded-full bg-white/[0.12] px-3 py-1 text-xs font-bold text-(--muted)">VS</span>
-        </div>
-        <div className="space-y-2 rounded-md border-2 border-(--gold)/35 bg-(--gold)/10 p-3">
-          <p className="text-sm font-bold text-(--gold)">Equipo Amarillo ({teamB.length}) - {pointsB} pts ranking</p>
-          <div className="space-y-2">
-            {teamB.map((row) => (
-              <PlayerRosterRow key={row.id} row={row} monthly={isMonthlyMatchRow(row, players)} standing={standingForMatchRow(row, players, standings)} onTeamChange={(team) => onTeamChange(row.id, team)} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
-            ))}
-            {teamB.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
-          </div>
-        </div>
-      </div>
+        </>
+      ) : (
+        <div className="space-y-2">{confirmedRanked.map(renderRow)}</div>
+      )}
       {outRows.length > 0 ? (
         <div className="space-y-2 rounded-md border border-white/10 bg-white/[0.03] p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">No pueden ({outRows.length})</p>
@@ -1199,25 +1267,23 @@ function PlayerDetailModal({
   );
 }
 
-function PaymentCollectionRow({ row, monthly, onToggle, disabled }: { row: MatchPlayer; monthly: boolean; onToggle: () => void; disabled?: boolean }) {
-  const pending = pendingForMatchRow(row);
-  return (
-    <div className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 ${monthly ? "border-(--cyan)/45 bg-(--cyan)/10" : "border-(--border) bg-white/[0.04]"}`}>
-      <div>
-        <p className="font-semibold text-white"><span className="mr-2 text-xs text-(--muted)">#{row.whatsappOrder || "-"}</span>{row.name} {monthly ? <span className="ml-2 rounded bg-(--cyan)/20 px-1.5 py-0.5 text-[10px] font-black uppercase text-(--cyan)">Mensual</span> : null}</p>
-        <p className="text-sm text-(--muted)">{pending > 0 ? `Pendiente ${formatCurrency(pending)}` : "Sin saldo pendiente"}</p>
-      </div>
-      <PaymentToggle status={row.paymentStatus} onToggle={onToggle} disabled={disabled} />
-    </div>
-  );
-}
-
 function matchDateTime(match: Match) {
   return new Date(`${match.date}T${match.time || "00:00"}`);
 }
 
 function matchIsUpcoming(match: Match) {
   return matchDateTime(match) >= new Date();
+}
+
+function matchCountdownLabel(match: Match) {
+  const hours = (matchDateTime(match).getTime() - Date.now()) / (1000 * 60 * 60);
+  if (hours < 1) return "Es en menos de 1 hora";
+  if (hours < 48) return `${Math.round(hours)} horas para el partido`;
+  return `${Math.round(hours / 24)} dias para el partido`;
+}
+
+function hasTeamsAssigned(rows: MatchPlayer[]) {
+  return rows.some((row) => row.team === "A" || row.team === "B");
 }
 
 function rankedConfirmedRows(rows: MatchPlayer[], players: Player[], standings: Map<string, PlayerStanding>) {
@@ -1288,16 +1354,21 @@ function MatchHero({
                 <span>SIFUP</span>
                 <strong>{upcoming ? "Partido por jugar" : showResult ? "Resultado cerrado" : "Partido"}</strong>
               </div>
-              <h1 className="max-w-3xl text-4xl font-black uppercase leading-none text-white sm:text-6xl">{match.weekLabel || match.date}</h1>
+              <h1 className="max-w-3xl text-4xl font-black uppercase leading-none text-white sm:text-6xl">{upcoming ? matchCountdownLabel(match) : (match.weekLabel || match.date)}</h1>
               <div className="mt-4 flex flex-wrap gap-3 text-sm font-bold">
                 <p className="flex items-center gap-2 text-white">
                   <CalendarDays size={16} className="text-(--cyan)" />
                   <span>{match.date} · {match.time}</span>
                 </p>
-                <p className="flex items-start gap-2 text-(--muted)">
+                <a
+                  href={googleMapsHref(match.location)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-start gap-2 text-(--muted) hover:text-white hover:underline"
+                >
                   <MapPin size={16} className="mt-0.5 text-(--gold)" />
                   <span>{match.location}</span>
-                </p>
+                </a>
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -1321,28 +1392,20 @@ function MatchHero({
             </div>
           </div>
 
-          <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-lg border border-(--cyan)/40 bg-(--cyan)/12 p-4">
-              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Confirmados</p>
-              <p className="mt-2 text-5xl font-black leading-none text-white">{confirmed}<span className="text-2xl text-(--muted)">/{SQUAD_TARGET}</span></p>
-            </div>
+          <div className="mt-6 grid gap-3 sm:grid-cols-2">
             <div className={`rounded-lg border p-4 ${missing > 0 ? "border-(--gold)/45 bg-(--gold)/12" : "border-(--green)/45 bg-(--green)/12"}`}>
               <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Faltan para 12</p>
               <p className={`mt-2 text-5xl font-black leading-none ${missing > 0 ? "text-(--gold)" : "text-(--green)"}`}>{missing}</p>
               <p className="mt-1 text-sm font-bold text-(--muted)">{missing > 0 ? "jugadores por sumar" : "plantel completo"}</p>
             </div>
-            <div className="rounded-lg border border-(--cyan)/40 bg-(--cyan)/12 p-4">
-              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Mensuales</p>
-              <p className="mt-2 text-5xl font-black leading-none text-white">{monthlyConfirmed}</p>
-              <p className="mt-1 text-sm font-bold text-(--muted)">oficiales confirmados</p>
-            </div>
             <div className="rounded-lg border border-(--pink)/40 bg-(--pink)/12 p-4">
-              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Galletas</p>
+              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Galletas actuales</p>
               <p className="mt-2 text-5xl font-black leading-none text-white">{galletasConfirmed}</p>
               <p className="mt-1 text-sm font-bold text-(--pink)">necesitas {galletasNeeded} si o si</p>
             </div>
           </div>
 
+          {hasTeamsAssigned(rows) || showResult ? (
           <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
             <div className="rounded-lg border border-(--red)/35 bg-(--red)/10 p-4">
               <p className="text-sm font-black uppercase tracking-wide text-(--red)">Equipo Rojo</p>
@@ -1358,6 +1421,7 @@ function MatchHero({
               <p className="mt-1 text-xs font-bold uppercase text-(--muted)">{showResult ? "goles" : `jugadores · ${pointsB} pts`}</p>
             </div>
           </div>
+          ) : null}
 
           {topRanked ? (
             <div className="mt-5 rounded-lg border border-(--gold)/35 bg-black/25 p-4">
@@ -1387,7 +1451,6 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [showAddPlayer, setShowAddPlayer] = useState(false);
   const summary = summarizeMatch(rows);
-  const collectionRows = sortRowsWithMonthlyLast(rows, data.players);
   const standings = useMemo(() => buildPlayerStandings(data), [data]);
 
   if (!match) return <PageTitle title="Partido no encontrado" description="No existe en la base de datos." />;
@@ -1470,7 +1533,9 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
     });
   }
 
-  function togglePayment(row: MatchPlayer, index: number) {
+  function togglePayment(rowId: string) {
+    const index = rows.findIndex((item) => item.id === rowId);
+    const row = rows[index];
     const nextStatus = row.paymentStatus === "paid" ? "unpaid" : "paid";
     setPaymentPending(row.id);
     setMatchPlayerPaymentStatusAction(row.id, nextStatus)
@@ -1502,9 +1567,15 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
       <Card className="mt-4 space-y-3">
-        <div>
-          <p className="text-xs font-black uppercase tracking-wide text-(--muted)">{isAdmin ? "Plantel y equipos" : "Jugadores"}</p>
-          <h2 className="mt-1 text-xl font-black text-white">{isAdmin ? "Arma el partido" : "Lista de jugadores"}</h2>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-wide text-(--muted)">{isAdmin ? "Plantel y cobranza" : "Jugadores"}</p>
+            <h2 className="mt-1 text-xl font-black text-white">{isAdmin ? "Jugadores" : "Lista de jugadores"}</h2>
+          </div>
+          <div className="rounded-md border border-(--pink)/35 bg-(--pink)/10 px-3 py-2">
+            <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Falta recaudar</p>
+            <p className="text-lg font-black text-(--pink)">{formatCurrency(summary.pendingAmount)}</p>
+          </div>
         </div>
         {isAdmin ? (
           <TeamAssignmentBoard
@@ -1512,10 +1583,12 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             players={data.players}
             standings={standings}
             onTeamChange={(rowId, team) => updateRow(rows.findIndex((row) => row.id === rowId), { team })}
+            onTogglePaid={togglePayment}
             onOpenDetails={(rowId) => setEditingIndex(rows.findIndex((row) => row.id === rowId))}
             onRemove={removeRow}
             onAddPlayer={() => setShowAddPlayer(true)}
             onResetTeams={resetBalancedTeams}
+            paymentPendingId={paymentPending}
           />
         ) : (
           <PublicMatchRows rows={rows} players={data.players} standings={standings} />
@@ -1539,30 +1612,6 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         <CopyBlock title="Resumen de equipos" text={teamsMessage(currentMatch, rows)} />
         <CopyBlock title="Resumen del partido" text={matchSummaryMessage(currentMatch, rows)} />
       </div>
-
-      <Card className="mt-4 space-y-2">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="font-semibold">Cobranza</h2>
-          <div className="rounded-md border border-(--pink)/35 bg-(--pink)/10 px-3 py-2">
-            <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Falta recaudar</p>
-            <p className="text-lg font-black text-(--pink)">{formatCurrency(summary.pendingAmount)}</p>
-          </div>
-        </div>
-        {isAdmin
-          ? collectionRows.map((row) => (
-              <PaymentCollectionRow key={row.id} row={row} monthly={isMonthlyMatchRow(row, data.players)} onToggle={() => togglePayment(row, rows.findIndex((item) => item.id === row.id))} disabled={paymentPending === row.id} />
-            ))
-          : collectionRows.map((row, index) => {
-              const monthly = isMonthlyMatchRow(row, data.players);
-              const pending = pendingForMatchRow(row);
-              return (
-              <div key={row.id} className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 ${monthly ? "border-(--cyan)/45 bg-(--cyan)/10" : "border-(--border) bg-white/[0.04]"}`}>
-                <p className="font-semibold text-white"><span className="mr-2 text-xs text-(--muted)">#{row.whatsappOrder || index + 1}</span>{row.name}</p>
-                <div className="flex items-center gap-2">{monthly ? <span className="rounded bg-(--cyan)/20 px-1.5 py-0.5 text-[10px] font-black uppercase text-(--cyan)">Mensual</span> : null}<PaymentBadge status={row.paymentStatus} /><span className="rounded-full bg-white/[0.08] px-2 py-1 text-xs font-semibold text-(--muted) ring-1 ring-(--border)">{formatCurrency(pending)}</span></div>
-              </div>
-              );
-            })}
-      </Card>
 
       {editingIndex !== null ? (
         <PlayerDetailModal
@@ -2143,36 +2192,65 @@ function PlayerEditorForm({ player, onSave }: { player: Player; onSave: (patch: 
   );
 }
 
+export function PlayerDetailPage({ id, initialData }: { id: string } & InitialDataProps) {
+  const { data } = useSifupData(initialData);
+  const player = data.players.find((item) => item.id === id);
+  if (!player) return <PageTitle title="Jugador no encontrado" description="No existe en la base de datos." />;
+
+  const stats = computePlayerStats(player, data);
+  const history = stats.appearances
+    .map((row) => ({ row, match: data.matches.find((item) => item.id === row.matchId), result: data.results.find((item) => item.matchId === row.matchId) }))
+    .filter((item) => item.match)
+    .sort((a, b) => (b.match?.date ?? "").localeCompare(a.match?.date ?? ""));
+
+  return (
+    <>
+      <PageTitle title={player.name} description={`${player.paymentPlan === "monthly" ? "Oficial" : "Galleta"} · ${player.nickname || "Sin pseudonimo"}`} />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat label="Partidos jugados" value={stats.played} />
+        <Stat label="G-E-P" value={stats.form} />
+        <Stat label="Win rate" value={`${stats.winRate}%`} />
+        <Stat label="Puntos" value={stats.points} />
+      </div>
+      <Card className="mt-4">
+        <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Deuda pendiente</p>
+        <p className={`mt-1 text-2xl font-black ${stats.pendingDebt > 0 ? "text-(--red)" : "text-(--green)"}`}>{formatCurrency(stats.pendingDebt)}</p>
+      </Card>
+      <Card className="mt-4 space-y-2">
+        <h2 className="font-semibold">Historial de partidos</h2>
+        {history.length === 0 ? <p className="text-sm text-(--muted)">Todavia no jugo ningun partido.</p> : null}
+        {history.map(({ row, match, result }) => (
+          <Link
+            key={row.id}
+            href={`/matches/${match?.id}`}
+            className="flex flex-col gap-1 rounded-md border border-(--border) bg-white/[0.04] px-3 py-2 text-sm hover:bg-white/[0.08] sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div>
+              <p className="font-semibold text-white">{match?.weekLabel || match?.date}</p>
+              <p className="text-xs text-(--muted)">{match?.date} · {teamLabel(row.team)}</p>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-(--muted)">
+              {result ? <span>Rojo {result.scoreA} - {result.scoreB} Amarillo</span> : <span>Sin resultado</span>}
+              <span className={pendingForMatchRow(row) > 0 ? "text-(--red)" : "text-(--green)"}>{formatCurrency(pendingForMatchRow(row))}</span>
+            </div>
+          </Link>
+        ))}
+      </Card>
+    </>
+  );
+}
+
 export function StandingsPage({ initialData }: InitialDataProps) {
   const { data } = useSifupData(initialData);
   const standings = useMemo(() => {
     return data.players.map((player) => {
-      const appearances = data.matchPlayers.filter((row) => (row.name === player.name || row.playerId === player.id) && row.attendanceStatus === "confirmed");
-      let wins = 0;
-      let losses = 0;
-      let draws = 0;
-      appearances.forEach((row) => {
-        const result = data.results.find((item) => item.matchId === row.matchId);
-        if (!result || row.team === "none") return;
-        if (result.winner === "draw") draws += 1;
-        else if (result.winner === row.team) wins += 1;
-        else losses += 1;
-      });
-      const matchDebt = appearances.reduce((sum, row) => sum + Math.max(row.amountDue - row.amountPaid, 0), 0);
-      const monthlyDebt = data.monthlyPayments.filter((payment) => payment.playerId === player.id).reduce((sum, payment) => sum + Math.max(payment.expectedAmount - payment.amountPaid, 0), 0);
-      const decided = wins + losses + draws;
+      const stats = computePlayerStats(player, data);
       return {
+        id: player.id,
         player: player.name,
         nickname: player.nickname,
         plan: player.paymentPlan,
-        played: appearances.length,
-        wins,
-        losses,
-        draws,
-        winRate: appearances.length ? Math.round((wins / appearances.length) * 100) : 0,
-        points: wins * WIN_POINTS + draws * DRAW_POINTS,
-        form: decided ? `${wins}-${draws}-${losses}` : "0-0-0",
-        pendingDebt: matchDebt + monthlyDebt,
+        ...stats,
       };
     }).sort((a, b) => b.points - a.points || b.winRate - a.winRate || b.played - a.played);
   }, [data]);
