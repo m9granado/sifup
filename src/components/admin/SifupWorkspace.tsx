@@ -955,19 +955,57 @@ function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; pl
   const confirmedRows = rankedConfirmedRows(rows, players, standings);
   const outRows = rows.filter((row) => row.attendanceStatus === "out");
   const teamsAssigned = hasTeamsAssigned(rows);
+  const teamA = confirmedRows.filter((row) => row.team === "A");
+  const teamB = confirmedRows.filter((row) => row.team === "B");
+  const unassigned = confirmedRows.filter((row) => row.team === "none");
+  const pointsA = teamRankingTotal(rows, players, standings, "A");
+  const pointsB = teamRankingTotal(rows, players, standings, "B");
+
+  const renderRow = (row: MatchPlayer) => (
+    <PlayerCollectionRow
+      key={row.id}
+      row={row}
+      players={players}
+      standings={standings}
+      monthly={isMonthlyMatchRow(row, players)}
+      teamsAssigned={teamsAssigned}
+      isAdmin={false}
+    />
+  );
+
   return (
-    <div className="space-y-2">
-      {confirmedRows.map((row) => (
-        <PlayerCollectionRow
-          key={row.id}
-          row={row}
-          players={players}
-          standings={standings}
-          monthly={isMonthlyMatchRow(row, players)}
-          teamsAssigned={teamsAssigned}
-          isAdmin={false}
-        />
-      ))}
+    <div className="space-y-4">
+      {teamsAssigned ? (
+        <>
+          {unassigned.length > 0 ? (
+            <div className="space-y-2 rounded-md border border-(--border) bg-white/[0.04] p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">Sin asignar ({unassigned.length})</p>
+              <div className="space-y-2">{unassigned.map(renderRow)}</div>
+            </div>
+          ) : null}
+          <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr] lg:items-start">
+            <div className="space-y-2 rounded-md border-2 border-(--red)/35 bg-(--red)/10 p-3">
+              <p className="text-sm font-bold text-(--red)">Equipo Rojo ({teamA.length}) - {pointsA} pts ranking</p>
+              <div className="space-y-2">
+                {teamA.map(renderRow)}
+                {teamA.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
+              </div>
+            </div>
+            <div className="hidden items-center justify-center px-2 lg:flex">
+              <span className="rounded-full bg-white/[0.12] px-3 py-1 text-xs font-bold text-(--muted)">VS</span>
+            </div>
+            <div className="space-y-2 rounded-md border-2 border-(--gold)/35 bg-(--gold)/10 p-3">
+              <p className="text-sm font-bold text-(--gold)">Equipo Amarillo ({teamB.length}) - {pointsB} pts ranking</p>
+              <div className="space-y-2">
+                {teamB.map(renderRow)}
+                {teamB.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
+              </div>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="space-y-2">{confirmedRows.map(renderRow)}</div>
+      )}
       {outRows.length > 0 ? (
         <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">No pueden ({outRows.length})</p>
