@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { COURT_COST, MONTHLY_AMOUNT, PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "./sifup-constants";
 import { monthKey, weekLabel } from "./sifup-date";
 import { parseWhatsAppList } from "./parser";
-import { getSifupData, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment } from "./repository";
+import { getSifupData, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment, savePlayer } from "./repository";
 import { newId, nextMatch, sortByWhatsappOrder, summarizeMatch } from "./store";
 import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, teamsMessage } from "./whatsapp";
 import type { AttendanceStatus, Match, MatchPlayer, MonthlyPayment, Player, Team } from "./types";
@@ -43,11 +43,28 @@ export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MA
     updatedAt: now,
   };
 
-  const rows: MatchPlayer[] = parsed.players.map((row, index) => {
-    const player = findKnownPlayer(data.players, row.name);
-    const monthly = player?.paymentPlan === "monthly";
+  const knownPlayers = [...data.players];
+  const rows: MatchPlayer[] = [];
+  for (const [index, row] of parsed.players.entries()) {
     const out = row.attendanceStatus === "out";
-    return {
+    let player = findKnownPlayer(knownPlayers, row.name);
+    if (!player && !out) {
+      player = {
+        id: newId("player"),
+        name: row.name.trim(),
+        nickname: row.name.trim().split(" ")[0],
+        phone: row.phone,
+        paymentPlan: "perMatch",
+        skillLevel: 3,
+        active: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await savePlayer(player);
+      knownPlayers.push(player);
+    }
+    const monthly = player?.paymentPlan === "monthly";
+    rows.push({
       ...row,
       id: `${targetId}-player-${index + 1}`,
       matchId: targetId,
@@ -62,8 +79,8 @@ export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MA
       whatsappOrder: row.whatsappOrder || index + 1,
       createdAt: now,
       updatedAt: now,
-    };
-  });
+    });
+  }
 
   await saveMatchWithPlayers(match, rows);
   revalidateSifupViews(match.id);
