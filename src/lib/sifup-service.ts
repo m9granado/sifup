@@ -285,6 +285,60 @@ export async function registerMatchPayment(input: RegisterMatchPaymentInput) {
   };
 }
 
+export type SetMatchTeamsInput = {
+  matchId?: string;
+  date?: string;
+  message: string;
+};
+
+function parseTeamsMessage(message: string): { teamA: number[]; teamB: number[] } {
+  const lines = message.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  let currentTeam: "A" | "B" | null = null;
+  const teamA: number[] = [];
+  const teamB: number[] = [];
+  for (const line of lines) {
+    if (/equipo\s+rojo/i.test(line)) { currentTeam = "A"; continue; }
+    if (/equipo\s+amarillo/i.test(line)) { currentTeam = "B"; continue; }
+    const orderMatch = line.match(/#(\d+)/);
+    if (orderMatch && currentTeam) {
+      const order = Number(orderMatch[1]);
+      if (currentTeam === "A") teamA.push(order);
+      else teamB.push(order);
+    }
+  }
+  return { teamA, teamB };
+}
+
+export async function setMatchTeams(input: SetMatchTeamsInput) {
+  const data = await getSifupData();
+  const match = resolveMatch(data.matches, input);
+  if (!match) throw new Error("No hay partido para actualizar equipos.");
+
+  const { teamA, teamB } = parseTeamsMessage(input.message);
+  if (teamA.length === 0 && teamB.length === 0) {
+    throw new Error("No se detectaron equipos en el mensaje. Asegurate de incluir 'Equipo Rojo:' y 'Equipo Amarillo:' con lineas '- #N Nombre'.");
+  }
+
+  const setA = new Set(teamA);
+  const setB = new Set(teamB);
+  const now = new Date().toISOString();
+  const currentRows = data.matchPlayers.filter((row) => row.matchId === match.id);
+  const updatedRows = currentRows.map((row) => {
+    if (setA.has(row.whatsappOrder)) return { ...row, team: "A" as Team, updatedAt: now };
+    if (setB.has(row.whatsappOrder)) return { ...row, team: "B" as Team, updatedAt: now };
+    return row;
+  });
+
+  const result = data.results.find((item) => item.matchId === match.id);
+  await saveMatchPlayers(match.id, updatedRows);
+  revalidateSifupViews(match.id);
+
+  return {
+    ...buildMatchPayload(match, updatedRows, result, "updated"),
+    note: `Equipos actualizados: Rojo [${teamA.join(", ")}], Amarillo [${teamB.join(", ")}].`,
+  };
+}
+
 export type ReportMatchScoreInput = {
   matchId?: string;
   date?: string;

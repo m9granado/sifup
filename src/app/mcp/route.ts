@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { addPlayerToMatch, findPlayer, getNextMatchSummary, getPendingPayments, importWhatsAppMatch, registerMatchPayment, registerMonthlyPayment, reportMatchScore } from "@/lib/sifup-service";
+import { addPlayerToMatch, findPlayer, getNextMatchSummary, getPendingPayments, importWhatsAppMatch, registerMatchPayment, registerMonthlyPayment, reportMatchScore, setMatchTeams } from "@/lib/sifup-service";
 import { PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "@/lib/sifup-constants";
 
 type ToolResult = {
@@ -133,6 +133,20 @@ function createServer() {
       },
     },
     (input) => runTool(() => getPendingPayments(input)),
+  );
+
+  server.registerTool(
+    "set_match_teams",
+    {
+      title: "Asignar equipos del partido",
+      description: "Actualiza los equipos Rojo y Amarillo pegando el mensaje de equipos de WhatsApp. Detecta los numeros de orden (#N) para asignar cada jugador. Util para corregir equipos despues de un import.",
+      inputSchema: {
+        message: z.string().min(1).describe("Mensaje de equipos de WhatsApp con formato 'Equipo Rojo:\\n- #N Nombre\\n...\\nEquipo Amarillo:\\n- #N Nombre'."),
+        matchId: z.string().optional().describe("ID del partido. Si se omite, se usa el mas reciente."),
+        date: z.string().optional().describe("Fecha YYYY-MM-DD del partido si no se entrega matchId."),
+      },
+    },
+    (input) => runTool(() => setMatchTeams(input)),
   );
 
   server.registerTool(
