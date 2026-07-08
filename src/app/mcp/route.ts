@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { addPlayerToMatch, findPlayer, getNextMatchSummary, getPendingPayments, importWhatsAppMatch, registerMatchPayment, registerMonthlyPayment } from "@/lib/sifup-service";
+import { addPlayerToMatch, findPlayer, getNextMatchSummary, getPendingPayments, importWhatsAppMatch, registerMatchPayment, registerMonthlyPayment, reportMatchScore } from "@/lib/sifup-service";
 import { PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "@/lib/sifup-constants";
 
 type ToolResult = {
@@ -133,6 +133,23 @@ function createServer() {
       },
     },
     (input) => runTool(() => getPendingPayments(input)),
+  );
+
+  server.registerTool(
+    "report_match_score",
+    {
+      title: "Reportar resultado del partido",
+      description: "Registra el marcador final (goles Rojo y Amarillo) y marca el partido como jugado. El ganador se deduce automaticamente de los goles si no se especifica.",
+      inputSchema: {
+        scoreA: z.number().int().min(0).describe("Goles del Equipo Rojo (A)."),
+        scoreB: z.number().int().min(0).describe("Goles del Equipo Amarillo (B)."),
+        winner: z.enum(["A", "B", "draw"]).optional().describe("Ganador: A (Rojo), B (Amarillo) o draw. Se deduce de los goles si se omite."),
+        matchId: z.string().optional().describe("ID del partido. Si se omite, se usa el partido mas reciente."),
+        date: z.string().optional().describe("Fecha YYYY-MM-DD del partido si no se entrega matchId."),
+        notes: z.string().optional().describe("Notas adicionales sobre el resultado."),
+      },
+    },
+    (input) => runTool(() => reportMatchScore(input)),
   );
 
   server.registerTool(

@@ -4,10 +4,10 @@ import { revalidatePath } from "next/cache";
 import { COURT_COST, MONTHLY_AMOUNT, PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "./sifup-constants";
 import { monthKey, weekLabel } from "./sifup-date";
 import { parseWhatsAppList } from "./parser";
-import { getSifupData, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment, savePlayer } from "./repository";
+import { getSifupData, saveMatchPlayers, saveMatchResult, saveMatchWithPlayers, saveMonthlyPayment, savePlayer } from "./repository";
 import { newId, nextMatch, sortByWhatsappOrder, summarizeMatch } from "./store";
 import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, teamsMessage } from "./whatsapp";
-import type { AttendanceStatus, Match, MatchPlayer, MonthlyPayment, Player, Team } from "./types";
+import type { AttendanceStatus, Match, MatchPlayer, MatchResult, MonthlyPayment, Player, Team, Winner } from "./types";
 
 export type ImportWhatsAppMatchInput = {
   message: string;
@@ -283,6 +283,37 @@ export async function registerMatchPayment(input: RegisterMatchPaymentInput) {
     status: updatedRow.paymentStatus,
     note: `${row.name} pago ${amount} para el partido ${match?.weekLabel || match?.date}. Saldo pendiente: ${Math.max(updatedRow.amountDue - updatedRow.amountPaid, 0)}.`,
   };
+}
+
+export type ReportMatchScoreInput = {
+  matchId?: string;
+  date?: string;
+  scoreA: number;
+  scoreB: number;
+  winner?: Winner;
+  notes?: string;
+};
+
+export async function reportMatchScore(input: ReportMatchScoreInput) {
+  const data = await getSifupData();
+  const match = resolveMatch(data.matches, input);
+  if (!match) throw new Error("No hay partido para reportar resultado.");
+
+  const winner: Winner = input.winner ?? (input.scoreA > input.scoreB ? "A" : input.scoreB > input.scoreA ? "B" : "draw");
+  const result: MatchResult = {
+    id: `result-${match.id}`,
+    matchId: match.id,
+    scoreA: input.scoreA,
+    scoreB: input.scoreB,
+    winner,
+    notes: input.notes ?? "",
+  };
+
+  await saveMatchResult(match.id, result);
+  revalidateSifupViews(match.id);
+
+  const rows = sortByWhatsappOrder(data.matchPlayers.filter((row) => row.matchId === match.id));
+  return buildMatchPayload({ ...match, status: "played" }, rows, result, "updated");
 }
 
 export async function getPendingPayments(input: { monthKey?: string } = {}) {

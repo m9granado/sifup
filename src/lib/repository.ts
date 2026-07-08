@@ -307,6 +307,23 @@ export async function savePlayer(player: Player) {
   `;
 }
 
+export async function saveMatchResult(matchId: string, result: MatchResult) {
+  const sql = requireDatabase();
+  const now = new Date().toISOString();
+  await sql.begin(async (tx) => {
+    await tx`
+      insert into match_results (id, match_id, score_a, score_b, winner, notes)
+      values (${result.id}, ${result.matchId}, ${result.scoreA}, ${result.scoreB}, ${result.winner}, ${result.notes})
+      on conflict (match_id) do update set
+        score_a = excluded.score_a,
+        score_b = excluded.score_b,
+        winner = excluded.winner,
+        notes = excluded.notes
+    `;
+    await tx`update matches set status = 'played', updated_at = ${now} where id = ${matchId}`;
+  });
+}
+
 export async function saveMonthlyPayment(payment: MonthlyPayment) {
   const sql = requireDatabase();
   await sql`
