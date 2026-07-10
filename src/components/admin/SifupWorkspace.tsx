@@ -1668,6 +1668,8 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
   const isAdmin = useIsAdmin();
   const { data, commit } = useSifupData(initialData);
   const [error, setError] = useState("");
+  const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
+  const [editingGuestName, setEditingGuestName] = useState<string | null>(null);
   const month = currentMonthKey();
   const [planYear, setPlanYear] = useState(() => Number(month.slice(0, 4)));
   const monthlyPlayers = data.players
@@ -1710,6 +1712,70 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
       .catch((err) => setError(err instanceof Error ? err.message : "No se pudo registrar el pago."));
   }
 
+  function startEditMonthly(player: Player) {
+    setEditingPlayer(player);
+    setEditingGuestName(null);
+  }
+
+  function startEditGalleta(name: string, key: string) {
+    const isGuest = key.startsWith("name:");
+    const existing = isGuest ? null : data.players.find((p) => p.id === key);
+    if (existing) {
+      setEditingPlayer(existing);
+      setEditingGuestName(null);
+    } else {
+      const now = new Date().toISOString();
+      setEditingPlayer({
+        id: newId("player"),
+        name: name,
+        nickname: name.split(" ")[0],
+        phone: "",
+        paymentPlan: "perMatch",
+        skillLevel: 3,
+        active: true,
+        createdAt: now,
+        updatedAt: now,
+      });
+      setEditingGuestName(name);
+    }
+  }
+
+  function savePlayer(patch: Partial<Player>) {
+    if (!editingPlayer) return;
+    const updated = { ...editingPlayer, ...patch, updatedAt: new Date().toISOString() };
+    savePlayerAction(updated, editingGuestName || undefined)
+      .then(() => {
+        let nextData = upsertPlayer(data, updated);
+        if (editingGuestName) {
+          nextData = {
+            ...nextData,
+            matchPlayers: nextData.matchPlayers.map((mp) => {
+              if (mp.playerId === null || mp.playerId === undefined) {
+                if (mp.name.toLowerCase() === editingGuestName.toLowerCase()) {
+                  return { ...mp, playerId: updated.id, name: updated.name, updatedAt: updated.updatedAt };
+                }
+              }
+              return mp;
+            }),
+          };
+        } else {
+          nextData = {
+            ...nextData,
+            matchPlayers: nextData.matchPlayers.map((mp) => {
+              if (mp.playerId === updated.id) {
+                return { ...mp, name: updated.name, updatedAt: updated.updatedAt };
+              }
+              return mp;
+            }),
+          };
+        }
+        commit(nextData);
+        setEditingPlayer(null);
+        setEditingGuestName(null);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar el jugador."));
+  }
+
   return (
     <>
       <PageTitle title="Pagos" description={`Mensualidades con vencimiento los dias 10, pagos por partido y balance del club.`} />
@@ -1740,11 +1806,17 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
           onToggle={toggleMonthly}
           onYear={setPlanYear}
           financeSummary={financeSummary}
+          onEdit={startEditMonthly}
         />
       </div>
       <div className="mb-4">
-        <GalletaMatchBreakdown data={data} isAdmin={isAdmin} onMarkPaid={markPaid} />
+        <GalletaMatchBreakdown data={data} isAdmin={isAdmin} onMarkPaid={markPaid} onEdit={startEditGalleta} />
       </div>
+      {editingPlayer ? (
+        <Modal title={editingGuestName ? `Registrar ${editingGuestName}` : `Editar ${editingPlayer.name}`} onClose={() => { setEditingPlayer(null); setEditingGuestName(null); }}>
+          <PlayerEditorForm player={editingPlayer} onSave={savePlayer} />
+        </Modal>
+      ) : null}
       <div className="grid gap-4 xl:grid-cols-2">
         <Card className="space-y-3 xl:col-span-2">
           <div>
@@ -1771,6 +1843,7 @@ function MonthlyPaymentPlan({
   onToggle,
   onYear,
   financeSummary,
+  onEdit,
 }: {
   players: Player[];
   payments: MonthlyPayment[];
@@ -1780,6 +1853,7 @@ function MonthlyPaymentPlan({
   onToggle: (player: Player, monthKey: string, paid: boolean) => void;
   onYear: (year: number) => void;
   financeSummary: MonthlyFinanceRow[];
+  onEdit?: (player: Player) => void;
 }) {
   const months = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0"));
   return (
@@ -1813,7 +1887,21 @@ function MonthlyPaymentPlan({
           <tbody>
             {players.map((player) => (
               <tr key={player.id}>
-                <td className="whitespace-nowrap pr-2 font-semibold text-white">{player.name}</td>
+                <td className="whitespace-nowrap pr-2 font-semibold text-white">
+                  <div className="flex items-center gap-1.5">
+                    <span>{player.name}</span>
+                    {isAdmin && onEdit ? (
+                      <button
+                        type="button"
+                        onClick={() => onEdit(player)}
+                        className="text-(--muted) hover:text-white transition"
+                        title="Editar jugador"
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    ) : null}
+                  </div>
+                </td>
                 {months.map((mm) => {
                   const key = `${year}-${mm}`;
                   const payment = payments.find((item) => item.playerId === player.id && item.monthKey === key);
@@ -1931,10 +2019,12 @@ function GalletaMatchBreakdown({
   data,
   isAdmin,
   onMarkPaid,
+  onEdit,
 }: {
   data: SifupData;
   isAdmin: boolean;
   onMarkPaid: (row: MatchPlayer) => void;
+  onEdit?: (name: string, key: string) => void;
 }) {
   const allowedMonths = new Set(recentMonthKeys(4));
   const matches = [...data.matches].filter((match) => allowedMonths.has(match.monthKey)).sort((a, b) => a.date.localeCompare(b.date));
@@ -1975,10 +2065,20 @@ function GalletaMatchBreakdown({
             {players.map((player) => (
               <tr key={player.key}>
                 <td className="whitespace-nowrap pr-2">
-                  <p className="font-semibold text-white">
-                    {player.name}
-                    {player.pending > 0 ? <span className="ml-1.5 font-bold text-(--red)">({formatCurrency(player.pending)})</span> : null}
-                  </p>
+                  <div className="flex items-center gap-1.5 font-semibold text-white">
+                    <span>{player.name}</span>
+                    {player.pending > 0 ? <span className="font-bold text-(--red)">({formatCurrency(player.pending)})</span> : null}
+                    {isAdmin && onEdit ? (
+                      <button
+                        type="button"
+                        onClick={() => onEdit(player.name, player.key)}
+                        className="text-(--muted) hover:text-white transition"
+                        title="Editar o registrar jugador"
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    ) : null}
+                  </div>
                 </td>
                 {matches.map((match) => {
                   const row = player.byMatch.get(match.id);
@@ -2075,7 +2175,16 @@ export function PlayersPage({ initialData }: InitialDataProps) {
     const updated = { ...editingPlayer, ...patch, updatedAt: new Date().toISOString() };
     savePlayerAction(updated)
       .then(() => {
-        commit(upsertPlayer(data, updated));
+        const nextData = {
+          ...upsertPlayer(data, updated),
+          matchPlayers: data.matchPlayers.map((mp) => {
+            if (mp.playerId === updated.id) {
+              return { ...mp, name: updated.name, updatedAt: updated.updatedAt };
+            }
+            return mp;
+          }),
+        };
+        commit(nextData);
         setEditingPlayer(null);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar el jugador."));

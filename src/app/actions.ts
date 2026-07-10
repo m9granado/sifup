@@ -66,9 +66,9 @@ export async function setMatchPlayerPaymentStatusAction(rowId: string, status: "
   revalidateAdminViews();
 }
 
-export async function savePlayerAction(player: Player) {
+export async function savePlayerAction(player: Player, guestName?: string) {
   await requireAdmin();
-  await savePlayer(player);
+  await savePlayer(player, guestName);
   revalidateAdminViews();
 }
 

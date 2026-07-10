@@ -291,20 +291,36 @@ export async function setMatchPlayerPaymentStatus(rowId: string, status: "paid" 
   `;
 }
 
-export async function savePlayer(player: Player) {
+export async function savePlayer(player: Player, guestName?: string) {
   const sql = requireDatabase();
-  await sql`
-    insert into players (id, name, nickname, phone, payment_plan, skill_level, active, created_at, updated_at)
-    values (${player.id}, ${player.name}, ${player.nickname}, ${player.phone}, ${player.paymentPlan}, ${player.skillLevel}, ${player.active}, ${player.createdAt}, ${player.updatedAt})
-    on conflict (id) do update set
-      name = excluded.name,
-      nickname = excluded.nickname,
-      phone = excluded.phone,
-      payment_plan = excluded.payment_plan,
-      skill_level = excluded.skill_level,
-      active = excluded.active,
-      updated_at = excluded.updated_at
-  `;
+  await sql.begin(async (tx) => {
+    await tx`
+      insert into players (id, name, nickname, phone, payment_plan, skill_level, active, created_at, updated_at)
+      values (${player.id}, ${player.name}, ${player.nickname}, ${player.phone}, ${player.paymentPlan}, ${player.skillLevel}, ${player.active}, ${player.createdAt}, ${player.updatedAt})
+      on conflict (id) do update set
+        name = excluded.name,
+        nickname = excluded.nickname,
+        phone = excluded.phone,
+        payment_plan = excluded.payment_plan,
+        skill_level = excluded.skill_level,
+        active = excluded.active,
+        updated_at = excluded.updated_at
+    `;
+
+    if (guestName) {
+      await tx`
+        update match_players
+        set player_id = ${player.id}, name = ${player.name}, updated_at = now()
+        where player_id = ${player.id} or (player_id is null and lower(name) = lower(${guestName}))
+      `;
+    } else {
+      await tx`
+        update match_players
+        set name = ${player.name}, updated_at = now()
+        where player_id = ${player.id}
+      `;
+    }
+  });
 }
 
 export async function saveMonthlyPayment(payment: MonthlyPayment) {
