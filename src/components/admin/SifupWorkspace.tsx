@@ -2417,8 +2417,7 @@ export function StandingsPage({ initialData }: InitialDataProps) {
     return [...data.matches]
       .filter((match) => data.results.some((r) => r.matchId === match.id))
       .sort((a, b) => b.date.localeCompare(a.date))
-      .slice(0, 5)
-      .reverse();
+      .slice(0, 5);
   }, [data]);
 
   const topThree = filteredStandings.slice(0, 3);
@@ -2503,8 +2502,8 @@ export function StandingsPage({ initialData }: InitialDataProps) {
     ctx.fillText("#", 30, y + 20);
     ctx.fillText("JUGADOR", 65, y + 20);
     ctx.textAlign = "center";
-    ctx.fillText("PJ", 380, y + 20);
-    ctx.fillText("PTS", 440, y + 20);
+    ctx.fillText("PTS", 370, y + 20);
+    ctx.fillText("PJ", 430, y + 20);
     ctx.fillText("RACHA", 510, y + 20);
     ctx.textAlign = "left";
 
@@ -2551,13 +2550,13 @@ export function StandingsPage({ initialData }: InitialDataProps) {
 
       // Stats
       ctx.textAlign = "center";
+      ctx.fillStyle = "#eab308";
+      ctx.font = "black 16px sans-serif";
+      ctx.fillText(String(row.points), 370, y + 28);
+
       ctx.fillStyle = "#ffffff";
       ctx.font = "bold 13px sans-serif";
-      ctx.fillText(String(row.played), 380, y + 28);
-
-      ctx.fillStyle = "#12d69a";
-      ctx.font = "black 14px sans-serif";
-      ctx.fillText(String(row.points), 440, y + 28);
+      ctx.fillText(String(row.played), 430, y + 28);
 
       // Draw form circles
       let cx = 510 - 28;
@@ -2742,13 +2741,12 @@ export function StandingsPage({ initialData }: InitialDataProps) {
               <tr>
                 <th>#</th>
                 <th>Jugador</th>
-                <th className="optional">PJ</th>
-                <th className="optional">G</th>
-                <th className="optional">E</th>
-                <th className="optional">P</th>
-                <th className="optional">%</th>
-                <th>Puntos</th>
-                <th>Racha</th>
+                <th className="text-center font-bold" style={{ color: "var(--gold)" }}>Puntos</th>
+                <th className="optional text-center">PJ</th>
+                <th className="optional text-center">G</th>
+                <th className="optional text-center">E</th>
+                <th className="optional text-center">P</th>
+                <th className="text-center">Racha</th>
               </tr>
             </thead>
             <tbody>
@@ -2781,14 +2779,13 @@ export function StandingsPage({ initialData }: InitialDataProps) {
                       </strong>
                     </div>
                   </td>
-                  <td className="optional">{row.played}</td>
-                  <td className="optional">{row.wins}</td>
-                  <td className="optional">{row.draws}</td>
-                  <td className="optional">{row.losses}</td>
-                  <td className="optional">{row.winRate}%</td>
-                  <td className="points-cell">{row.points}</td>
+                  <td className="points-cell text-center" style={{ fontSize: "20px", color: "var(--gold)", fontWeight: "1000" }}>{row.points}</td>
+                  <td className="optional text-center">{row.played}</td>
+                  <td className="optional text-center">{row.wins}</td>
+                  <td className="optional text-center">{row.draws}</td>
+                  <td className="optional text-center">{row.losses}</td>
                   <td className="align-middle">
-                    <div className="flex items-center gap-1.5 justify-center sm:justify-start">
+                    <div className="flex items-center gap-1.5 justify-center">
                       {last5Matches.map((match) => {
                         const mp = data.matchPlayers.find(
                           (rowMp) => rowMp.matchId === match.id &&
