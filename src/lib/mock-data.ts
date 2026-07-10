@@ -55,6 +55,7 @@ const players: Player[] = playerSeeds.map((player, index) => ({
   paymentPlan: player.paymentPlan,
   skillLevel: ((index % 5) + 1) as 1 | 2 | 3 | 4 | 5,
   active: true,
+  shortName: player.name.slice(0, 3).toUpperCase(),
   createdAt: now,
   updatedAt: now,
 }));

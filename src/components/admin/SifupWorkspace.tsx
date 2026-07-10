@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, Clipboard, MapPin, Medal, MessageCircle, Pencil, Plus, Save, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
+import { CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, Clipboard, MapPin, Medal, MessageCircle, Pencil, Plus, Save, Share, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
 import {
   createMatchAction,
   markMatchPlayerPaidAction,
@@ -1522,7 +1522,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   function createAndAddPlayer(name: string, phone: string) {
     if (!name.trim()) return;
     const now = new Date().toISOString();
-    const player: Player = { id: newId("player"), name: name.trim(), nickname: name.trim().split(" ")[0], phone: phone.trim(), paymentPlan: "perMatch", skillLevel: 3, active: true, createdAt: now, updatedAt: now };
+    const player: Player = { id: newId("player"), name: name.trim(), nickname: name.trim().split(" ")[0], phone: phone.trim(), paymentPlan: "perMatch", skillLevel: 3, active: true, shortName: name.trim().slice(0, 3).toUpperCase(), createdAt: now, updatedAt: now };
     savePlayerAction(player)
       .then(() => {
         commit(upsertPlayer(data, player));
@@ -1733,6 +1733,7 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
         paymentPlan: "perMatch",
         skillLevel: 3,
         active: true,
+        shortName: name.slice(0, 3).toUpperCase(),
         createdAt: now,
         updatedAt: now,
       });
@@ -2161,7 +2162,7 @@ export function PlayersPage({ initialData }: InitialDataProps) {
   function addPlayer() {
     if (!name.trim()) return;
     const now = new Date().toISOString();
-    const player: Player = { id: newId("player"), name: name.trim(), nickname: name.trim().split(" ")[0], phone: "", paymentPlan: "perMatch", skillLevel: 3, active: true, createdAt: now, updatedAt: now };
+    const player: Player = { id: newId("player"), name: name.trim(), nickname: name.trim().split(" ")[0], phone: "", paymentPlan: "perMatch", skillLevel: 3, active: true, shortName: name.trim().slice(0, 3).toUpperCase(), createdAt: now, updatedAt: now };
     savePlayerAction(player)
       .then(() => {
         commit(upsertPlayer(data, player));
@@ -2307,6 +2308,7 @@ function PlayerEditorForm({ player, onSave }: { player: Player; onSave: (patch: 
     <div className="space-y-3">
       <Input label="Nombre" value={draft.name} onChange={(value) => setDraft({ ...draft, name: value })} />
       <Input label="Pseudonimo" value={draft.nickname} onChange={(value) => setDraft({ ...draft, nickname: value })} />
+      <Input label="Sigla (3 caracteres)" value={draft.shortName} onChange={(value) => setDraft({ ...draft, shortName: value.slice(0, 3).toUpperCase() })} />
       <Input label="Telefono" value={draft.phone} onChange={(value) => setDraft({ ...draft, phone: value })} />
       <label className="space-y-1 text-sm font-medium text-(--muted)">
         <span>Plan</span>
@@ -2378,25 +2380,44 @@ export function PlayerDetailPage({ id, initialData }: { id: string } & InitialDa
 }
 
 export function StandingsPage({ initialData }: InitialDataProps) {
-  const { data } = useSifupData(initialData);
-  const standings = useMemo(() => {
-    return data.players.map((player) => {
+  const isAdmin = useIsAdmin();
+  const { data, commit } = useSifupData(initialData);
+  const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
+  const [error, setError] = useState("");
+
+  const filteredStandings = useMemo(() => {
+    const baseStandings = data.players.map((player) => {
       const stats = computePlayerStats(player, data);
       return {
         id: player.id,
         player: player.name,
         nickname: player.nickname,
         plan: player.paymentPlan,
+        shortName: player.shortName,
         ...stats,
       };
     }).sort((a, b) => b.points - a.points || b.winRate - a.winRate || b.played - a.played);
+
+    let lastMonthlyIndex = -1;
+    for (let i = baseStandings.length - 1; i >= 0; i--) {
+      if (baseStandings[i].plan === "monthly") {
+        lastMonthlyIndex = i;
+        break;
+      }
+    }
+
+    if (lastMonthlyIndex === -1) {
+      return baseStandings;
+    }
+
+    return baseStandings.slice(0, lastMonthlyIndex + 1);
   }, [data]);
 
-  const topThree = standings.slice(0, 3);
+  const topThree = filteredStandings.slice(0, 3);
   const totalPlayed = data.results.length;
   const activePlayers = data.players.filter((player) => player.active).length;
-  const totalPending = standings.reduce((sum, row) => sum + row.pendingDebt, 0);
-  const averageWinRate = standings.length ? Math.round(standings.reduce((sum, row) => sum + row.winRate, 0) / standings.length) : 0;
+  const totalPending = filteredStandings.reduce((sum, row) => sum + row.pendingDebt, 0);
+  const averageWinRate = filteredStandings.length ? Math.round(filteredStandings.reduce((sum, row) => sum + row.winRate, 0) / filteredStandings.length) : 0;
   const recentResults = [...data.results]
     .map((result) => ({ result, match: data.matches.find((match) => match.id === result.matchId) }))
     .filter((item) => item.match)
@@ -2404,6 +2425,182 @@ export function StandingsPage({ initialData }: InitialDataProps) {
     .slice(0, 4);
 
   const rankClass = ["first", "second", "third"];
+
+  function savePlayer(patch: Partial<Player>) {
+    if (!editingPlayer) return;
+    const updated = { ...editingPlayer, ...patch, updatedAt: new Date().toISOString() };
+    savePlayerAction(updated)
+      .then(() => {
+        const nextData = {
+          ...upsertPlayer(data, updated),
+          matchPlayers: data.matchPlayers.map((mp) => {
+            if (mp.playerId === updated.id) {
+              return { ...mp, name: updated.name, updatedAt: updated.updatedAt };
+            }
+            return mp;
+          }),
+        };
+        commit(nextData);
+        setEditingPlayer(null);
+        setError("");
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar el jugador."));
+  }
+
+  function handleShare() {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const rowHeight = 48;
+    const headerHeight = 110;
+    const footerHeight = 50;
+    const canvasWidth = 600;
+    const canvasHeight = headerHeight + (filteredStandings.length * rowHeight) + footerHeight;
+
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+
+    // Draw background gradient
+    const grad = ctx.createLinearGradient(0, 0, 0, canvasHeight);
+    grad.addColorStop(0, "#05110e");
+    grad.addColorStop(1, "#0d2720");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+    // Draw header branding
+    ctx.fillStyle = "#12d69a";
+    ctx.font = "black 28px sans-serif";
+    ctx.fillText("SIFUP", 30, 48);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 16px sans-serif";
+    ctx.fillText("Tabla Viva de los Martes", 30, 75);
+
+    ctx.fillStyle = "#70a090";
+    ctx.font = "600 12px sans-serif";
+    ctx.fillText("RANKING OFICIAL", 30, 95);
+
+    // Draw date
+    const dateStr = new Date().toLocaleDateString("es-CL", { day: "numeric", month: "long", year: "numeric" });
+    ctx.textAlign = "right";
+    ctx.fillText(dateStr, canvasWidth - 30, 95);
+    ctx.textAlign = "left";
+
+    // Table Headers
+    let y = headerHeight;
+    ctx.fillStyle = "rgba(255, 255, 255, 0.08)";
+    ctx.fillRect(0, y, canvasWidth, 32);
+
+    ctx.fillStyle = "#70a090";
+    ctx.font = "bold 11px sans-serif";
+    ctx.fillText("#", 30, y + 20);
+    ctx.fillText("JUGADOR", 65, y + 20);
+    ctx.textAlign = "center";
+    ctx.fillText("PJ", 380, y + 20);
+    ctx.fillText("PTS", 440, y + 20);
+    ctx.fillText("FORM", 510, y + 20);
+    ctx.textAlign = "left";
+
+    y += 32;
+
+    // Draw rows
+    filteredStandings.forEach((row, index) => {
+      // Row background
+      if (index % 2 === 1) {
+        ctx.fillStyle = "rgba(255, 255, 255, 0.02)";
+        ctx.fillRect(0, y, canvasWidth, rowHeight);
+      }
+
+      // Rank
+      ctx.fillStyle = index < 3 ? "#eab308" : "#70a090";
+      ctx.font = "black 14px sans-serif";
+      ctx.fillText(String(index + 1), 30, y + 28);
+
+      // Initials Bubble
+      const bubbleColor = index < 3 ? "#eab308" : "#12d69a";
+      ctx.fillStyle = bubbleColor;
+      ctx.beginPath();
+      ctx.arc(80, y + 24, 16, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Initials Text
+      ctx.fillStyle = "#05110e";
+      ctx.font = "black 11px sans-serif";
+      ctx.textAlign = "center";
+      const initials = row.shortName ? row.shortName.toUpperCase() : row.player.slice(0, 2).toUpperCase();
+      ctx.fillText(initials, 80, y + 28);
+      ctx.textAlign = "left";
+
+      // Player Name
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 14px sans-serif";
+      ctx.fillText(row.player, 110, y + 20);
+
+      // Nickname / Plan
+      ctx.fillStyle = "#70a090";
+      ctx.font = "500 11px sans-serif";
+      const subText = `${row.nickname || (row.plan === "monthly" ? "Oficial" : "Galleta")}`;
+      ctx.fillText(subText, 110, y + 36);
+
+      // Stats
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 13px sans-serif";
+      ctx.fillText(String(row.played), 380, y + 28);
+
+      ctx.fillStyle = "#12d69a";
+      ctx.font = "black 14px sans-serif";
+      ctx.fillText(String(row.points), 440, y + 28);
+
+      ctx.fillStyle = "#70a090";
+      ctx.font = "500 12px sans-serif";
+      ctx.fillText(row.form, 510, y + 28);
+
+      ctx.textAlign = "left";
+
+      // Separator line
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(30, y + rowHeight);
+      ctx.lineTo(canvasWidth - 30, y + rowHeight);
+      ctx.stroke();
+
+      y += rowHeight;
+    });
+
+    // Draw footer
+    ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
+    ctx.font = "500 11px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("Generado en sifup.vercel.app", canvasWidth / 2, y + 30);
+
+    // Share / Download
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const file = new File([blob], "sifup-ranking.png", { type: "image/png" });
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({
+          files: [file],
+          title: "Ranking SIFUP",
+          text: `Tabla de los martes generada el ${dateStr}`,
+        }).catch((err) => {
+          console.error("Error al compartir:", err);
+          triggerDownload(canvas);
+        });
+      } else {
+        triggerDownload(canvas);
+      }
+    }, "image/png");
+  }
+
+  function triggerDownload(canvas: HTMLCanvasElement) {
+    const link = document.createElement("a");
+    link.download = `sifup-ranking-${new Date().toISOString().slice(0, 10)}.png`;
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  }
 
   return (
     <>
@@ -2415,7 +2612,7 @@ export function StandingsPage({ initialData }: InitialDataProps) {
             <strong>Tabla viva de los martes</strong>
           </div>
           <h1>Rankings</h1>
-          <p>Vision general, resultados y rendimiento acumulado por jugador, con deuda pendiente siempre visible.</p>
+          <p>Vision general, resultados y rendimiento acumulado por jugador, con deudas e invitados acotados.</p>
         </div>
         <div className="hero-metrics" aria-label="Vision general">
           <article className="metric cyan">
@@ -2436,6 +2633,8 @@ export function StandingsPage({ initialData }: InitialDataProps) {
           </article>
         </div>
       </section>
+
+      {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
       <nav className="section-nav" aria-label="Secciones del ranking">
         <a className="selected" href="#vision">Vision general</a>
@@ -2500,9 +2699,14 @@ export function StandingsPage({ initialData }: InitialDataProps) {
         <div className="ranking-head">
           <div>
             <h2>Ranking general</h2>
-            <p>Ordenado por puntos, rendimiento y partidos jugados.</p>
+            <p>Ordenado por puntos, rendimiento y PJ. Acotado hasta el ultimo oficial mensual.</p>
           </div>
-          <strong className="season-chip">Temporada actual</strong>
+          <div className="flex items-center gap-2">
+            <Button onClick={handleShare} variant="secondary" className="h-9 px-3 text-xs flex items-center gap-1.5">
+              <Share size={14} /> Compartir
+            </Button>
+            <strong className="season-chip">Temporada actual</strong>
+          </div>
         </div>
 
         <div className="table-wrap">
@@ -2521,13 +2725,31 @@ export function StandingsPage({ initialData }: InitialDataProps) {
               </tr>
             </thead>
             <tbody>
-              {standings.map((row, index) => (
+              {filteredStandings.map((row, index) => (
                 <tr key={row.player}>
                   <td>{index + 1}</td>
                   <td>
                     <div className="player">
-                      <span>{row.player.slice(0, 2).toUpperCase()}</span>
-                      <strong>{row.player}<small>{row.plan === "monthly" ? "Oficial" : "Galleta"} · {row.form}</small></strong>
+                      <span>{row.shortName ? row.shortName.toUpperCase() : row.player.slice(0, 2).toUpperCase()}</span>
+                      <strong>
+                        <div className="flex items-center gap-1.5">
+                          <b>{row.player}</b>
+                          {isAdmin ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const p = data.players.find((item) => item.id === row.id);
+                                if (p) setEditingPlayer(p);
+                              }}
+                              className="text-(--muted) hover:text-white transition inline-flex"
+                              title="Editar jugador"
+                            >
+                              <Pencil size={12} />
+                            </button>
+                          ) : null}
+                        </div>
+                        <small>{row.plan === "monthly" ? "Oficial" : "Galleta"} · {row.form}</small>
+                      </strong>
                     </div>
                   </td>
                   <td className="optional">{row.played}</td>
@@ -2543,6 +2765,12 @@ export function StandingsPage({ initialData }: InitialDataProps) {
           </table>
         </div>
       </section>
+
+      {editingPlayer ? (
+        <Modal title={`Editar ${editingPlayer.name}`} onClose={() => setEditingPlayer(null)}>
+          <PlayerEditorForm player={editingPlayer} onSave={savePlayer} />
+        </Modal>
+      ) : null}
     </>
   );
 }

@@ -29,6 +29,7 @@ export type Player = {
   paymentPlan: PaymentPlan;
   skillLevel: 1 | 2 | 3 | 4 | 5;
   active: boolean;
+  shortName: string;
   createdAt: string;
   updatedAt: string;
 };

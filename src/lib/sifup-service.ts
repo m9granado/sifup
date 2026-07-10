@@ -57,6 +57,7 @@ export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MA
         paymentPlan: "perMatch",
         skillLevel: 3,
         active: true,
+        shortName: row.name.trim().slice(0, 3).toUpperCase(),
         createdAt: now,
         updatedAt: now,
       };

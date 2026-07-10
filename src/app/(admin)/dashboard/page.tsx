@@ -14,6 +14,7 @@ type PlayerStanding = {
   player: string;
   nickname?: string;
   plan: Player["paymentPlan"];
+  shortName: string;
   played: number;
   wins: number;
   draws: number;
@@ -91,6 +92,7 @@ function buildStandings(players: Player[], matchPlayers: MatchPlayer[], results:
         player: player.name,
         nickname: player.nickname,
         plan: player.paymentPlan,
+        shortName: player.shortName || "",
         played: appearances.length,
         wins,
         draws,
@@ -296,7 +298,7 @@ export default async function Page() {
                 <article key={row.player} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
                   <span className="w-5 text-sm font-black text-(--muted)">#{index + 1}</span>
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-(--border) bg-white/[0.06] text-sm font-black text-white">
-                    {playerInitials(row.player, row.nickname)}
+                    {row.shortName ? row.shortName.toUpperCase() : playerInitials(row.player, row.nickname)}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">

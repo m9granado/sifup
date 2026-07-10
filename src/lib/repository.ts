@@ -22,6 +22,7 @@ type PlayerRow = {
   payment_plan: Player["paymentPlan"];
   skill_level: Player["skillLevel"];
   active: boolean;
+  short_name: string;
   created_at: Date | string;
   updated_at: Date | string;
 };
@@ -145,6 +146,7 @@ export async function getSifupData(): Promise<SifupData> {
       paymentPlan: row.payment_plan,
       skillLevel: row.skill_level,
       active: row.active,
+      shortName: row.short_name || "",
       createdAt: iso(row.created_at),
       updatedAt: iso(row.updated_at),
     })),
@@ -295,8 +297,8 @@ export async function savePlayer(player: Player, guestName?: string) {
   const sql = requireDatabase();
   await sql.begin(async (tx) => {
     await tx`
-      insert into players (id, name, nickname, phone, payment_plan, skill_level, active, created_at, updated_at)
-      values (${player.id}, ${player.name}, ${player.nickname}, ${player.phone}, ${player.paymentPlan}, ${player.skillLevel}, ${player.active}, ${player.createdAt}, ${player.updatedAt})
+      insert into players (id, name, nickname, phone, payment_plan, skill_level, active, short_name, created_at, updated_at)
+      values (${player.id}, ${player.name}, ${player.nickname}, ${player.phone}, ${player.paymentPlan}, ${player.skillLevel}, ${player.active}, ${player.shortName || ""}, ${player.createdAt}, ${player.updatedAt})
       on conflict (id) do update set
         name = excluded.name,
         nickname = excluded.nickname,
@@ -304,6 +306,7 @@ export async function savePlayer(player: Player, guestName?: string) {
         payment_plan = excluded.payment_plan,
         skill_level = excluded.skill_level,
         active = excluded.active,
+        short_name = excluded.short_name,
         updated_at = excluded.updated_at
     `;
 

@@ -6,6 +6,7 @@ create table if not exists players (
   payment_plan text not null check (payment_plan in ('monthly', 'perMatch')),
   skill_level integer not null check (skill_level between 1 and 5),
   active boolean not null default true,
+  short_name text not null default '',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
