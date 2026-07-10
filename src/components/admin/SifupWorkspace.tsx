@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, Clipboard, MapPin, Medal, MessageCircle, Pencil, Plus, Save, Share, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
+import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, MapPin, Medal, MessageCircle, Pencil, Plus, Save, Share, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
 import {
   createMatchAction,
   markMatchPlayerPaidAction,
@@ -2413,11 +2413,17 @@ export function StandingsPage({ initialData }: InitialDataProps) {
     return baseStandings.slice(0, lastMonthlyIndex + 1);
   }, [data]);
 
+  const last5Matches = useMemo(() => {
+    return [...data.matches]
+      .filter((match) => data.results.some((r) => r.matchId === match.id))
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 5)
+      .reverse();
+  }, [data]);
+
   const topThree = filteredStandings.slice(0, 3);
   const totalPlayed = data.results.length;
   const activePlayers = data.players.filter((player) => player.active).length;
-  const totalPending = filteredStandings.reduce((sum, row) => sum + row.pendingDebt, 0);
-  const averageWinRate = filteredStandings.length ? Math.round(filteredStandings.reduce((sum, row) => sum + row.winRate, 0) / filteredStandings.length) : 0;
   const recentResults = [...data.results]
     .map((result) => ({ result, match: data.matches.find((match) => match.id === result.matchId) }))
     .filter((item) => item.match)
@@ -2499,7 +2505,7 @@ export function StandingsPage({ initialData }: InitialDataProps) {
     ctx.textAlign = "center";
     ctx.fillText("PJ", 380, y + 20);
     ctx.fillText("PTS", 440, y + 20);
-    ctx.fillText("FORM", 510, y + 20);
+    ctx.fillText("RACHA", 510, y + 20);
     ctx.textAlign = "left";
 
     y += 32;
@@ -2553,9 +2559,45 @@ export function StandingsPage({ initialData }: InitialDataProps) {
       ctx.font = "black 14px sans-serif";
       ctx.fillText(String(row.points), 440, y + 28);
 
-      ctx.fillStyle = "#70a090";
-      ctx.font = "500 12px sans-serif";
-      ctx.fillText(row.form, 510, y + 28);
+      // Draw form circles
+      let cx = 510 - 28;
+      last5Matches.forEach((match) => {
+        const mp = data.matchPlayers.find(
+          (rowMp) => rowMp.matchId === match.id &&
+            (rowMp.playerId === row.id || rowMp.name === row.player) &&
+            rowMp.attendanceStatus === "confirmed"
+        );
+        if (!mp || mp.team === "none") {
+          // Hollow circle
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(cx, y + 24, 5, 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          const result = data.results.find((r) => r.matchId === match.id);
+          if (!result) {
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(cx, y + 24, 5, 0, Math.PI * 2);
+            ctx.stroke();
+          } else if (result.winner === "draw") {
+            // Gray circle
+            ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
+            ctx.beginPath();
+            ctx.arc(cx, y + 24, 5, 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            const win = result.winner === mp.team;
+            ctx.fillStyle = win ? "#12d69a" : "#ef4444";
+            ctx.beginPath();
+            ctx.arc(cx, y + 24, 5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        cx += 14;
+      });
 
       ctx.textAlign = "left";
 
@@ -2603,7 +2645,7 @@ export function StandingsPage({ initialData }: InitialDataProps) {
   }
 
   return (
-    <>
+    <div className="max-w-4xl mx-auto w-full px-4 pt-4 pb-12 space-y-6">
       <section className="hero">
         <div className="hero-bg" aria-hidden="true"></div>
         <div className="hero-copy">
@@ -2623,25 +2665,10 @@ export function StandingsPage({ initialData }: InitialDataProps) {
             <span>Jugadores</span>
             <strong>{activePlayers}</strong>
           </article>
-          <article className="metric pink">
-            <span>Win rate prom.</span>
-            <strong>{averageWinRate}%</strong>
-          </article>
-          <article className="metric gold">
-            <span>Deuda</span>
-            <strong>{formatCurrency(totalPending)}</strong>
-          </article>
         </div>
       </section>
 
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
-
-      <nav className="section-nav" aria-label="Secciones del ranking">
-        <a className="selected" href="#vision">Vision general</a>
-        <a href="#top3">Top 3</a>
-        <a href="#ranking">Ranking general</a>
-        <a href="#resultados">Resultados</a>
-      </nav>
 
       <section id="vision" className="vision-grid">
         <article id="top3" className="panel top-panel">
@@ -2721,7 +2748,7 @@ export function StandingsPage({ initialData }: InitialDataProps) {
                 <th className="optional">P</th>
                 <th className="optional">%</th>
                 <th>Puntos</th>
-                <th>Deuda</th>
+                <th>Racha</th>
               </tr>
             </thead>
             <tbody>
@@ -2733,7 +2760,9 @@ export function StandingsPage({ initialData }: InitialDataProps) {
                       <span>{row.shortName ? row.shortName.toUpperCase() : row.player.slice(0, 2).toUpperCase()}</span>
                       <strong>
                         <div className="flex items-center gap-1.5">
-                          <b>{row.player}</b>
+                          <Link href={`/players/${row.id}`} className="hover:text-(--green) hover:underline transition">
+                            <b>{row.player}</b>
+                          </Link>
                           {isAdmin ? (
                             <button
                               type="button"
@@ -2758,7 +2787,45 @@ export function StandingsPage({ initialData }: InitialDataProps) {
                   <td className="optional">{row.losses}</td>
                   <td className="optional">{row.winRate}%</td>
                   <td className="points-cell">{row.points}</td>
-                  <td className={row.pendingDebt > 0 ? "debt" : "ok"}>{formatCurrency(row.pendingDebt)}</td>
+                  <td className="align-middle">
+                    <div className="flex items-center gap-1.5 justify-center sm:justify-start">
+                      {last5Matches.map((match) => {
+                        const mp = data.matchPlayers.find(
+                          (rowMp) => rowMp.matchId === match.id &&
+                            (rowMp.playerId === row.id || rowMp.name === row.player) &&
+                            rowMp.attendanceStatus === "confirmed"
+                        );
+                        if (!mp || mp.team === "none") {
+                          return <div key={match.id} className="h-5 w-5 rounded-full border border-white/[0.12] bg-transparent" title={`${match.weekLabel}: No jugó`} />;
+                        }
+                        const result = data.results.find((r) => r.matchId === match.id);
+                        if (!result) {
+                          return <div key={match.id} className="h-5 w-5 rounded-full border border-white/[0.12] bg-transparent" title={`${match.weekLabel}: No jugó`} />;
+                        }
+                        if (result.winner === "draw") {
+                          return (
+                            <div key={match.id} className="flex h-5 w-5 items-center justify-center rounded-full bg-white/[0.12] text-[10px] font-black text-(--muted) border border-white/[0.08]" title={`${match.weekLabel}: Empate`}>
+                              -
+                            </div>
+                          );
+                        }
+                        const win = result.winner === mp.team;
+                        if (win) {
+                          return (
+                            <div key={match.id} className="flex h-5 w-5 items-center justify-center rounded-full bg-(--green) text-(--bg-deep)" title={`${match.weekLabel}: Victoria`}>
+                              <Check size={11} strokeWidth={4} />
+                            </div>
+                          );
+                        } else {
+                          return (
+                            <div key={match.id} className="flex h-5 w-5 items-center justify-center rounded-full bg-(--red)/85 text-white" title={`${match.weekLabel}: Derrota`}>
+                              <X size={10} strokeWidth={3} />
+                            </div>
+                          );
+                        }
+                      })}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -2771,7 +2838,7 @@ export function StandingsPage({ initialData }: InitialDataProps) {
           <PlayerEditorForm player={editingPlayer} onSave={savePlayer} />
         </Modal>
       ) : null}
-    </>
+    </div>
   );
 }
 
