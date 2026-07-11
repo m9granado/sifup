@@ -489,6 +489,14 @@
   border-radius: 10px;
 }
 
+.podium-card-main-content {
+  display: block;
+}
+
+.podium-card-name-group {
+  margin-top: 0;
+}
+
 .podium-card::after {
   position: absolute;
   top: -18px;
@@ -916,6 +924,49 @@
     grid-template-columns: 1fr;
   }
 
+  .podium-card {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    min-height: auto !important;
+    padding: 12px 16px !important;
+    gap: 16px !important;
+  }
+
+  .podium-card::after {
+    display: none !important;
+  }
+
+  .podium-card-main-content {
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+  }
+
+  .podium-card h3 {
+    margin: 0 !important;
+    font-size: 18px !important;
+    line-height: 1.2 !important;
+  }
+
+  .podium-card p {
+    margin-top: 2px !important;
+    font-size: 11px !important;
+  }
+
+  .podium-footer {
+    margin-top: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 16px !important;
+  }
+
+  .podium-footer strong {
+    font-size: 28px !important;
+    line-height: 1 !important;
+  }
+
   .section-nav {
     padding: 14px 0;
   }
@@ -972,18 +1023,7 @@
     font-size: 20px;
   }
 
-  .podium-card {
-    min-height: 166px;
-  }
 
-  .podium-card h3 {
-    margin-top: 28px;
-    font-size: 22px;
-  }
-
-  .podium-footer {
-    margin-top: 24px;
-  }
 
   .result-row {
     grid-template-columns: 1fr;

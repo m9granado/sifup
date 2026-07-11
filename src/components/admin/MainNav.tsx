@@ -14,8 +14,8 @@ export function MainNav({ isAdmin, nextMatchId }: { isAdmin: boolean; nextMatchI
 
   const items: NavItem[] = [
     { href: "/dashboard", label: "Inicio", icon: "icon-home" },
-    ...(isAdmin ? [{ href: "/matches", label: "Partidos", icon: "icon-calendar" }] : []),
-    { href: "/players", label: "Jugadores", icon: "icon-users" },
+    { href: "/matches", label: "Partidos", icon: "icon-calendar" },
+    ...(isAdmin ? [{ href: "/players", label: "Jugadores", icon: "icon-users" }] : []),
     ...(isAdmin && nextMatchId ? [{ href: `/matches/${nextMatchId}/teams`, label: "Equipos", icon: "icon-shield" }] : []),
     ...(isAdmin ? [{ href: "/payments", label: "Pagos", icon: "icon-wallet" }] : []),
     { href: "/standings", label: "Rankings", icon: "icon-trophy" },

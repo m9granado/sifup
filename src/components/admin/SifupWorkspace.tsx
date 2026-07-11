@@ -2682,12 +2682,52 @@ export function StandingsPage({ initialData }: InitialDataProps) {
           <div className="podium-grid">
             {topThree.map((row, index) => (
               <article key={row.player} className={`podium-card ${rankClass[index]}`} data-rank={index + 1}>
-                <span className="medal"><Medal size={14} /></span>
-                <h3>{row.player}</h3>
-                <p>{row.nickname || (row.plan === "monthly" ? "Oficial" : "Galleta")}</p>
+                <div className="podium-card-main-content">
+                  <span className="medal"><Medal size={14} /></span>
+                  <div className="podium-card-name-group">
+                    <h3>{row.player}</h3>
+                    <p>{row.nickname || (row.plan === "monthly" ? "Oficial" : "Galleta")}</p>
+                  </div>
+                </div>
                 <div className="podium-footer">
-                  <strong>{row.points}</strong>
-                  <span>{row.winRate}%<small>{row.form}</small></span>
+                  <strong>{row.points} <span className="text-[10px] uppercase font-bold tracking-wider opacity-60">pts</span></strong>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {last5Matches.map((match) => {
+                      const mp = data.matchPlayers.find(
+                        (rowMp) => rowMp.matchId === match.id &&
+                          (rowMp.playerId === row.id || rowMp.name === row.player) &&
+                          rowMp.attendanceStatus === "confirmed"
+                      );
+                      if (!mp || mp.team === "none") {
+                        return <div key={match.id} className="h-3 w-3 rounded-full border border-current opacity-30" title={`${match.weekLabel}: No jugó`} />;
+                      }
+                      const result = data.results.find((r) => r.matchId === match.id);
+                      if (!result) {
+                        return <div key={match.id} className="h-3 w-3 rounded-full border border-current opacity-30" title={`${match.weekLabel}: No jugó`} />;
+                      }
+                      if (result.winner === "draw") {
+                        return (
+                          <div key={match.id} className="flex h-3 w-3 items-center justify-center rounded-full bg-current/25 text-[8px] font-black text-current" title={`${match.weekLabel}: Empate`}>
+                            -
+                          </div>
+                        );
+                      }
+                      const win = result.winner === mp.team;
+                      if (win) {
+                        return (
+                          <div key={match.id} className="flex h-3 w-3 items-center justify-center rounded-full bg-emerald-600 text-white" title={`${match.weekLabel}: Victoria`}>
+                            <Check size={8} strokeWidth={4} />
+                          </div>
+                        );
+                      } else {
+                        return (
+                          <div key={match.id} className="flex h-3 w-3 items-center justify-center rounded-full bg-red-600 text-white" title={`${match.weekLabel}: Derrota`}>
+                            <X size={8} strokeWidth={3} />
+                          </div>
+                        );
+                      }
+                    })}
+                  </div>
                 </div>
               </article>
             ))}
@@ -2704,18 +2744,31 @@ export function StandingsPage({ initialData }: InitialDataProps) {
           </div>
 
           <div className="result-list">
-            {recentResults.map(({ result, match }) => (
-              <article key={result.id} className="result-row">
-                <div>
-                  <strong>{match?.weekLabel || match?.date}</strong>
-                  <span>{match?.location}</span>
-                </div>
-                <div className="score">
-                  <b>Rojo</b> {result.scoreA} - {result.scoreB} <b>Amarillo</b>
-                  <small>{result.winner === "draw" ? "Empate" : `Gana ${teamLabel(result.winner)}`}</small>
-                </div>
-              </article>
-            ))}
+            {recentResults.map(({ result, match }) => {
+              const winners = result.winner !== "draw"
+                ? data.matchPlayers.filter((mp) => mp.matchId === result.matchId && mp.team === result.winner && mp.attendanceStatus === "confirmed")
+                : [];
+              return (
+                <article key={result.id} className="result-row">
+                  <div className="flex flex-col gap-1.5 min-w-0">
+                    <strong>{match?.weekLabel || match?.date}</strong>
+                    {winners.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5 mt-1.5">
+                        {winners.map((w) => (
+                          <span key={w.id} className="inline-flex items-center rounded-full bg-(--green)/15 px-2 py-0.5 text-[10px] font-black text-(--green)">
+                            {w.name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="score">
+                    <b>Rojo</b> {result.scoreA} - {result.scoreB} <b>Amarillo</b>
+                    <small>{result.winner === "draw" ? "Empate" : `Gana ${teamLabel(result.winner)}`}</small>
+                  </div>
+                </article>
+              );
+            })}
             {recentResults.length === 0 ? <p className="text-sm text-(--muted)">Aun no hay resultados cerrados.</p> : null}
           </div>
         </article>
