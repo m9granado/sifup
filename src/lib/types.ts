@@ -30,6 +30,7 @@ export type Player = {
   skillLevel: 1 | 2 | 3 | 4 | 5;
   active: boolean;
   shortName: string;
+  isGoalkeeper: boolean;
   createdAt: string;
   updatedAt: string;
 };

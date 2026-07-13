@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { addPlayerToMatch, findPlayer, getNextMatchSummary, getPendingPayments, importWhatsAppMatch, registerMatchPayment, registerMonthlyPayment } from "@/lib/sifup-service";
+import { addPlayerToMatch, findPlayer, getNextMatchSummary, getPendingPayments, importWhatsAppMatch, registerMatchPayment, registerMonthlyPayment, mergePlayers } from "@/lib/sifup-service";
 import { PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "@/lib/sifup-constants";
 
 type ToolResult = {
@@ -121,6 +121,19 @@ function createServer() {
       },
     },
     (input) => runTool(() => registerMatchPayment(input)),
+  );
+
+  server.registerTool(
+    "merge_players",
+    {
+      title: "Fusionar jugadores duplicados",
+      description: "Une dos registros de jugadores (ej. un registro temporal galleta y uno oficial). Mueve todas las participaciones en partidos y pagos del jugador origen al jugador destino, y luego elimina el jugador origen.",
+      inputSchema: {
+        sourcePlayerId: z.string().min(1).describe("ID del jugador origen (duplicado/temporal a eliminar)."),
+        targetPlayerId: z.string().min(1).describe("ID del jugador destino (oficial a conservar)."),
+      },
+    },
+    (input) => runTool(() => mergePlayers(input)),
   );
 
   server.registerTool(

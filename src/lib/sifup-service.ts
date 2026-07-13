@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { COURT_COST, MONTHLY_AMOUNT, PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "./sifup-constants";
 import { monthKey, weekLabel } from "./sifup-date";
 import { parseWhatsAppList } from "./parser";
-import { getSifupData, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment, savePlayer } from "./repository";
+import { getSifupData, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment, savePlayer, mergePlayers as dbMergePlayers } from "./repository";
 import { newId, nextMatch, sortByWhatsappOrder, summarizeMatch } from "./store";
 import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, teamsMessage } from "./whatsapp";
 import type { AttendanceStatus, Match, MatchPlayer, MonthlyPayment, Player, Team } from "./types";
@@ -49,7 +49,7 @@ export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MA
     const out = row.attendanceStatus === "out";
     let player = findKnownPlayer(knownPlayers, row.name);
     if (!player && !out) {
-      player = {
+      const newPlayer: Player = {
         id: newId("player"),
         name: row.name.trim(),
         nickname: row.name.trim().split(" ")[0],
@@ -58,11 +58,13 @@ export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MA
         skillLevel: 3,
         active: true,
         shortName: row.name.trim().slice(0, 3).toUpperCase(),
+        isGoalkeeper: false,
         createdAt: now,
         updatedAt: now,
       };
-      await savePlayer(player);
-      knownPlayers.push(player);
+      await savePlayer(newPlayer);
+      knownPlayers.push(newPlayer);
+      player = newPlayer;
     }
     const monthly = player?.paymentPlan === "monthly";
     rows.push({
@@ -399,6 +401,12 @@ function scorePlayerMatch(player: Player, target: string): { matchType: PlayerMa
   const playerName = normalizeName(player.name);
   const nickname = normalizeName(player.nickname);
 
+  // Normalize aliases for Piti / Pituto / Cristopher
+  const pitiAliases = ["piti", "pituto", "cristopher"];
+  if (pitiAliases.includes(target) && (pitiAliases.includes(playerName) || pitiAliases.includes(nickname))) {
+    return { matchType: "exact", score: 100 };
+  }
+
   if (target === playerName || (nickname && target === nickname)) return { matchType: "exact", score: 100 };
 
   if (target.length >= 3 && (playerName.startsWith(target) || target.startsWith(playerName))) {
@@ -426,6 +434,18 @@ function scorePlayerMatch(player: Player, target: string): { matchType: PlayerMa
 
 function findKnownPlayer(players: Player[], name: string) {
   const target = normalizeName(name);
+
+  // Normalize aliases for Piti / Pituto / Cristopher
+  const pitiAliases = ["piti", "pituto", "cristopher"];
+  if (pitiAliases.includes(target)) {
+    const found = players.find((player) => {
+      const playerName = normalizeName(player.name);
+      const nickname = normalizeName(player.nickname);
+      return pitiAliases.includes(playerName) || pitiAliases.includes(nickname);
+    });
+    if (found) return found;
+  }
+
   return players.find((player) => {
     const playerName = normalizeName(player.name);
     const nickname = normalizeName(player.nickname);
@@ -455,5 +475,11 @@ function revalidateSifupViews(matchId?: string) {
   revalidatePath("/players");
   revalidatePath("/standings");
   if (matchId) revalidatePath(`/matches/${matchId}`);
+}
+
+export async function mergePlayers({ sourcePlayerId, targetPlayerId }: { sourcePlayerId: string; targetPlayerId: string }) {
+  await dbMergePlayers(sourcePlayerId, targetPlayerId);
+  revalidateSifupViews();
+  return { success: true, message: "Jugadores fusionados exitosamente." };
 }
 

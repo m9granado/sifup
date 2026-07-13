@@ -7,9 +7,12 @@ create table if not exists players (
   skill_level integer not null check (skill_level between 1 and 5),
   active boolean not null default true,
   short_name text not null default '',
+  is_goalkeeper boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table players add column if not exists is_goalkeeper boolean not null default false;
 
 create table if not exists matches (
   id text primary key,

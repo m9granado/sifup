@@ -23,6 +23,7 @@ type PlayerRow = {
   skill_level: Player["skillLevel"];
   active: boolean;
   short_name: string;
+  is_goalkeeper: boolean;
   created_at: Date | string;
   updated_at: Date | string;
 };
@@ -147,6 +148,7 @@ export async function getSifupData(): Promise<SifupData> {
       skillLevel: row.skill_level,
       active: row.active,
       shortName: row.short_name || "",
+      isGoalkeeper: Boolean(row.is_goalkeeper),
       createdAt: iso(row.created_at),
       updatedAt: iso(row.updated_at),
     })),
@@ -297,8 +299,8 @@ export async function savePlayer(player: Player, guestName?: string) {
   const sql = requireDatabase();
   await sql.begin(async (tx) => {
     await tx`
-      insert into players (id, name, nickname, phone, payment_plan, skill_level, active, short_name, created_at, updated_at)
-      values (${player.id}, ${player.name}, ${player.nickname}, ${player.phone}, ${player.paymentPlan}, ${player.skillLevel}, ${player.active}, ${player.shortName || ""}, ${player.createdAt}, ${player.updatedAt})
+      insert into players (id, name, nickname, phone, payment_plan, skill_level, active, short_name, is_goalkeeper, created_at, updated_at)
+      values (${player.id}, ${player.name}, ${player.nickname}, ${player.phone}, ${player.paymentPlan}, ${player.skillLevel}, ${player.active}, ${player.shortName || ""}, ${player.isGoalkeeper}, ${player.createdAt}, ${player.updatedAt})
       on conflict (id) do update set
         name = excluded.name,
         nickname = excluded.nickname,
@@ -307,6 +309,7 @@ export async function savePlayer(player: Player, guestName?: string) {
         skill_level = excluded.skill_level,
         active = excluded.active,
         short_name = excluded.short_name,
+        is_goalkeeper = excluded.is_goalkeeper,
         updated_at = excluded.updated_at
     `;
 
@@ -339,4 +342,51 @@ export async function saveMonthlyPayment(payment: MonthlyPayment) {
       paid_at = excluded.paid_at,
       updated_at = excluded.updated_at
   `;
+}
+
+export async function mergePlayers(sourceId: string, targetId: string) {
+  const sql = requireDatabase();
+  await sql.begin(async (tx) => {
+    // 1. Obtener la info del jugador destino
+    const [targetPlayer] = await tx`select name from players where id = ${targetId}`;
+    if (!targetPlayer) throw new Error("Jugador destino no encontrado.");
+
+    // 2. Actualizar participaciones en partidos (match_players)
+    await tx`
+      update match_players
+      set player_id = ${targetId}, name = ${targetPlayer.name}, updated_at = now()
+      where player_id = ${sourceId}
+    `;
+
+    // 3. Fusionar pagos mensuales (monthly_payments) para evitar violaciones de unicidad (player_id, month_key)
+    const sourcePayments = await tx`select id, month_key, amount_paid, expected_amount from monthly_payments where player_id = ${sourceId}`;
+    for (const sourcePay of sourcePayments) {
+      const [targetPay] = await tx`
+        select id, amount_paid, expected_amount from monthly_payments
+        where player_id = ${targetId} and month_key = ${sourcePay.month_key}
+      `;
+      if (targetPay) {
+        // Sumar montos pagados y actualizar
+        const newPaid = Math.min(targetPay.amount_paid + sourcePay.amount_paid, targetPay.expected_amount);
+        const newStatus = newPaid >= targetPay.expected_amount ? "paid" : newPaid > 0 ? "promised" : "unpaid";
+        await tx`
+          update monthly_payments
+          set amount_paid = ${newPaid}, payment_status = ${newStatus}, updated_at = now()
+          where id = ${targetPay.id}
+        `;
+        // Eliminar el duplicado origen
+        await tx`delete from monthly_payments where id = ${sourcePay.id}`;
+      } else {
+        // Actualizar player_id al destino
+        await tx`
+          update monthly_payments
+          set player_id = ${targetId}, updated_at = now()
+          where id = ${sourcePay.id}
+        `;
+      }
+    }
+
+    // 4. Eliminar el jugador origen
+    await tx`delete from players where id = ${sourceId}`;
+  });
 }

@@ -65,6 +65,18 @@ function weekLabel(date: string) {
 
 function findKnownPlayer(players: Player[], name: string) {
   const clean = name.trim().toLowerCase();
+
+  // Normalized group aliases for Piti / Pituto / Cristopher
+  const pitiAliases = ["piti", "pituto", "cristopher"];
+  if (pitiAliases.includes(clean)) {
+    const found = players.find(
+      (player) =>
+        pitiAliases.includes(player.name.toLowerCase()) ||
+        pitiAliases.includes(player.nickname.toLowerCase())
+    );
+    if (found) return found;
+  }
+
   return players.find((player) => player.name.toLowerCase() === clean || player.nickname.toLowerCase() === clean);
 }
 
@@ -177,27 +189,48 @@ function suggestedTeamForRank(pairIndex: number, positionInPair: number): Team {
 }
 
 function buildRankedTeamRows<T extends TeamAssignableRow>(rows: T[], players: Player[], standings: Map<string, PlayerStanding>) {
-  const rankedRows = rows
+  const isGoalkeeper = (r: T) => {
+    return playerForMatchRow(r, players)?.isGoalkeeper === true;
+  };
+
+  const mapped = rows
     .map((row, index) => ({
       row,
       index,
       standing: standingForMatchRow(row, players, standings),
     }))
-    .filter((item) => item.row.attendanceStatus === "confirmed")
-    .sort((a, b) => {
-      const rankA = a.standing?.rank ?? Number.MAX_SAFE_INTEGER;
-      const rankB = b.standing?.rank ?? Number.MAX_SAFE_INTEGER;
-      if (rankA !== rankB) return rankA - rankB;
-      const pointsA = a.standing?.points ?? -1;
-      const pointsB = b.standing?.points ?? -1;
-      if (pointsA !== pointsB) return pointsB - pointsA;
-      return rowOrder(a.row, a.index) - rowOrder(b.row, b.index) || a.row.name.localeCompare(b.row.name);
-    });
+    .filter((item) => item.row.attendanceStatus === "confirmed");
 
-  return rankedRows.map((item, rankedIndex): RankedTeamRow<T> => ({
+  // Separar arqueros de jugadores de campo
+  const goalkeepers = mapped.filter((item) => isGoalkeeper(item.row));
+  const fieldPlayers = mapped.filter((item) => !isGoalkeeper(item.row));
+
+  const sortByRank = (a: typeof mapped[0], b: typeof mapped[0]) => {
+    const rankA = a.standing?.rank ?? Number.MAX_SAFE_INTEGER;
+    const rankB = b.standing?.rank ?? Number.MAX_SAFE_INTEGER;
+    if (rankA !== rankB) return rankA - rankB;
+    const pointsA = a.standing?.points ?? -1;
+    const pointsB = b.standing?.points ?? -1;
+    if (pointsA !== pointsB) return pointsB - pointsA;
+    return rowOrder(a.row, a.index) - rowOrder(b.row, b.index) || a.row.name.localeCompare(b.row.name);
+  };
+
+  goalkeepers.sort(sortByRank);
+  fieldPlayers.sort(sortByRank);
+
+  // Asignar equipo sugerido para arqueros
+  const rankedGoalkeepers = goalkeepers.map((item, index): RankedTeamRow<T> => ({
     ...item,
-    suggestedTeam: suggestedTeamForRank(Math.floor(rankedIndex / 2), rankedIndex % 2),
+    suggestedTeam: suggestedTeamForRank(Math.floor(index / 2), index % 2),
   }));
+
+  // Asignar equipo sugerido para jugadores de campo
+  const rankedFieldPlayers = fieldPlayers.map((item, index): RankedTeamRow<T> => ({
+    ...item,
+    suggestedTeam: suggestedTeamForRank(Math.floor(index / 2), index % 2),
+  }));
+
+  return [...rankedGoalkeepers, ...rankedFieldPlayers];
 }
 
 function applyBalancedTeams<T extends TeamAssignableRow>(rows: T[], players: Player[], standings: Map<string, PlayerStanding>) {
@@ -757,13 +790,23 @@ function TeamSuggestionPreview<T extends TeamAssignableRow>({ rows, players, sta
       <div className="grid gap-2 lg:grid-cols-2">
         {pairs.map((pair, pairIndex) => (
           <div key={pairIndex} className="grid gap-2 rounded-md border border-white/10 bg-black/10 p-2 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
-            {pair.map((item) => (
-              <div key={`${item.index}-${item.row.name}`} className={`rounded-md border px-3 py-2 ${item.suggestedTeam === "A" ? "border-(--red)/35 bg-(--red)/10" : "border-(--gold)/40 bg-(--gold)/10"}`}>
-                <p className="text-xs font-black uppercase tracking-wide text-(--muted)">#{item.standing?.rank ?? "SR"} - {teamLabel(item.suggestedTeam)}</p>
-                <p className="truncate font-semibold text-white">{item.row.name}</p>
-                <p className="text-xs font-semibold text-(--gold)">{item.standing?.points ?? 0} pts</p>
-              </div>
-            ))}
+            {pair.map((item) => {
+              const isArq = playerForMatchRow(item.row, players)?.isGoalkeeper === true;
+              return (
+                <div key={`${item.index}-${item.row.name}`} className={`rounded-md border px-3 py-2 ${item.suggestedTeam === "A" ? "border-(--red)/35 bg-(--red)/10" : "border-(--gold)/40 bg-(--gold)/10"}`}>
+                  <p className="text-xs font-black uppercase tracking-wide text-(--muted)">#{item.standing?.rank ?? "SR"} - {teamLabel(item.suggestedTeam)}</p>
+                  <p className="truncate font-semibold text-white">
+                    {item.row.name}
+                    {isArq ? (
+                      <span className="ml-1 inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider" title="Arquero">
+                        ARQ
+                      </span>
+                    ) : null}
+                  </p>
+                  <p className="text-xs font-semibold text-(--gold)">{item.standing?.points ?? 0} pts</p>
+                </div>
+              );
+            })}
             {pair.length === 2 ? <span className="hidden rounded-full bg-white/[0.1] px-2 py-1 text-center text-[10px] font-black text-(--muted) sm:block">VS</span> : null}
           </div>
         ))}
@@ -1565,7 +1608,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   function createAndAddPlayer(name: string, phone: string) {
     if (!name.trim()) return;
     const now = new Date().toISOString();
-    const player: Player = { id: newId("player"), name: name.trim(), nickname: name.trim().split(" ")[0], phone: phone.trim(), paymentPlan: "perMatch", skillLevel: 3, active: true, shortName: name.trim().slice(0, 3).toUpperCase(), createdAt: now, updatedAt: now };
+    const player: Player = { id: newId("player"), name: name.trim(), nickname: name.trim().split(" ")[0], phone: phone.trim(), paymentPlan: "perMatch", skillLevel: 3, active: true, shortName: name.trim().slice(0, 3).toUpperCase(), isGoalkeeper: name.toLowerCase().includes("arquero"), createdAt: now, updatedAt: now };
     savePlayerAction(player)
       .then(() => {
         commit(upsertPlayer(data, player));
@@ -1777,6 +1820,7 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
         skillLevel: 3,
         active: true,
         shortName: name.slice(0, 3).toUpperCase(),
+        isGoalkeeper: name.toLowerCase().includes("arquero"),
         createdAt: now,
         updatedAt: now,
       });
@@ -2205,7 +2249,7 @@ export function PlayersPage({ initialData }: InitialDataProps) {
   function addPlayer() {
     if (!name.trim()) return;
     const now = new Date().toISOString();
-    const player: Player = { id: newId("player"), name: name.trim(), nickname: name.trim().split(" ")[0], phone: "", paymentPlan: "perMatch", skillLevel: 3, active: true, shortName: name.trim().slice(0, 3).toUpperCase(), createdAt: now, updatedAt: now };
+    const player: Player = { id: newId("player"), name: name.trim(), nickname: name.trim().split(" ")[0], phone: "", paymentPlan: "perMatch", skillLevel: 3, active: true, shortName: name.trim().slice(0, 3).toUpperCase(), isGoalkeeper: name.toLowerCase().includes("arquero"), createdAt: now, updatedAt: now };
     savePlayerAction(player)
       .then(() => {
         commit(upsertPlayer(data, player));
@@ -2360,10 +2404,16 @@ function PlayerEditorForm({ player, onSave }: { player: Player; onSave: (patch: 
           <option value="perMatch">por partido (galleta)</option>
         </select>
       </label>
-      <label className="flex items-center gap-2 text-sm font-medium text-(--muted)">
-        <input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} />
-        <span>Activo</span>
-      </label>
+      <div className="flex gap-4">
+        <label className="flex items-center gap-2 text-sm font-medium text-(--muted)">
+          <input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} />
+          <span>Activo</span>
+        </label>
+        <label className="flex items-center gap-2 text-sm font-medium text-(--muted)">
+          <input type="checkbox" checked={draft.isGoalkeeper} onChange={(event) => setDraft({ ...draft, isGoalkeeper: event.target.checked })} />
+          <span>Arquero</span>
+        </label>
+      </div>
       <div className="flex flex-wrap gap-2 pt-2">
         <Button onClick={() => onSave(draft)}><Save size={16} />Guardar</Button>
         {whatsapp ? (
@@ -2437,6 +2487,7 @@ export function StandingsPage({ initialData }: InitialDataProps) {
         nickname: player.nickname,
         plan: player.paymentPlan,
         shortName: player.shortName,
+        isGoalkeeper: player.isGoalkeeper,
         ...stats,
       };
     }).sort((a, b) => b.points - a.points || b.winRate - a.winRate || b.played - a.played);
@@ -2879,6 +2930,11 @@ export function StandingsPage({ initialData }: InitialDataProps) {
                           <Link href={`/players/${row.id}`} className="hover:text-(--green) hover:underline transition">
                             <b>{row.player}</b>
                           </Link>
+                          {row.isGoalkeeper ? (
+                            <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider" title="Arquero">
+                              ARQ
+                            </span>
+                          ) : null}
                           {isAdmin ? (
                             <button
                               type="button"
