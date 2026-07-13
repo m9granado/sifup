@@ -2812,6 +2812,7 @@ export function StandingsPage({ initialData }: InitialDataProps) {
                 <th className="optional text-center">E</th>
                 <th className="optional text-center">P</th>
                 <th className="text-center">Racha</th>
+                {upcomingMatch ? <th className="text-center">Próx.</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -2828,17 +2829,6 @@ export function StandingsPage({ initialData }: InitialDataProps) {
                           <Link href={`/players/${row.id}`} className="hover:text-(--green) hover:underline transition">
                             <b>{row.player}</b>
                           </Link>
-                          {upcomingMatch ? (
-                            (confirmedForNextMatch.has(row.id) || confirmedForNextMatch.has(row.player.toLowerCase())) ? (
-                              <span className="inline-flex items-center rounded bg-(--green)/15 px-1.5 py-0.5 text-[9px] font-black text-(--green) uppercase tracking-wider" title="Confirmado para el próximo partido">
-                                Conf.
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center rounded bg-white/[0.06] px-1.5 py-0.5 text-[9px] font-black text-(--muted) uppercase tracking-wider" title="No confirmado para el próximo partido">
-                                Pend.
-                              </span>
-                            )
-                          ) : null}
                           {isAdmin ? (
                             <button
                               type="button"
@@ -2901,6 +2891,19 @@ export function StandingsPage({ initialData }: InitialDataProps) {
                       })}
                     </div>
                   </td>
+                  {upcomingMatch ? (
+                    <td className="text-center align-middle">
+                      {confirmedForNextMatch.has(row.id) || confirmedForNextMatch.has(row.player.toLowerCase()) ? (
+                        <div className="inline-flex items-center justify-center text-(--green)" title="Confirmado para el próximo partido">
+                          <Check size={16} strokeWidth={3} />
+                        </div>
+                      ) : (
+                        <span className="text-(--muted) opacity-45" title="Pendiente de confirmación">
+                          -
+                        </span>
+                      )}
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
