@@ -799,8 +799,8 @@ function TeamSuggestionPreview<T extends TeamAssignableRow>({ rows, players, sta
                   <p className="truncate font-semibold text-white">
                     {item.row.name}
                     {isArq ? (
-                      <span className="ml-1 inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider" title="Arquero">
-                        ARQ
+                      <span className="ml-1 inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider gap-0.5" title="Arquero">
+                        🧤 ARQ
                       </span>
                     ) : null}
                   </p>
@@ -2725,7 +2725,8 @@ export function StandingsPage({ initialData }: InitialDataProps) {
       // Player Name
       ctx.fillStyle = "#ffffff";
       ctx.font = "bold 14px sans-serif";
-      ctx.fillText(row.player, 110, y + 20);
+      const displayName = row.player + (row.isGoalkeeper ? " 🧤" : "");
+      ctx.fillText(displayName, 110, y + 20);
 
       // Nickname / Plan
       ctx.fillStyle = "#70a090";
@@ -3010,8 +3011,8 @@ export function StandingsPage({ initialData }: InitialDataProps) {
                             <b>{row.player}</b>
                           </Link>
                           {row.isGoalkeeper ? (
-                            <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider" title="Arquero">
-                              ARQ
+                            <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider gap-0.5" title="Arquero">
+                              🧤 ARQ
                             </span>
                           ) : null}
                           {isAdmin ? (
