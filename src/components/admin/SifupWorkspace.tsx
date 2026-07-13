@@ -1135,7 +1135,9 @@ function PlayerCollectionRow({
   const standing = standingForMatchRow(row, players, standings);
   const pending = pendingForMatchRow(row);
   const whatsapp = whatsappHref(row.phone);
-  const playerId = playerForMatchRow(row, players)?.id;
+  const player = playerForMatchRow(row, players);
+  const playerId = player?.id;
+  const isArq = player?.isGoalkeeper === true;
   return (
     <div className={`flex flex-col gap-2 rounded-md border px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between ${monthly ? "border-(--cyan)/45 bg-(--cyan)/10" : "border-(--border) bg-white/[0.04]"}`}>
       <div className="flex min-w-0 items-center gap-2">
@@ -1144,6 +1146,11 @@ function PlayerCollectionRow({
         <div className="min-w-0">
           <p className="truncate font-semibold text-white">
             {playerId ? <Link href={`/players/${playerId}`} className="hover:underline">{row.name}</Link> : row.name}
+            {isArq ? (
+              <span className="ml-2 inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider gap-0.5" title="Arquero">
+                🧤 ARQ
+              </span>
+            ) : null}
             {monthly ? <span className="ml-2 rounded bg-(--cyan)/20 px-1.5 py-0.5 text-[10px] font-black uppercase text-(--cyan)">Mensual</span> : null}
           </p>
           <p className="text-xs text-(--muted)">{standing ? `${standing.points} pts` : "Sin ranking"}{pending > 0 ? ` · Falta ${formatCurrency(pending)}` : ""}</p>
