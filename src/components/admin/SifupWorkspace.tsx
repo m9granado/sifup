@@ -659,7 +659,15 @@ export function MatchesPage({ initialData }: InitialDataProps) {
 
             return (
               <Link key={match.id} href={`/matches/${match.id}`} className="block">
-                <Card className={`transition hover:border-(--lime)/40 ${isNext ? "border-(--lime) bg-(--lime)/10 ring-2 ring-(--lime)/30" : ""}`}>
+                <Card
+                  className={`transition ${
+                    result
+                      ? "played-match-card"
+                      : isNext
+                      ? "next-match-card ring-2 ring-(--lime)/20"
+                      : "upcoming-match-card"
+                  }`}
+                >
                   {result ? (
                     <div className="flex flex-col gap-2">
                       <div className="flex items-start justify-between gap-3">
