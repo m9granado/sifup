@@ -647,32 +647,67 @@ export function MatchesPage({ initialData }: InitialDataProps) {
           const nextId = [...data.matches]
             .filter((match) => match.date >= today && match.status !== "played" && match.status !== "closed")
             .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))[0]?.id;
-          return data.matches.map((match) => {
+          const sortedMatches = [...data.matches].sort((a, b) => b.date.localeCompare(a.date));
+          return sortedMatches.map((match) => {
             const rows = data.matchPlayers.filter((row) => row.matchId === match.id);
             const summary = summarizeMatch(rows);
             const isNext = match.id === nextId;
+            const result = data.results.find((r) => r.matchId === match.id);
+            const winners = result && result.winner !== "draw"
+              ? data.matchPlayers.filter((mp) => mp.matchId === match.id && mp.team === result.winner && mp.attendanceStatus === "confirmed")
+              : [];
+
             return (
               <Link key={match.id} href={`/matches/${match.id}`} className="block">
                 <Card className={`transition hover:border-(--lime)/40 ${isNext ? "border-(--lime) bg-(--lime)/10 ring-2 ring-(--lime)/30" : ""}`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h2 className="text-lg font-bold text-white">{match.weekLabel || match.date}</h2>
-                        {isNext ? <span className="rounded-full bg-(--lime) px-2 py-1 text-xs font-bold text-(--bg-deep)">Proximo partido</span> : null}
+                  {result ? (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h2 className="text-lg font-bold text-white">
+                            Rojo {result.scoreA} - {result.scoreB} Amarillo
+                          </h2>
+                          <p className="mt-1 text-sm font-medium text-(--muted)">
+                            {match.weekLabel || match.date} · {result.winner === "draw" ? "Empate" : `Gana ${teamLabel(result.winner)}`}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <StatusBadge value={matchStatusLabel(match.status)} />
+                        </div>
                       </div>
-                      <p className="mt-1 text-sm font-medium text-(--muted)">{match.date} - {match.time}</p>
-                      <p className="mt-1 text-sm text-(--muted)">{match.location}</p>
+                      {winners.length > 0 ? (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {winners.map((w) => (
+                            <span key={w.id} className="inline-flex items-center rounded bg-(--green)/15 px-1.5 py-0.5 text-[9px] font-black text-(--green) uppercase tracking-wider">
+                              {w.name}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <StatusBadge value={matchStatusLabel(match.status)} />
-                      {match.courtPrepaid ? <span className="rounded-full bg-(--green)/15 px-2 py-1 text-xs font-bold text-(--green) ring-1 ring-(--green)/30">cancha pagada</span> : null}
+                  ) : (
+                    <div>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h2 className="text-lg font-bold text-white">{match.weekLabel || match.date}</h2>
+                            {isNext ? <span className="rounded-full bg-(--lime) px-2 py-1 text-xs font-bold text-(--bg-deep)">Proximo partido</span> : null}
+                          </div>
+                          <p className="mt-1 text-sm font-medium text-(--muted)">{match.date} - {match.time}</p>
+                          <p className="mt-1 text-sm text-(--muted)">{match.location}</p>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <StatusBadge value={matchStatusLabel(match.status)} />
+                          {match.courtPrepaid ? <span className="rounded-full bg-(--green)/15 px-2 py-1 text-xs font-bold text-(--green) ring-1 ring-(--green)/30">cancha pagada</span> : null}
+                        </div>
+                      </div>
+                      <div className="mt-3 grid grid-cols-3 gap-2 text-sm text-(--muted)">
+                        <span>{summary.confirmedCount} jugadores</span>
+                        <span>{summary.paidCount} pagados</span>
+                        <span>{formatCurrency(summary.pendingAmount)} pend.</span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
-                    <span>{summary.confirmedCount} jugadores</span>
-                    <span>{summary.paidCount} pagados</span>
-                    <span>{formatCurrency(summary.pendingAmount)} pend.</span>
-                  </div>
+                  )}
                 </Card>
               </Link>
             );
