@@ -11,6 +11,7 @@ import {
   saveMonthlyPaymentAction,
   savePlayerAction,
   setMatchPlayerPaymentStatusAction,
+  mergePlayersAction,
 } from "@/app/actions";
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
@@ -1902,7 +1903,7 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
       </div>
       {editingPlayer ? (
         <Modal title={editingGuestName ? `Registrar ${editingGuestName}` : `Editar ${editingPlayer.name}`} onClose={() => { setEditingPlayer(null); setEditingGuestName(null); }}>
-          <PlayerEditorForm player={editingPlayer} onSave={savePlayer} />
+          <PlayerEditorForm player={editingPlayer} onSave={savePlayer} players={data.players} />
         </Modal>
       ) : null}
       <div className="grid gap-4 xl:grid-cols-2">
@@ -2321,7 +2322,7 @@ export function PlayersPage({ initialData }: InitialDataProps) {
       </div>
       {editingPlayer ? (
         <Modal title={`Editar ${editingPlayer.name}`} onClose={() => setEditingPlayer(null)}>
-          <PlayerEditorForm player={editingPlayer} onSave={savePlayer} />
+          <PlayerEditorForm player={editingPlayer} onSave={savePlayer} players={data.players} />
         </Modal>
       ) : null}
     </>
@@ -2388,9 +2389,45 @@ function PlayerRow({
   );
 }
 
-function PlayerEditorForm({ player, onSave }: { player: Player; onSave: (patch: Partial<Player>) => void }) {
-  const [draft, setDraft] = useState(player);
+function PlayerEditorForm({ player, onSave, players = [] }: { player: Player; onSave: (patch: Partial<Player>) => void; players?: Player[] }) {
+  const [draft, setDraft] = useState(draftPlayerWithIsGoalkeeper(player));
   const whatsapp = whatsappHref(draft.phone);
+
+  const [mergeTargetId, setMergeTargetId] = useState("");
+  const [isMerging, startMergeTransition] = useTransition();
+  const [mergeError, setMergeError] = useState("");
+
+  function draftPlayerWithIsGoalkeeper(p: Player): Player {
+    return {
+      ...p,
+      isGoalkeeper: p.isGoalkeeper || false,
+    };
+  }
+
+  const otherPlayers = useMemo(() => {
+    return players
+      .filter((p) => p.id !== player.id)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [players, player.id]);
+
+  function handleMerge() {
+    if (!mergeTargetId) return;
+    const target = otherPlayers.find((p) => p.id === mergeTargetId);
+    if (!target) return;
+    if (!confirm(`¿Estás seguro de fusionar a ${player.name} dentro de ${target.name}? Esta acción es irreversible, moverá todos sus registros y eliminará a ${player.name}.`)) {
+      return;
+    }
+
+    startMergeTransition(async () => {
+      try {
+        await mergePlayersAction(player.id, mergeTargetId);
+        window.location.reload();
+      } catch (err) {
+        setMergeError(err instanceof Error ? err.message : "Error al fusionar jugadores.");
+      }
+    });
+  }
+
   return (
     <div className="space-y-3">
       <Input label="Nombre" value={draft.name} onChange={(value) => setDraft({ ...draft, name: value })} />
@@ -2420,6 +2457,39 @@ function PlayerEditorForm({ player, onSave }: { player: Player; onSave: (patch: 
           <a href={whatsapp} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--green) bg-(--green) px-3 text-sm font-bold text-(--bg-deep) hover:bg-(--green-dark) hover:text-white"><MessageCircle size={16} />WhatsApp</a>
         ) : null}
       </div>
+
+      {otherPlayers.length > 0 ? (
+        <div className="border-t border-white/10 pt-4 mt-4 space-y-3">
+          <h3 className="text-sm font-bold uppercase tracking-wider text-amber-500">Fusionar Jugador (Irreversible)</h3>
+          <p className="text-xs text-(--muted)">
+            Transfiere todos los partidos y pagos de <b>{player.name}</b> a otro jugador, y luego elimina la cuenta de <b>{player.name}</b>.
+          </p>
+          <div className="flex gap-2">
+            <select
+              value={mergeTargetId}
+              onChange={(e) => setMergeTargetId(e.target.value)}
+              className="h-10 flex-1 rounded-md border border-(--border) bg-(--panel-strong) px-3 text-sm text-white"
+              disabled={isMerging}
+            >
+              <option value="">-- Seleccionar jugador de destino --</option>
+              {otherPlayers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.paymentPlan === "monthly" ? "mensual" : "galleta"})
+                </option>
+              ))}
+            </select>
+            <Button
+              variant="secondary"
+              onClick={handleMerge}
+              disabled={!mergeTargetId || isMerging}
+              className="border-amber-500/40 text-amber-500 hover:bg-amber-500 hover:text-white"
+            >
+              Fusionar
+            </Button>
+          </div>
+          {mergeError ? <p className="text-xs text-red-400 font-semibold">{mergeError}</p> : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -3019,7 +3089,7 @@ export function StandingsPage({ initialData }: InitialDataProps) {
 
       {editingPlayer ? (
         <Modal title={`Editar ${editingPlayer.name}`} onClose={() => setEditingPlayer(null)}>
-          <PlayerEditorForm player={editingPlayer} onSave={savePlayer} />
+          <PlayerEditorForm player={editingPlayer} onSave={savePlayer} players={data.players} />
         </Modal>
       ) : null}
     </div>

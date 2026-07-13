@@ -11,6 +11,7 @@ import {
   saveMonthlyPayment,
   savePlayer,
   setMatchPlayerPaymentStatus,
+  mergePlayers as repositoryMergePlayers,
 } from "@/lib/repository";
 import type { Match, MatchPlayer, MatchResult, MonthlyPayment, Player } from "@/lib/types";
 
@@ -75,5 +76,11 @@ export async function savePlayerAction(player: Player, guestName?: string) {
 export async function saveMonthlyPaymentAction(payment: MonthlyPayment) {
   await requireAdmin();
   await saveMonthlyPayment(payment);
+  revalidateAdminViews();
+}
+
+export async function mergePlayersAction(sourceId: string, targetId: string) {
+  await requireAdmin();
+  await repositoryMergePlayers(sourceId, targetId);
   revalidateAdminViews();
 }
