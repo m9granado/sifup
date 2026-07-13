@@ -2438,7 +2438,7 @@ export function StandingsPage({ initialData }: InitialDataProps) {
     .map((result) => ({ result, match: data.matches.find((match) => match.id === result.matchId) }))
     .filter((item) => item.match)
     .sort((a, b) => (b.match?.date ?? "").localeCompare(a.match?.date ?? ""))
-    .slice(0, 4);
+    .slice(0, 3);
 
   const rankClass = ["first", "second", "third"];
 
@@ -2756,28 +2756,35 @@ export function StandingsPage({ initialData }: InitialDataProps) {
           </div>
 
           <div className="result-list">
-            {recentResults.map(({ result, match }) => {
+            {recentResults.map(({ result }, index) => {
               const winners = result.winner !== "draw"
                 ? data.matchPlayers.filter((mp) => mp.matchId === result.matchId && mp.team === result.winner && mp.attendanceStatus === "confirmed")
                 : [];
               return (
-                <article key={result.id} className="result-row">
-                  <div className="flex flex-col gap-1.5 min-w-0">
-                    <strong>{match?.weekLabel || match?.date}</strong>
-                    {winners.length > 0 ? (
-                      <div className="flex flex-wrap gap-1.5 mt-1.5">
-                        {winners.map((w) => (
-                          <span key={w.id} className="inline-flex items-center rounded-full bg-(--green)/15 px-2 py-0.5 text-[10px] font-black text-(--green)">
-                            {w.name}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
+                <article
+                  key={result.id}
+                  style={{ background: "var(--row)", border: "1px solid rgba(255, 255, 255, 0.08)", borderRadius: "10px", padding: "12px" }}
+                  className="flex flex-col gap-1.5"
+                >
+                  <div className="flex flex-col gap-0.5">
+                    <strong className="text-sm font-bold text-white">
+                      Rojo {result.scoreA} - {result.scoreB} Amarillo
+                    </strong>
+                    <span className="text-[11px] text-(--muted) font-medium">
+                      {index === 0 ? "Semana pasada" : `Hace ${index + 1} semanas`}
+                    </span>
                   </div>
-                  <div className="score">
-                    <b>Rojo</b> {result.scoreA} - {result.scoreB} <b>Amarillo</b>
-                    <small>{result.winner === "draw" ? "Empate" : `Gana ${teamLabel(result.winner)}`}</small>
-                  </div>
+                  {winners.length > 0 ? (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {winners.map((w) => (
+                        <span key={w.id} className="inline-flex items-center rounded bg-(--green)/15 px-1.5 py-0.5 text-[9px] font-black text-(--green) uppercase tracking-wider">
+                          {w.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-[10px] text-(--muted) italic mt-0.5">Empate</span>
+                  )}
                 </article>
               );
             })}
