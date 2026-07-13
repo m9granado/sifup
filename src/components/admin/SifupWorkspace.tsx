@@ -219,17 +219,38 @@ function buildRankedTeamRows<T extends TeamAssignableRow>(rows: T[], players: Pl
   goalkeepers.sort(sortByRank);
   fieldPlayers.sort(sortByRank);
 
-  // Asignar equipo sugerido para arqueros
-  const rankedGoalkeepers = goalkeepers.map((item, index): RankedTeamRow<T> => ({
-    ...item,
-    suggestedTeam: suggestedTeamForRank(Math.floor(index / 2), index % 2),
-  }));
-
-  // Asignar equipo sugerido para jugadores de campo
+  // Asignar jugadores de campo de manera balanceada
   const rankedFieldPlayers = fieldPlayers.map((item, index): RankedTeamRow<T> => ({
     ...item,
     suggestedTeam: suggestedTeamForRank(Math.floor(index / 2), index % 2),
   }));
+
+  // Calcular puntos de campo para determinar el equipo más débil
+  const pointsA = rankedFieldPlayers
+    .filter((item) => item.suggestedTeam === "A")
+    .reduce((sum, item) => sum + (item.standing?.points ?? 0), 0);
+  const pointsB = rankedFieldPlayers
+    .filter((item) => item.suggestedTeam === "B")
+    .reduce((sum, item) => sum + (item.standing?.points ?? 0), 0);
+
+  const weakerTeam = pointsA <= pointsB ? "A" : "B";
+  const strongerTeam = weakerTeam === "A" ? "B" : "A";
+
+  // Asignar arqueros: el arquero más fuerte (primer elemento) va al equipo más débil
+  const rankedGoalkeepers = goalkeepers.map((item, index): RankedTeamRow<T> => {
+    let suggestedTeam: Team = "none";
+    if (index === 0) {
+      suggestedTeam = weakerTeam;
+    } else if (index === 1) {
+      suggestedTeam = strongerTeam;
+    } else {
+      suggestedTeam = index % 2 === 0 ? weakerTeam : strongerTeam;
+    }
+    return {
+      ...item,
+      suggestedTeam,
+    };
+  });
 
   return [...rankedGoalkeepers, ...rankedFieldPlayers];
 }
@@ -245,11 +266,6 @@ function applyBalancedTeams<T extends TeamAssignableRow>(rows: T[], players: Pla
   }));
 }
 
-function teamRankingPoints<T extends TeamAssignableRow>(rows: T[], players: Player[], standings: Map<string, PlayerStanding>, team: "A" | "B") {
-  return rows
-    .filter((row) => row.team === team && row.attendanceStatus === "confirmed")
-    .reduce((sum, row) => sum + (standingForMatchRow(row, players, standings)?.points ?? 0), 0);
-}
 
 function pendingForMatchRow(row: MatchPlayer) {
   return Math.max(row.amountDue - row.amountPaid, 0);
@@ -1183,33 +1199,23 @@ function TeamAssignmentBoard({
   rows,
   players,
   standings,
-  onTeamChange,
   onTogglePaid,
   onOpenDetails,
   onRemove,
   onAddPlayer,
-  onResetTeams,
   paymentPendingId,
 }: {
   rows: MatchPlayer[];
   players: Player[];
   standings: Map<string, PlayerStanding>;
-  onTeamChange: (rowId: string, team: Team) => void;
   onTogglePaid: (rowId: string) => void;
   onOpenDetails: (rowId: string) => void;
   onRemove: (rowId: string) => void;
   onAddPlayer: () => void;
-  onResetTeams: () => void;
   paymentPendingId: string | null;
 }) {
-  const teamsAssigned = hasTeamsAssigned(rows);
   const confirmedRanked = rankedConfirmedRows(rows, players, standings);
-  const teamA = confirmedRanked.filter((row) => row.team === "A");
-  const teamB = confirmedRanked.filter((row) => row.team === "B");
-  const unassigned = confirmedRanked.filter((row) => row.team === "none");
   const outRows = sortRowsWithMonthlyLast(rows.filter((row) => row.attendanceStatus === "out"), players);
-  const pointsA = teamRankingPoints(rows, players, standings, "A");
-  const pointsB = teamRankingPoints(rows, players, standings, "B");
   const confirmedCount = confirmedRanked.length;
   const missing = Math.max(SQUAD_TARGET - confirmedCount, 0);
 
@@ -1220,9 +1226,8 @@ function TeamAssignmentBoard({
       players={players}
       standings={standings}
       monthly={isMonthlyMatchRow(row, players)}
-      teamsAssigned={teamsAssigned}
+      teamsAssigned={false}
       isAdmin
-      onTeamChange={(team) => onTeamChange(row.id, team)}
       onTogglePaid={() => onTogglePaid(row.id)}
       onOpenDetails={() => onOpenDetails(row.id)}
       onRemove={() => onRemove(row.id)}
@@ -1232,54 +1237,19 @@ function TeamAssignmentBoard({
 
   return (
     <div className="space-y-4">
-      <TeamSuggestionPreview rows={rows} players={players} standings={standings} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className={`rounded-md border px-3 py-2 ${missing > 0 ? "border-(--gold)/40 bg-(--gold)/10" : "border-(--green)/40 bg-(--green)/10"}`}>
           <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Plantel</p>
           <p className={`text-xl font-black ${missing > 0 ? "text-(--gold)" : "text-(--green)"}`}>{confirmedCount}/{SQUAD_TARGET} · faltan {missing}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={onResetTeams}>
-            <Sparkles size={16} />
-            Reiniciar equipos
-          </Button>
           <Button variant="secondary" onClick={onAddPlayer}>
             <UserPlus size={16} />
             Agregar jugador
           </Button>
         </div>
       </div>
-      {teamsAssigned ? (
-        <>
-          {unassigned.length > 0 ? (
-            <div className="space-y-2 rounded-md border border-(--border) bg-white/[0.04] p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">Sin asignar ({unassigned.length})</p>
-              <div className="space-y-2">{unassigned.map(renderRow)}</div>
-            </div>
-          ) : null}
-          <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr] lg:items-start">
-            <div className="space-y-2 rounded-md border-2 border-(--red)/35 bg-(--red)/10 p-3">
-              <p className="text-sm font-bold text-(--red)">Equipo Rojo ({teamA.length}) - {pointsA} pts ranking</p>
-              <div className="space-y-2">
-                {teamA.map(renderRow)}
-                {teamA.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
-              </div>
-            </div>
-            <div className="hidden items-center justify-center px-2 lg:flex">
-              <span className="rounded-full bg-white/[0.12] px-3 py-1 text-xs font-bold text-(--muted)">VS</span>
-            </div>
-            <div className="space-y-2 rounded-md border-2 border-(--gold)/35 bg-(--gold)/10 p-3">
-              <p className="text-sm font-bold text-(--gold)">Equipo Amarillo ({teamB.length}) - {pointsB} pts ranking</p>
-              <div className="space-y-2">
-                {teamB.map(renderRow)}
-                {teamB.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
-              </div>
-            </div>
-          </div>
-        </>
-      ) : (
-        <div className="space-y-2">{confirmedRanked.map(renderRow)}</div>
-      )}
+      <div className="space-y-2">{confirmedRanked.map(renderRow)}</div>
       {outRows.length > 0 ? (
         <div className="space-y-2 rounded-md border border-white/10 bg-white/[0.03] p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">No pueden ({outRows.length})</p>
@@ -1641,19 +1611,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
     });
   }
 
-  function resetBalancedTeams() {
-    const nextRows = applyBalancedTeams(rows, data.players, standings).map((row) => ({ ...row, updatedAt: new Date().toISOString() }));
-    setRows(nextRows);
-    startTransition(async () => {
-      try {
-        await saveMatchDetailAction(currentMatch.id, nextRows, result);
-        commit(replaceMatchPlayers(data, currentMatch.id, nextRows));
-        setError("");
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "No se pudo reiniciar los equipos.");
-      }
-    });
-  }
+
 
   function togglePayment(rowId: string) {
     const index = rows.findIndex((item) => item.id === rowId);
@@ -1688,6 +1646,19 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: equipos, resultado y pagos son solo lectura." /> : null}
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
+      {/* Marcador final / Resultado en la parte superior */}
+      <div className="mt-4">
+        {isAdmin ? (
+          <Card className="space-y-3">
+            <h2 className="font-semibold">Marcador final</h2>
+            <div className="grid grid-cols-2 gap-3"><Input label="Rojo" type="number" value={String(scoreA)} onChange={(value) => setScoreA(Number(value))} /><Input label="Amarillo" type="number" value={String(scoreB)} onChange={(value) => setScoreB(Number(value))} /></div>
+            <textarea className="min-h-20 w-full rounded-md border border-(--border) bg-(--panel-strong) p-2 text-sm text-white" value={resultNotes} onChange={(event) => setResultNotes(event.target.value)} placeholder="Notas del resultado" />
+          </Card>
+        ) : result && !matchIsUpcoming(currentMatch) ? (
+          <Card><h2 className="font-semibold">Resultado final</h2><p className="mt-2 text-2xl font-semibold">Rojo {result.scoreA} - {result.scoreB} Amarillo</p><p className="mt-1 text-sm text-(--muted)">{result.winner === "draw" ? "Empate" : `Gana ${teamLabel(result.winner)}`}</p></Card>
+        ) : null}
+      </div>
+
       <Card className="mt-4 space-y-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -1704,12 +1675,10 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             rows={rows}
             players={data.players}
             standings={standings}
-            onTeamChange={(rowId, team) => updateRow(rows.findIndex((row) => row.id === rowId), { team })}
             onTogglePaid={togglePayment}
             onOpenDetails={(rowId) => setEditingIndex(rows.findIndex((row) => row.id === rowId))}
             onRemove={removeRow}
             onAddPlayer={() => setShowAddPlayer(true)}
-            onResetTeams={resetBalancedTeams}
             paymentPendingId={paymentPending}
           />
         ) : (
@@ -1717,23 +1686,56 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         )}
       </Card>
 
-      <div className="mt-4">
-        {isAdmin ? (
-          <Card className="space-y-3">
-            <h2 className="font-semibold">Marcador final</h2>
-            <div className="grid grid-cols-2 gap-3"><Input label="Rojo" type="number" value={String(scoreA)} onChange={(value) => setScoreA(Number(value))} /><Input label="Amarillo" type="number" value={String(scoreB)} onChange={(value) => setScoreB(Number(value))} /></div>
-            <textarea className="min-h-20 w-full rounded-md border border-(--border) bg-(--panel-strong) p-2 text-sm text-white" value={resultNotes} onChange={(event) => setResultNotes(event.target.value)} placeholder="Notas del resultado" />
-          </Card>
-        ) : result && !matchIsUpcoming(currentMatch) ? (
-          <Card><h2 className="font-semibold">Resultado final</h2><p className="mt-2 text-2xl font-semibold">Rojo {result.scoreA} - {result.scoreB} Amarillo</p><p className="mt-1 text-sm text-(--muted)">{result.winner === "draw" ? "Empate" : `Gana ${teamLabel(result.winner)}`}</p></Card>
-        ) : null}
-      </div>
-
       <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <CopyBlock title="Resumen de pagos pendientes" text={pendingPaymentsMessage(currentMatch, rows)} />
         <CopyBlock title="Resumen de equipos" text={teamsMessage(currentMatch, rows)} />
         <CopyBlock title="Resumen del partido" text={matchSummaryMessage(currentMatch, rows)} />
       </div>
+
+      {/* Equipos informativos al final */}
+      {hasTeamsAssigned(rows) ? (
+        <Card className="mt-4 space-y-3">
+          <h2 className="font-bold text-white text-lg">Equipos Definidos</h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2 rounded-md border border-(--red)/35 bg-(--red)/5 p-3">
+              <p className="text-sm font-bold text-(--red)">Equipo Rojo ({rows.filter(r => r.team === "A" && r.attendanceStatus === "confirmed").length}) - {rows.filter(r => r.team === "A" && r.attendanceStatus === "confirmed").reduce((sum, r) => sum + (standingForMatchRow(r, data.players, standings)?.points ?? 0), 0)} pts</p>
+              <ul className="space-y-1.5">
+                {rows.filter(r => r.team === "A" && r.attendanceStatus === "confirmed").map((r) => {
+                  const isArq = playerForMatchRow(r, data.players)?.isGoalkeeper === true;
+                  return (
+                    <li key={r.id} className="text-sm text-white flex items-center gap-1.5">
+                      • {r.name}
+                      {isArq ? (
+                        <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider gap-0.5" title="Arquero">
+                          🧤 ARQ
+                        </span>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+            <div className="space-y-2 rounded-md border border-(--gold)/35 bg-(--gold)/5 p-3">
+              <p className="text-sm font-bold text-(--gold)">Equipo Amarillo ({rows.filter(r => r.team === "B" && r.attendanceStatus === "confirmed").length}) - {rows.filter(r => r.team === "B" && r.attendanceStatus === "confirmed").reduce((sum, r) => sum + (standingForMatchRow(r, data.players, standings)?.points ?? 0), 0)} pts</p>
+              <ul className="space-y-1.5">
+                {rows.filter(r => r.team === "B" && r.attendanceStatus === "confirmed").map((r) => {
+                  const isArq = playerForMatchRow(r, data.players)?.isGoalkeeper === true;
+                  return (
+                    <li key={r.id} className="text-sm text-white flex items-center gap-1.5">
+                      • {r.name}
+                      {isArq ? (
+                        <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider gap-0.5" title="Arquero">
+                          🧤 ARQ
+                        </span>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </div>
+        </Card>
+      ) : null}
 
       {editingIndex !== null ? (
         <PlayerDetailModal
@@ -3118,46 +3120,160 @@ export function StandingsPage({ initialData }: InitialDataProps) {
 }
 
 export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps) {
-  const { data } = useSifupData(initialData);
+  const { data, commit } = useSifupData(initialData);
   const match = data.matches.find((item) => item.id === id);
-  const rows = data.matchPlayers.filter((row) => row.matchId === id);
+  const [rows, setRows] = useState(() => data.matchPlayers.filter((row) => row.matchId === id));
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState("");
+  const router = useRouter();
 
   if (!match) return <PageTitle title="Partido no encontrado" description="No existe en la base de datos." />;
+  const currentMatch = match;
 
-  const teamA = rows.filter((row) => row.team === "A");
-  const teamB = rows.filter((row) => row.team === "B");
-  const unassigned = rows.filter((row) => row.team === "none");
+  const standings = buildPlayerStandings(data);
+
+  const confirmedRows = rows.filter((r) => r.attendanceStatus === "confirmed");
+  const teamA = confirmedRows.filter((row) => row.team === "A");
+  const teamB = confirmedRows.filter((row) => row.team === "B");
+  const unassigned = confirmedRows.filter((row) => row.team === "none");
+
+  const pointsA = teamA.reduce((sum, row) => sum + (standingForMatchRow(row, data.players, standings)?.points ?? 0), 0);
+  const pointsB = teamB.reduce((sum, row) => sum + (standingForMatchRow(row, data.players, standings)?.points ?? 0), 0);
+
+  function handleTeamChange(rowId: string, team: Team) {
+    setRows((current) =>
+      current.map((row) => (row.id === rowId ? { ...row, team, updatedAt: new Date().toISOString() } : row))
+    );
+  }
+
+  function resetBalancedTeams() {
+    setRows((current) => applyBalancedTeams(current, data.players, standings));
+  }
+
+  function save() {
+    setError("");
+    startTransition(async () => {
+      try {
+        await saveMatchDetailAction(currentMatch.id, rows);
+        commit({ ...data, matchPlayers: data.matchPlayers.map((item) => rows.find((r) => r.id === item.id) ?? item) });
+        router.push(`/matches/${currentMatch.id}`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Error al guardar equipos.");
+      }
+    });
+  }
 
   return (
     <>
       <PageTitle
-        title={`Equipos - ${match.weekLabel || match.date}`}
-        description={`${match.date} - ${match.location}`}
+        title={`Equipos - ${currentMatch.weekLabel || currentMatch.date}`}
+        description={`${currentMatch.date} - ${currentMatch.location}`}
         action={
-          <Link href={`/matches/${match.id}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
-            Volver al partido
-          </Link>
+          <div className="flex gap-2">
+            <Link href={`/matches/${currentMatch.id}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
+              Volver al partido
+            </Link>
+            <Button onClick={save} disabled={isPending}>
+              <Save size={16} />
+              Guardar equipos
+            </Button>
+          </div>
         }
       />
-      <div className="grid gap-4 sm:grid-cols-2">
-        <TeamColumn label="Equipo Rojo" rows={teamA} />
-        <TeamColumn label="Equipo Amarillo" rows={teamB} />
+
+      {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
+
+      <div className="space-y-4">
+        {/* Sugerencia preview */}
+        <TeamSuggestionPreview rows={rows} players={data.players} standings={standings} />
+
+        <div className="flex justify-between items-center bg-white/[0.04] p-3 rounded-md border border-(--border)">
+          <div className="flex gap-4 text-xs font-bold uppercase">
+            <span className="text-(--red)">Rojo: {pointsA} pts ({teamA.length} jug)</span>
+            <span className="text-(--gold)">Amarillo: {pointsB} pts ({teamB.length} jug)</span>
+          </div>
+          <Button variant="secondary" onClick={resetBalancedTeams} disabled={isPending}>
+            <Sparkles size={16} />
+            Equilibrar por Ranking
+          </Button>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <Card className="space-y-3 border-t-2 border-t-(--red)/70 bg-(--red)/5">
+            <h2 className="font-bold text-(--red)">Equipo Rojo ({teamA.length})</h2>
+            <div className="space-y-2">
+              {teamA.map((row) => (
+                <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} />
+              ))}
+              {teamA.length === 0 ? <p className="text-sm text-(--muted) italic">Sin jugadores asignados</p> : null}
+            </div>
+          </Card>
+
+          <Card className="space-y-3 border-t-2 border-t-(--gold)/70 bg-(--gold)/5">
+            <h2 className="font-bold text-(--gold)">Equipo Amarillo ({teamB.length})</h2>
+            <div className="space-y-2">
+              {teamB.map((row) => (
+                <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} />
+              ))}
+              {teamB.length === 0 ? <p className="text-sm text-(--muted) italic">Sin jugadores asignados</p> : null}
+            </div>
+          </Card>
+
+          <Card className="space-y-3 md:col-span-2 lg:col-span-1">
+            <h2 className="font-bold text-white">Sin equipo / Pendientes ({unassigned.length})</h2>
+            <div className="space-y-2">
+              {unassigned.map((row) => (
+                <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} />
+              ))}
+              {unassigned.length === 0 ? <p className="text-sm text-(--muted) italic">Todos asignados</p> : null}
+            </div>
+          </Card>
+        </div>
       </div>
-      {unassigned.length > 0 ? <div className="mt-4"><TeamColumn label="Sin equipo" rows={unassigned} /></div> : null}
     </>
   );
 }
 
-function TeamColumn({ label, rows }: { label: string; rows: MatchPlayer[] }) {
+function TeamSelectorRow({ row, onChange, players, standings }: { row: MatchPlayer; onChange: (team: Team) => void; players: Player[]; standings: Map<string, PlayerStanding> }) {
+  const isArq = playerForMatchRow(row, players)?.isGoalkeeper === true;
+  const standing = standingForMatchRow(row, players, standings);
+
   return (
-    <Card className="space-y-2">
-      <h2 className="font-bold text-white">{label} ({rows.length})</h2>
-      <ul className="space-y-2">
-        {rows.map((row) => (
-          <li key={row.id} className="result-row"><strong><span className="mr-2 text-sm text-(--muted)">#{whatsappOrderFor(row)}</span>{row.name}</strong></li>
-        ))}
-        {rows.length === 0 ? <li className="text-sm text-(--muted)">Sin jugadores</li> : null}
-      </ul>
-    </Card>
+    <div className="flex flex-col gap-2 rounded-md border border-white/5 bg-white/[0.03] p-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <p className="truncate font-semibold text-white">
+          {row.name}
+          {isArq ? (
+            <span className="ml-2 inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider gap-0.5" title="Arquero">
+              🧤 ARQ
+            </span>
+          ) : null}
+        </p>
+        <p className="text-xs text-(--muted)">{standing ? `${standing.points} pts` : "Sin ranking"}</p>
+      </div>
+      <div className="flex gap-1 shrink-0">
+        <button
+          type="button"
+          onClick={() => onChange("A")}
+          className={`h-8 px-3 text-xs font-black uppercase rounded transition ${row.team === "A" ? "bg-(--red) text-white" : "bg-white/[0.08] text-(--muted) hover:bg-white/[0.14]"}`}
+        >
+          Rojo
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange("B")}
+          className={`h-8 px-3 text-xs font-black uppercase rounded transition ${row.team === "B" ? "bg-(--gold) text-white" : "bg-white/[0.08] text-(--muted) hover:bg-white/[0.14]"}`}
+        >
+          Amarillo
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange("none")}
+          className={`h-8 px-3 text-xs font-black uppercase rounded transition ${row.team === "none" ? "bg-white/[0.2] text-white" : "bg-white/[0.08] text-(--muted) hover:bg-white/[0.14]"}`}
+        >
+          Ninguno
+        </button>
+      </div>
+    </div>
   );
 }
