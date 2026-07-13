@@ -1038,3 +1038,8 @@
     height: 34px;
   }
 }
+
+.player span.galleta-bubble {
+  background: #475569 !important;
+  color: #ffffff !important;
+}

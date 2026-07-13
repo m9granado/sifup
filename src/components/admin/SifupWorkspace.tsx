@@ -2413,6 +2413,17 @@ export function StandingsPage({ initialData }: InitialDataProps) {
     return baseStandings.slice(0, lastMonthlyIndex + 1);
   }, [data]);
 
+  const upcomingMatch = useMemo(() => nextMatch(data.matches), [data.matches]);
+
+  const confirmedForNextMatch = useMemo(() => {
+    if (!upcomingMatch) return new Set<string>();
+    return new Set(
+      data.matchPlayers
+        .filter((mp) => mp.matchId === upcomingMatch.id && mp.attendanceStatus === "confirmed")
+        .map((mp) => mp.playerId || mp.name.toLowerCase())
+    );
+  }, [upcomingMatch, data.matchPlayers]);
+
   const last5Matches = useMemo(() => {
     return [...data.matches]
       .filter((match) => data.results.some((r) => r.matchId === match.id))
@@ -2523,14 +2534,15 @@ export function StandingsPage({ initialData }: InitialDataProps) {
       ctx.fillText(String(index + 1), 30, y + 28);
 
       // Initials Bubble
-      const bubbleColor = index < 3 ? "#eab308" : "#12d69a";
+      const isGalleta = row.plan !== "monthly";
+      const bubbleColor = isGalleta ? "#64748b" : (index < 3 ? "#eab308" : "#12d69a");
       ctx.fillStyle = bubbleColor;
       ctx.beginPath();
       ctx.arc(80, y + 24, 16, 0, Math.PI * 2);
       ctx.fill();
 
       // Initials Text
-      ctx.fillStyle = "#05110e";
+      ctx.fillStyle = isGalleta ? "#ffffff" : "#05110e";
       ctx.font = "black 11px sans-serif";
       ctx.textAlign = "center";
       const initials = row.shortName ? row.shortName.toUpperCase() : row.player.slice(0, 2).toUpperCase();
@@ -2808,12 +2820,25 @@ export function StandingsPage({ initialData }: InitialDataProps) {
                   <td>{index + 1}</td>
                   <td>
                     <div className="player">
-                      <span>{row.shortName ? row.shortName.toUpperCase() : row.player.slice(0, 2).toUpperCase()}</span>
+                      <span className={row.plan !== "monthly" ? "galleta-bubble" : undefined}>
+                        {row.shortName ? row.shortName.toUpperCase() : row.player.slice(0, 2).toUpperCase()}
+                      </span>
                       <strong>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
                           <Link href={`/players/${row.id}`} className="hover:text-(--green) hover:underline transition">
                             <b>{row.player}</b>
                           </Link>
+                          {upcomingMatch ? (
+                            (confirmedForNextMatch.has(row.id) || confirmedForNextMatch.has(row.player.toLowerCase())) ? (
+                              <span className="inline-flex items-center rounded bg-(--green)/15 px-1.5 py-0.5 text-[9px] font-black text-(--green) uppercase tracking-wider" title="Confirmado para el próximo partido">
+                                Conf.
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center rounded bg-white/[0.06] px-1.5 py-0.5 text-[9px] font-black text-(--muted) uppercase tracking-wider" title="No confirmado para el próximo partido">
+                                Pend.
+                              </span>
+                            )
+                          ) : null}
                           {isAdmin ? (
                             <button
                               type="button"
