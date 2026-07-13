@@ -2588,6 +2588,15 @@ export function StandingsPage({ initialData }: InitialDataProps) {
     );
   }, [upcomingMatch, data.matchPlayers]);
 
+  const outForNextMatch = useMemo(() => {
+    if (!upcomingMatch) return new Set<string>();
+    return new Set(
+      data.matchPlayers
+        .filter((mp) => mp.matchId === upcomingMatch.id && mp.attendanceStatus === "out")
+        .map((mp) => mp.playerId || mp.name.toLowerCase())
+    );
+  }, [upcomingMatch, data.matchPlayers]);
+
   const last5Matches = useMemo(() => {
     return [...data.matches]
       .filter((match) => data.results.some((r) => r.matchId === match.id))
@@ -3072,6 +3081,10 @@ export function StandingsPage({ initialData }: InitialDataProps) {
                       {confirmedForNextMatch.has(row.id) || confirmedForNextMatch.has(row.player.toLowerCase()) ? (
                         <div className="inline-flex items-center justify-center text-(--green)" title="Confirmado para el próximo partido">
                           <Check size={16} strokeWidth={3} />
+                        </div>
+                      ) : outForNextMatch.has(row.id) || outForNextMatch.has(row.player.toLowerCase()) ? (
+                        <div className="inline-flex items-center justify-center text-(--red)" title="No asiste al próximo partido">
+                          <X size={14} strokeWidth={3} />
                         </div>
                       ) : (
                         <span className="text-(--muted) opacity-45" title="Pendiente de confirmación">
