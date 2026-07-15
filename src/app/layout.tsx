@@ -15,6 +15,10 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "SIFUP",
   description: "Internal football admin dashboard",
+  icons: {
+    icon: [{ url: "/brand/sifup-logo-v1.png", type: "image/png" }],
+    apple: [{ url: "/brand/sifup-logo-v1.png", type: "image/png" }],
+  },
 };
 
 export default function RootLayout({

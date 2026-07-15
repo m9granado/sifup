@@ -10,13 +10,12 @@ import {
   saveMatchDetailAction,
   saveMonthlyPaymentAction,
   savePlayerAction,
-  setMatchPlayerPaymentStatusAction,
   mergePlayersAction,
 } from "@/app/actions";
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
 import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
-import { matchSummaryMessage, pendingPaymentsMessage, teamsMessage } from "@/lib/whatsapp";
+import { matchSummaryMessage, teamsMessage } from "@/lib/whatsapp";
 import { COURT_COST, DRAW_POINTS, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, SQUAD_TARGET, WIN_POINTS } from "@/lib/sifup-constants";
 import type { ClubExpense, Match, MatchPlayer, MatchResult, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
 
@@ -389,22 +388,6 @@ function TeamToggle({ value, onChange, disabled }: { value: Team; onChange: (tea
   );
 }
 
-function PaymentToggle({ status, onToggle, disabled }: { status: PaymentStatus; onToggle: () => void; disabled?: boolean }) {
-  const paid = status === "paid";
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      disabled={disabled}
-      className={`inline-flex h-11 w-32 items-center justify-center rounded-md border text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-        paid ? "border-(--green) bg-(--green) text-(--bg-deep) hover:bg-(--green-dark) hover:text-white" : "border-(--red)/35 bg-(--red)/10 text-(--red) hover:bg-(--red)/20"
-      }`}
-    >
-      {paid ? "Pagado" : "No pagado"}
-    </button>
-  );
-}
-
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
     <Card>
@@ -756,13 +739,10 @@ export function MatchesPage({ initialData }: InitialDataProps) {
                         </div>
                         <div className="flex flex-col items-end gap-2">
                           <StatusBadge value={matchStatusLabel(match.status)} />
-                          {match.courtPrepaid ? <span className="rounded-full bg-(--green)/15 px-2 py-1 text-xs font-bold text-(--green) ring-1 ring-(--green)/30">cancha pagada</span> : null}
                         </div>
                       </div>
-                      <div className="mt-3 grid grid-cols-3 gap-2 text-sm text-(--muted)">
-                        <span>{summary.confirmedCount} jugadores</span>
-                        <span>{summary.paidCount} pagados</span>
-                        <span>{formatCurrency(summary.pendingAmount)} pend.</span>
+                      <div className="mt-3 text-sm font-bold text-(--muted)">
+                        <span>{summary.confirmedCount}/{SQUAD_TARGET} jugadores</span>
                       </div>
                     </div>
                   )}
@@ -1070,7 +1050,6 @@ function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; pl
       row={row}
       players={players}
       standings={standings}
-      monthly={isMonthlyMatchRow(row, players)}
       teamsAssigned={teamsAssigned}
       isAdmin={false}
     />
@@ -1127,35 +1106,28 @@ function PlayerCollectionRow({
   row,
   players,
   standings,
-  monthly,
   teamsAssigned,
   isAdmin,
   onTeamChange,
-  onTogglePaid,
   onOpenDetails,
   onRemove,
-  disabled,
 }: {
   row: MatchPlayer;
   players: Player[];
   standings: Map<string, PlayerStanding>;
-  monthly: boolean;
   teamsAssigned: boolean;
   isAdmin: boolean;
   onTeamChange?: (team: Team) => void;
-  onTogglePaid?: () => void;
   onOpenDetails?: () => void;
   onRemove?: () => void;
-  disabled?: boolean;
 }) {
   const standing = standingForMatchRow(row, players, standings);
-  const pending = pendingForMatchRow(row);
   const whatsapp = whatsappHref(row.phone);
   const player = playerForMatchRow(row, players);
   const playerId = player?.id;
   const isArq = player?.isGoalkeeper === true;
   return (
-    <div className={`flex flex-col gap-2 rounded-md border px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between ${monthly ? "border-(--cyan)/45 bg-(--cyan)/10" : "border-(--border) bg-white/[0.04]"}`}>
+    <div className="flex flex-col gap-2 rounded-md border border-(--border) bg-white/[0.04] px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 items-center gap-2">
         <span className="flex h-7 min-w-7 items-center justify-center rounded-full bg-white/[0.08] px-2 text-xs font-bold text-(--muted) ring-1 ring-(--border)">{standing ? `#${standing.rank}` : "-"}</span>
         {teamsAssigned ? <span className={`h-3 w-3 shrink-0 rounded-full ${teamDot(row.team)}`} /> : null}
@@ -1167,14 +1139,12 @@ function PlayerCollectionRow({
                 🧤 ARQ
               </span>
             ) : null}
-            {monthly ? <span className="ml-2 rounded bg-(--cyan)/20 px-1.5 py-0.5 text-[10px] font-black uppercase text-(--cyan)">Mensual</span> : null}
           </p>
-          <p className="text-xs text-(--muted)">{standing ? `${standing.points} pts` : "Sin ranking"}{pending > 0 ? ` · Falta ${formatCurrency(pending)}` : ""}</p>
+          <p className="text-xs text-(--muted)">{standing ? `${standing.points} pts` : "Sin ranking"}</p>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {isAdmin && onTeamChange ? <TeamToggle value={row.team} onChange={onTeamChange} /> : null}
-        {isAdmin && onTogglePaid ? <PaymentToggle status={row.paymentStatus} onToggle={onTogglePaid} disabled={disabled} /> : <PaymentBadge status={row.paymentStatus} />}
         {whatsapp ? (
           <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15" aria-label={`WhatsApp ${row.name}`}>
             <MessageCircle size={16} />
@@ -1199,20 +1169,16 @@ function TeamAssignmentBoard({
   rows,
   players,
   standings,
-  onTogglePaid,
   onOpenDetails,
   onRemove,
   onAddPlayer,
-  paymentPendingId,
 }: {
   rows: MatchPlayer[];
   players: Player[];
   standings: Map<string, PlayerStanding>;
-  onTogglePaid: (rowId: string) => void;
   onOpenDetails: (rowId: string) => void;
   onRemove: (rowId: string) => void;
   onAddPlayer: () => void;
-  paymentPendingId: string | null;
 }) {
   const confirmedRanked = rankedConfirmedRows(rows, players, standings);
   const outRows = sortRowsWithMonthlyLast(rows.filter((row) => row.attendanceStatus === "out"), players);
@@ -1225,13 +1191,10 @@ function TeamAssignmentBoard({
       row={row}
       players={players}
       standings={standings}
-      monthly={isMonthlyMatchRow(row, players)}
       teamsAssigned={false}
       isAdmin
-      onTogglePaid={() => onTogglePaid(row.id)}
       onOpenDetails={() => onOpenDetails(row.id)}
       onRemove={() => onRemove(row.id)}
-      disabled={paymentPendingId === row.id}
     />
   );
 
@@ -1437,10 +1400,6 @@ function MatchHero({
   const pointsB = teamRankingTotal(rows, players, standings, "B");
   const confirmed = summary.confirmedCount;
   const missing = Math.max(SQUAD_TARGET - confirmed, 0);
-  const monthlyConfirmed = rows.filter((row) => row.attendanceStatus === "confirmed" && isMonthlyMatchRow(row, players)).length;
-  const galletasConfirmed = confirmed - monthlyConfirmed;
-  const activeMonthly = players.filter((player) => player.active && player.paymentPlan === "monthly").length;
-  const galletasNeeded = Math.max(SQUAD_TARGET - activeMonthly, 0);
 
   return (
     <section className="overflow-hidden rounded-xl border border-(--border) bg-(--panel) shadow-(--shadow)">
@@ -1492,16 +1451,11 @@ function MatchHero({
             </div>
           </div>
 
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          <div className="mt-6">
             <div className={`rounded-lg border p-4 ${missing > 0 ? "border-(--gold)/45 bg-(--gold)/12" : "border-(--green)/45 bg-(--green)/12"}`}>
-              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Faltan para 12</p>
-              <p className={`mt-2 text-5xl font-black leading-none ${missing > 0 ? "text-(--gold)" : "text-(--green)"}`}>{missing}</p>
-              <p className="mt-1 text-sm font-bold text-(--muted)">{missing > 0 ? "jugadores por sumar" : "plantel completo"}</p>
-            </div>
-            <div className="rounded-lg border border-(--pink)/40 bg-(--pink)/12 p-4">
-              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Galletas actuales</p>
-              <p className="mt-2 text-5xl font-black leading-none text-white">{galletasConfirmed}</p>
-              <p className="mt-1 text-sm font-bold text-(--pink)">necesitas {galletasNeeded} si o si</p>
+              <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Jugadores confirmados</p>
+              <p className={`mt-2 text-5xl font-black leading-none ${missing > 0 ? "text-(--gold)" : "text-(--green)"}`}>{confirmed}/{SQUAD_TARGET}</p>
+              <p className="mt-1 text-sm font-bold text-(--muted)">{missing > 0 ? `faltan ${missing} jugadores` : "plantel completo"}</p>
             </div>
           </div>
 
@@ -1532,17 +1486,14 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const isAdmin = useIsAdmin();
   const { data, commit } = useSifupData(initialData);
   const [isPending, startTransition] = useTransition();
-  const [paymentPending, setPaymentPending] = useState<string | null>(null);
   const match = data.matches.find((item) => item.id === id);
   const result = data.results.find((item) => item.matchId === id);
   const [rows, setRows] = useState(() => data.matchPlayers.filter((row) => row.matchId === id));
-  const [scoreA, setScoreA] = useState(result?.scoreA ?? 0);
-  const [scoreB, setScoreB] = useState(result?.scoreB ?? 0);
+  const [winner, setWinner] = useState(result?.winner ?? "draw");
   const [resultNotes, setResultNotes] = useState(result?.notes ?? "");
   const [error, setError] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [showAddPlayer, setShowAddPlayer] = useState(false);
-  const summary = summarizeMatch(rows);
   const standings = useMemo(() => buildPlayerStandings(data), [data]);
 
   if (!match) return <PageTitle title="Partido no encontrado" description="No existe en la base de datos." />;
@@ -1598,7 +1549,10 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   }
 
   function save() {
-    const winner = scoreA === scoreB ? "draw" : scoreA > scoreB ? "A" : "B";
+    // Los goles no se solicitan en esta vista: mantenemos un marcador canónico
+    // para compatibilidad con los resultados existentes y sus reportes.
+    const scoreA = winner === "A" ? 1 : 0;
+    const scoreB = winner === "B" ? 1 : 0;
     const nextResult: MatchResult = { id: result?.id ?? newId("result"), matchId: currentMatch.id, scoreA, scoreB, winner, notes: resultNotes };
     startTransition(async () => {
       try {
@@ -1609,24 +1563,6 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         setError(err instanceof Error ? err.message : "No se pudo guardar el partido.");
       }
     });
-  }
-
-
-
-  function togglePayment(rowId: string) {
-    const index = rows.findIndex((item) => item.id === rowId);
-    const row = rows[index];
-    const nextStatus = row.paymentStatus === "paid" ? "unpaid" : "paid";
-    setPaymentPending(row.id);
-    setMatchPlayerPaymentStatusAction(row.id, nextStatus)
-      .then(() => {
-        const patch = { paymentStatus: nextStatus, amountPaid: nextStatus === "paid" ? row.amountDue : 0 } as const;
-        updateRow(index, patch);
-        commit({ ...data, matchPlayers: data.matchPlayers.map((item) => (item.id === row.id ? { ...item, ...patch } : item)) });
-        setError("");
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo actualizar el pago."))
-      .finally(() => setPaymentPending(null));
   }
 
   return (
@@ -1643,15 +1579,37 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         previous={previous}
         next={next}
       />
-      {!isAdmin ? <AdminOnlyNotice label="Vista publica: equipos, resultado y pagos son solo lectura." /> : null}
+      {!isAdmin ? <AdminOnlyNotice label="Vista publica: equipos y resultado son solo lectura." /> : null}
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
       {/* Marcador final / Resultado en la parte superior */}
       <div className="mt-4">
         {isAdmin ? (
           <Card className="space-y-3">
-            <h2 className="font-semibold">Marcador final</h2>
-            <div className="grid grid-cols-2 gap-3"><Input label="Rojo" type="number" value={String(scoreA)} onChange={(value) => setScoreA(Number(value))} /><Input label="Amarillo" type="number" value={String(scoreB)} onChange={(value) => setScoreB(Number(value))} /></div>
+            <div>
+              <h2 className="font-semibold">Resultado final</h2>
+              <p className="mt-1 text-sm text-(--muted)">Selecciona el ganador; no necesitas ingresar goles.</p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3" role="group" aria-label="Resultado del partido">
+              {([
+                ["A", "Gana Rojo", "border-(--red)/50 bg-(--red)/15 text-(--red)"],
+                ["draw", "Empate", "border-white/30 bg-white/[0.10] text-white"],
+                ["B", "Gana Amarillo", "border-(--gold)/55 bg-(--gold)/15 text-(--gold)"],
+              ] as const).map(([value, label, selectedClass]) => {
+                const selected = winner === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setWinner(value)}
+                    aria-pressed={selected}
+                    className={`h-12 rounded-md border px-3 text-sm font-black transition ${selected ? selectedClass : "border-(--border) bg-white/[0.04] text-(--muted) hover:bg-white/[0.08]"}`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
             <textarea className="min-h-20 w-full rounded-md border border-(--border) bg-(--panel-strong) p-2 text-sm text-white" value={resultNotes} onChange={(event) => setResultNotes(event.target.value)} placeholder="Notas del resultado" />
           </Card>
         ) : result && !matchIsUpcoming(currentMatch) ? (
@@ -1662,12 +1620,8 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       <Card className="mt-4 space-y-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-xs font-black uppercase tracking-wide text-(--muted)">{isAdmin ? "Plantel y cobranza" : "Jugadores"}</p>
+            <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Plantel</p>
             <h2 className="mt-1 text-xl font-black text-white">{isAdmin ? "Jugadores" : "Lista de jugadores"}</h2>
-          </div>
-          <div className="rounded-md border border-(--pink)/35 bg-(--pink)/10 px-3 py-2">
-            <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Falta recaudar</p>
-            <p className="text-lg font-black text-(--pink)">{formatCurrency(summary.pendingAmount)}</p>
           </div>
         </div>
         {isAdmin ? (
@@ -1675,19 +1629,16 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             rows={rows}
             players={data.players}
             standings={standings}
-            onTogglePaid={togglePayment}
             onOpenDetails={(rowId) => setEditingIndex(rows.findIndex((row) => row.id === rowId))}
             onRemove={removeRow}
             onAddPlayer={() => setShowAddPlayer(true)}
-            paymentPendingId={paymentPending}
           />
         ) : (
           <PublicMatchRows rows={rows} players={data.players} standings={standings} />
         )}
       </Card>
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <CopyBlock title="Resumen de pagos pendientes" text={pendingPaymentsMessage(currentMatch, rows)} />
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <CopyBlock title="Resumen de equipos" text={teamsMessage(currentMatch, rows)} />
         <CopyBlock title="Resumen del partido" text={matchSummaryMessage(currentMatch, rows)} />
       </div>
