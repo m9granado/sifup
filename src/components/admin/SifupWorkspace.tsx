@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, BarChart2, CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, Filter, MapPin, Medal, MessageCircle, Pencil, Plus, Save, Share, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
+import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, MapPin, Medal, MessageCircle, Pencil, Plus, Save, Share, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
 import {
   createMatchAction,
   markMatchPlayerPaidAction,
@@ -1325,6 +1325,7 @@ function PlayerDetailModal({
           <Input label="Debe" type="number" value={String(draft.amountDue)} onChange={(value) => setDraft({ ...draft, amountDue: Number(value) })} />
           <Input label="Pagado" type="number" value={String(draft.amountPaid)} onChange={(value) => setDraft({ ...draft, amountPaid: Number(value) })} />
         </div>
+        <Input label="Goles en este partido" type="number" value={String(draft.goals ?? 0)} onChange={(value) => setDraft({ ...draft, goals: Math.max(0, Number(value)) })} />
         <Input label="Nota" value={draft.note} onChange={(value) => setDraft({ ...draft, note: value })} />
         <Button onClick={() => onSave(draft)}><Save size={16} />Guardar</Button>
       </div>
@@ -1489,7 +1490,8 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const match = data.matches.find((item) => item.id === id);
   const result = data.results.find((item) => item.matchId === id);
   const [rows, setRows] = useState(() => data.matchPlayers.filter((row) => row.matchId === id));
-  const [winner, setWinner] = useState(result?.winner ?? "draw");
+  const [scoreA, setScoreA] = useState(result?.scoreA ?? 0);
+  const [scoreB, setScoreB] = useState(result?.scoreB ?? 0);
   const [resultNotes, setResultNotes] = useState(result?.notes ?? "");
   const [error, setError] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -1549,11 +1551,8 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   }
 
   function save() {
-    // Los goles no se solicitan en esta vista: mantenemos un marcador canónico
-    // para compatibilidad con los resultados existentes y sus reportes.
-    const scoreA = winner === "A" ? 1 : 0;
-    const scoreB = winner === "B" ? 1 : 0;
-    const nextResult: MatchResult = { id: result?.id ?? newId("result"), matchId: currentMatch.id, scoreA, scoreB, winner, notes: resultNotes };
+    const derivedWinner: MatchResult["winner"] = scoreA > scoreB ? "A" : scoreB > scoreA ? "B" : "draw";
+    const nextResult: MatchResult = { id: result?.id ?? newId("result"), matchId: currentMatch.id, scoreA, scoreB, winner: derivedWinner, notes: resultNotes };
     startTransition(async () => {
       try {
         await saveMatchDetailAction(currentMatch.id, rows, nextResult);
@@ -1585,35 +1584,61 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       {/* Marcador final / Resultado en la parte superior */}
       <div className="mt-4">
         {isAdmin ? (
-          <Card className="space-y-3">
+          <Card className="space-y-4">
             <div>
               <h2 className="font-semibold">Resultado final</h2>
-              <p className="mt-1 text-sm text-(--muted)">Selecciona el ganador; no necesitas ingresar goles.</p>
+              <p className="mt-1 text-sm text-(--muted)">Ingresá el marcador real. El ganador se infiere automáticamente.</p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-3" role="group" aria-label="Resultado del partido">
-              {([
-                ["A", "Gana Rojo", "border-(--red)/50 bg-(--red)/15 text-(--red)"],
-                ["draw", "Empate", "border-white/30 bg-white/[0.10] text-white"],
-                ["B", "Gana Amarillo", "border-(--gold)/55 bg-(--gold)/15 text-(--gold)"],
-              ] as const).map(([value, label, selectedClass]) => {
-                const selected = winner === value;
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setWinner(value)}
-                    aria-pressed={selected}
-                    className={`h-12 rounded-md border px-3 text-sm font-black transition ${selected ? selectedClass : "border-(--border) bg-white/[0.04] text-(--muted) hover:bg-white/[0.08]"}`}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
+            <div className="flex items-center justify-center gap-4">
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-xs font-black uppercase tracking-wide text-(--red)">Rojo</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={scoreA}
+                  onChange={(e) => setScoreA(Math.max(0, Number(e.target.value)))}
+                  className="h-16 w-20 rounded-md border border-(--red)/40 bg-(--red)/10 text-center text-3xl font-black text-(--red) focus:outline-none focus:border-(--red)"
+                />
+              </div>
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-sm font-black text-(--muted)">vs</span>
+                {(() => {
+                  const w = scoreA > scoreB ? "A" : scoreB > scoreA ? "B" : "draw";
+                  return (
+                    <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${w === "A" ? "bg-(--red)/20 text-(--red)" : w === "B" ? "bg-(--gold)/20 text-(--gold)" : "bg-white/10 text-(--muted)"}`}>
+                      {w === "A" ? "Gana Rojo" : w === "B" ? "Gana Amarillo" : "Empate"}
+                    </span>
+                  );
+                })()}
+              </div>
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-xs font-black uppercase tracking-wide text-(--gold)">Amarillo</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={scoreB}
+                  onChange={(e) => setScoreB(Math.max(0, Number(e.target.value)))}
+                  className="h-16 w-20 rounded-md border border-(--gold)/40 bg-(--gold)/10 text-center text-3xl font-black text-(--gold) focus:outline-none focus:border-(--gold)"
+                />
+              </div>
             </div>
-            <textarea className="min-h-20 w-full rounded-md border border-(--border) bg-(--panel-strong) p-2 text-sm text-white" value={resultNotes} onChange={(event) => setResultNotes(event.target.value)} placeholder="Notas del resultado" />
+            <p className="text-xs text-(--muted) text-center">
+              Usá "Editar" en cada jugador para registrar los goles individuales.
+            </p>
+            <textarea className="min-h-16 w-full rounded-md border border-(--border) bg-(--panel-strong) p-2 text-sm text-white" value={resultNotes} onChange={(event) => setResultNotes(event.target.value)} placeholder="Notas del resultado (opcional)" />
           </Card>
         ) : result && !matchIsUpcoming(currentMatch) ? (
-          <Card><h2 className="font-semibold">Resultado final</h2><p className="mt-2 text-2xl font-semibold">Rojo {result.scoreA} - {result.scoreB} Amarillo</p><p className="mt-1 text-sm text-(--muted)">{result.winner === "draw" ? "Empate" : `Gana ${teamLabel(result.winner)}`}</p></Card>
+          <Card>
+            <h2 className="font-semibold">Resultado final</h2>
+            <p className="mt-2 text-3xl font-black">
+              <span className="text-(--red)">{result.scoreA}</span>
+              <span className="text-(--muted) mx-3">-</span>
+              <span className="text-(--gold)">{result.scoreB}</span>
+            </p>
+            <p className="mt-1 text-sm text-(--muted)">
+              Rojo vs Amarillo · {result.winner === "draw" ? "Empate" : `Gana ${teamLabel(result.winner)}`}
+            </p>
+          </Card>
         ) : null}
       </div>
 
@@ -3229,27 +3254,12 @@ function TeamSelectorRow({ row, onChange, players, standings }: { row: MatchPlay
   );
 }
 
-type SortCriterion = "points" | "winRate" | "played" | "wins" | "goals";
-
-const SORT_LABELS: Record<SortCriterion, string> = {
-  points: "Puntos",
-  winRate: "Rendimiento %",
-  played: "Partidos jugados",
-  wins: "Victorias",
-  goals: "Goles",
-};
-
 export function PlayerComparisonPage({ initialData }: InitialDataProps) {
   const { data } = useSifupData(initialData);
-  const [sortBy, setSortBy] = useState<SortCriterion>("points");
-  const [planFilter, setPlanFilter] = useState<"all" | "monthly" | "perMatch">("all");
-  const [minMatches, setMinMatches] = useState(1);
-  const [ascending, setAscending] = useState(false);
 
-  const rows = useMemo(() => {
-    const base = data.players
+  const allStats = useMemo(() => {
+    return data.players
       .filter((p) => p.active)
-      .filter((p) => planFilter === "all" || p.paymentPlan === planFilter)
       .map((player) => {
         const stats = computePlayerStats(player, data);
         const totalGoals = data.matchPlayers
@@ -3266,24 +3276,28 @@ export function PlayerComparisonPage({ initialData }: InitialDataProps) {
           ...stats,
           goals: totalGoals,
         };
-      })
-      .filter((r) => r.played >= minMatches);
+      });
+  }, [data]);
 
-    base.sort((a, b) => {
-      const diff = (b[sortBy] as number) - (a[sortBy] as number);
-      if (diff !== 0) return ascending ? -diff : diff;
-      return b.points - a.points || b.winRate - a.winRate;
-    });
+  // Top goleador: jugador de campo con más goles
+  const topScorers = useMemo(() =>
+    [...allStats]
+      .filter((r) => r.played > 0)
+      .sort((a, b) => b.goals - a.goals || b.played - a.played)
+      .slice(0, 5),
+    [allStats]
+  );
 
-    return base;
-  }, [data, sortBy, planFilter, minMatches, ascending]);
+  // Mejor arquero: jugadores marcados como arquero, por rendimiento y partidos jugados
+  const topGoalkeepers = useMemo(() =>
+    [...allStats]
+      .filter((r) => r.isGoalkeeper && r.played > 0)
+      .sort((a, b) => b.winRate - a.winRate || b.wins - a.wins || b.played - a.played)
+      .slice(0, 3),
+    [allStats]
+  );
 
-  const topPlayer = rows[0];
-
-  const criterionMax = useMemo(() => {
-    if (!rows.length) return 1;
-    return Math.max(...rows.map((r) => r[sortBy] as number)) || 1;
-  }, [rows, sortBy]);
+  const maxGoals = topScorers[0]?.goals || 1;
 
   return (
     <div className="max-w-4xl mx-auto w-full px-4 pt-4 pb-12 space-y-6">
@@ -3292,169 +3306,69 @@ export function PlayerComparisonPage({ initialData }: InitialDataProps) {
         <div className="hero-copy">
           <div className="label-row">
             <span>SIFUP</span>
-            <strong>Comparación de jugadores</strong>
+            <strong>Premios de la temporada</strong>
           </div>
           <h1>Mejores jugadores</h1>
-          <p>Compará el rendimiento de todos los jugadores según el criterio que elijas.</p>
+          <p>Goleador de la temporada y mejor arquero por rendimiento acumulado.</p>
         </div>
         <div className="hero-metrics" aria-label="Totales">
-          <article className="metric cyan">
-            <span>Jugadores</span>
-            <strong>{rows.length}</strong>
-          </article>
-          {topPlayer ? (
+          {topScorers[0] ? (
             <article className="metric lime">
-              <span>Líder actual</span>
-              <strong style={{ fontSize: "14px" }}>{topPlayer.shortName || topPlayer.name.split(" ")[0]}</strong>
+              <span>⚽ Goleador</span>
+              <strong style={{ fontSize: "13px" }}>{topScorers[0].shortName || topScorers[0].name.split(" ")[0]}</strong>
+            </article>
+          ) : null}
+          {topGoalkeepers[0] ? (
+            <article className="metric cyan">
+              <span>🧤 Arquero</span>
+              <strong style={{ fontSize: "13px" }}>{topGoalkeepers[0].shortName || topGoalkeepers[0].name.split(" ")[0]}</strong>
             </article>
           ) : null}
         </div>
       </section>
 
-      {/* Controls */}
-      <section className="panel" style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "16px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-          <Filter size={14} style={{ color: "var(--green)" }} />
-          <h2 style={{ fontSize: "14px", fontWeight: 700, margin: 0 }}>Criterio de ranking</h2>
-        </div>
-
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-          {(Object.keys(SORT_LABELS) as SortCriterion[]).map((key) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setSortBy(key)}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
-                sortBy === key
-                  ? "bg-(--green) text-(--bg-deep)"
-                  : "bg-white/[0.08] text-(--muted) hover:bg-white/[0.14] hover:text-white"
-              }`}
-            >
-              {key === sortBy ? <BarChart2 size={11} /> : null}
-              {SORT_LABELS[key]}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => setAscending((v) => !v)}
-            className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold bg-white/[0.08] text-(--muted) hover:bg-white/[0.14] hover:text-white transition"
-            title={ascending ? "Orden ascendente" : "Orden descendente"}
-          >
-            {ascending ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
-            {ascending ? "Asc" : "Desc"}
-          </button>
-        </div>
-
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", alignItems: "center" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            <label style={{ fontSize: "11px", color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Plan
-            </label>
-            <div style={{ display: "flex", gap: "6px" }}>
-              {(["all", "monthly", "perMatch"] as const).map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => setPlanFilter(opt)}
-                  className={`h-8 px-3 text-xs font-bold rounded transition ${
-                    planFilter === opt
-                      ? "bg-white/[0.2] text-white"
-                      : "bg-white/[0.06] text-(--muted) hover:bg-white/[0.12]"
-                  }`}
-                >
-                  {opt === "all" ? "Todos" : opt === "monthly" ? "Oficiales" : "Galletas"}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            <label style={{ fontSize: "11px", color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Mín. partidos: <strong style={{ color: "var(--green)" }}>{minMatches}</strong>
-            </label>
-            <input
-              type="range"
-              min={1}
-              max={20}
-              value={minMatches}
-              onChange={(e) => setMinMatches(Number(e.target.value))}
-              style={{ accentColor: "var(--green)", width: "120px" }}
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* Ranking visual bars */}
+      {/* Goleador */}
       <section className="panel" style={{ padding: "20px 24px" }}>
-        <div className="panel-heading" style={{ marginBottom: "16px" }}>
+        <div className="panel-heading" style={{ marginBottom: "20px" }}>
           <div>
-            <h2>Ranking por {SORT_LABELS[sortBy].toLowerCase()}</h2>
-            <p>{rows.length} jugadores con al menos {minMatches} partido{minMatches !== 1 ? "s" : ""}.</p>
+            <h2>⚽ Tabla de goleadores</h2>
+            <p>Goles registrados por partido. Registrá los goles desde el detalle de cada partido.</p>
           </div>
-          <span className="panel-icon gold"><Trophy size={16} /></span>
         </div>
 
-        {rows.length === 0 ? (
-          <p style={{ color: "var(--muted)", fontSize: "14px" }}>Sin jugadores que cumplan el filtro.</p>
+        {topScorers.length === 0 || topScorers[0].goals === 0 ? (
+          <p style={{ color: "var(--muted)", fontSize: "14px" }}>Aún no hay goles registrados. Editá a los jugadores en cada partido para agregar goles.</p>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-            {rows.map((row, index) => {
-              const value = row[sortBy] as number;
-              const pct = criterionMax > 0 ? (value / criterionMax) * 100 : 0;
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            {topScorers.map((row, index) => {
+              const pct = maxGoals > 0 ? (row.goals / maxGoals) * 100 : 0;
               const isTop = index === 0;
               return (
                 <div key={row.id} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  <span style={{
-                    minWidth: "24px",
-                    textAlign: "right",
-                    fontSize: "13px",
-                    fontWeight: 900,
-                    color: isTop ? "var(--gold)" : "var(--muted)",
-                  }}>
+                  <span style={{ minWidth: "24px", textAlign: "right", fontSize: "13px", fontWeight: 900, color: isTop ? "var(--gold)" : "var(--muted)" }}>
                     {index + 1}
                   </span>
                   <span style={{
-                    minWidth: "28px",
-                    height: "28px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderRadius: "50%",
-                    background: isTop ? "var(--gold)" : "rgba(255,255,255,0.08)",
-                    fontSize: "10px",
-                    fontWeight: 900,
-                    color: isTop ? "#000" : "var(--muted)",
-                    flexShrink: 0,
+                    minWidth: "32px", height: "32px", display: "flex", alignItems: "center", justifyContent: "center",
+                    borderRadius: "50%", background: isTop ? "var(--gold)" : "rgba(255,255,255,0.08)",
+                    fontSize: "11px", fontWeight: 900, color: isTop ? "#000" : "var(--muted)", flexShrink: 0,
                   }}>
                     {row.shortName ? row.shortName.toUpperCase().slice(0, 2) : row.name.slice(0, 2).toUpperCase()}
                   </span>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "4px" }}>
-                      <span style={{ fontSize: "13px", fontWeight: 700, color: isTop ? "var(--gold)" : "white" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "5px" }}>
+                      <span style={{ fontSize: "14px", fontWeight: 700, color: isTop ? "var(--gold)" : "white" }}>
                         {row.name}
-                        {row.isGoalkeeper ? " 🧤" : ""}
                       </span>
-                      <span style={{
-                        fontSize: "14px",
-                        fontWeight: 900,
-                        color: isTop ? "var(--gold)" : "var(--green)",
-                        marginLeft: "8px",
-                        flexShrink: 0,
-                      }}>
-                        {sortBy === "winRate" ? `${value}%` : value}
+                      <span style={{ fontSize: "18px", fontWeight: 900, color: isTop ? "var(--gold)" : "var(--green)", marginLeft: "8px", flexShrink: 0 }}>
+                        {row.goals} <span style={{ fontSize: "11px", fontWeight: 500, opacity: 0.7 }}>gol{row.goals !== 1 ? "es" : ""}</span>
                       </span>
                     </div>
                     <div style={{ height: "6px", borderRadius: "4px", background: "rgba(255,255,255,0.07)", overflow: "hidden" }}>
-                      <div style={{
-                        height: "100%",
-                        width: `${pct}%`,
-                        borderRadius: "4px",
-                        background: isTop ? "var(--gold)" : "var(--green)",
-                        transition: "width 0.4s ease",
-                      }} />
+                      <div style={{ height: "100%", width: `${pct}%`, borderRadius: "4px", background: isTop ? "var(--gold)" : "var(--green)", transition: "width 0.4s ease" }} />
                     </div>
                     <div style={{ fontSize: "10px", color: "var(--muted)", marginTop: "3px" }}>
-                      {row.form} · {row.played} PJ · {row.goals} goles
+                      {row.played} PJ · {row.goals > 0 ? `1 cada ${(row.played / row.goals).toFixed(1)} partidos` : "sin goles"}
                     </div>
                   </div>
                 </div>
@@ -3464,12 +3378,64 @@ export function PlayerComparisonPage({ initialData }: InitialDataProps) {
         )}
       </section>
 
-      {/* Stats comparison table */}
+      {/* Mejor arquero */}
+      <section className="panel" style={{ padding: "20px 24px" }}>
+        <div className="panel-heading" style={{ marginBottom: "20px" }}>
+          <div>
+            <h2>🧤 Mejor arquero</h2>
+            <p>Jugadores marcados como arquero, ordenados por rendimiento (victorias / partidos).</p>
+          </div>
+        </div>
+
+        {topGoalkeepers.length === 0 ? (
+          <p style={{ color: "var(--muted)", fontSize: "14px" }}>
+            No hay jugadores marcados como arquero. Activá la opción en el perfil del jugador.
+          </p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            {topGoalkeepers.map((row, index) => {
+              const isTop = index === 0;
+              return (
+                <div key={row.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px", borderRadius: "10px", background: isTop ? "rgba(18,214,154,0.06)" : "rgba(255,255,255,0.03)", border: `1px solid ${isTop ? "rgba(18,214,154,0.2)" : "rgba(255,255,255,0.06)"}` }}>
+                  <span style={{ fontSize: "20px" }}>{index === 0 ? "🥇" : index === 1 ? "🥈" : "🥉"}</span>
+                  <span style={{
+                    minWidth: "36px", height: "36px", display: "flex", alignItems: "center", justifyContent: "center",
+                    borderRadius: "50%", background: isTop ? "var(--green)" : "rgba(255,255,255,0.1)",
+                    fontSize: "12px", fontWeight: 900, color: isTop ? "var(--bg-deep)" : "var(--muted)", flexShrink: 0,
+                  }}>
+                    {row.shortName ? row.shortName.toUpperCase().slice(0, 2) : row.name.slice(0, 2).toUpperCase()}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <span style={{ fontSize: "15px", fontWeight: 800, color: isTop ? "var(--green)" : "white" }}>
+                          {row.name}
+                        </span>
+                        <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "2px" }}>
+                          {row.played} PJ · {row.form} · {row.plan === "monthly" ? "Oficial" : "Galleta"}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: "right", flexShrink: 0, marginLeft: "12px" }}>
+                        <div style={{ fontSize: "22px", fontWeight: 900, color: isTop ? "var(--green)" : "white" }}>
+                          {row.winRate}%
+                        </div>
+                        <div style={{ fontSize: "10px", color: "var(--muted)" }}>rendimiento</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* Tabla completa */}
       <section className="panel ranking-panel">
         <div className="ranking-head">
           <div>
-            <h2>Tabla comparativa</h2>
-            <p>Todos los stats lado a lado. Hacé clic en un encabezado para ordenar.</p>
+            <h2>Tabla completa con goles</h2>
+            <p>Todos los jugadores activos con sus goles registrados.</p>
           </div>
         </div>
         <div className="table-wrap">
@@ -3478,80 +3444,49 @@ export function PlayerComparisonPage({ initialData }: InitialDataProps) {
               <tr>
                 <th>#</th>
                 <th>Jugador</th>
-                <th
-                  className="text-center"
-                  style={{ cursor: "pointer", color: sortBy === "points" ? "var(--gold)" : undefined }}
-                  onClick={() => { setSortBy("points"); setAscending(false); }}
-                  title="Ordenar por puntos"
-                >
-                  Pts
-                </th>
-                <th
-                  className="text-center"
-                  style={{ cursor: "pointer", color: sortBy === "winRate" ? "var(--gold)" : undefined }}
-                  onClick={() => { setSortBy("winRate"); setAscending(false); }}
-                  title="Ordenar por rendimiento"
-                >
-                  Rend %
-                </th>
-                <th
-                  className="optional text-center"
-                  style={{ cursor: "pointer", color: sortBy === "played" ? "var(--gold)" : undefined }}
-                  onClick={() => { setSortBy("played"); setAscending(false); }}
-                  title="Ordenar por PJ"
-                >
-                  PJ
-                </th>
+                <th className="text-center" style={{ color: "var(--gold)" }}>Pts</th>
+                <th className="text-center">Rend %</th>
+                <th className="optional text-center">PJ</th>
                 <th className="optional text-center">G</th>
                 <th className="optional text-center">E</th>
                 <th className="optional text-center">P</th>
-                <th
-                  className="optional text-center"
-                  style={{ cursor: "pointer", color: sortBy === "goals" ? "var(--gold)" : undefined }}
-                  onClick={() => { setSortBy("goals"); setAscending(false); }}
-                  title="Ordenar por goles"
-                >
-                  ⚽
-                </th>
-                <th className="optional text-center">Nivel</th>
+                <th className="text-center" style={{ color: "var(--green)" }}>⚽</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, index) => (
-                <tr key={row.id}>
-                  <td style={{ fontWeight: 900, color: index === 0 ? "var(--gold)" : undefined }}>{index + 1}</td>
-                  <td>
-                    <div className="player">
-                      <span className={row.plan !== "monthly" ? "galleta-bubble" : undefined}>
-                        {row.shortName ? row.shortName.toUpperCase() : row.name.slice(0, 2).toUpperCase()}
-                      </span>
-                      <strong>
-                        <div className="flex items-center gap-1.5">
-                          <b>{row.name}</b>
-                          {row.isGoalkeeper ? (
-                            <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider gap-0.5">
-                              🧤 ARQ
-                            </span>
-                          ) : null}
-                        </div>
-                        <small>{row.plan === "monthly" ? "Oficial" : "Galleta"} · {row.nickname || ""}</small>
-                      </strong>
-                    </div>
-                  </td>
-                  <td className="points-cell text-center" style={{ fontSize: "18px", color: "var(--gold)", fontWeight: 1000 }}>{row.points}</td>
-                  <td className="text-center" style={{ fontWeight: 700 }}>{row.winRate}%</td>
-                  <td className="optional text-center">{row.played}</td>
-                  <td className="optional text-center">{row.wins}</td>
-                  <td className="optional text-center">{row.draws}</td>
-                  <td className="optional text-center">{row.losses}</td>
-                  <td className="optional text-center">{row.goals}</td>
-                  <td className="optional text-center">
-                    <span style={{ fontSize: "11px", letterSpacing: "1px" }}>
-                      {"★".repeat(row.skillLevel ?? 0)}{"☆".repeat(5 - (row.skillLevel ?? 0))}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {[...allStats]
+                .filter((r) => r.played > 0)
+                .sort((a, b) => b.goals - a.goals || b.points - a.points)
+                .map((row, index) => (
+                  <tr key={row.id}>
+                    <td style={{ fontWeight: 900, color: index === 0 ? "var(--gold)" : undefined }}>{index + 1}</td>
+                    <td>
+                      <div className="player">
+                        <span className={row.plan !== "monthly" ? "galleta-bubble" : undefined}>
+                          {row.shortName ? row.shortName.toUpperCase() : row.name.slice(0, 2).toUpperCase()}
+                        </span>
+                        <strong>
+                          <div className="flex items-center gap-1.5">
+                            <b>{row.name}</b>
+                            {row.isGoalkeeper ? (
+                              <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider gap-0.5">
+                                🧤 ARQ
+                              </span>
+                            ) : null}
+                          </div>
+                          <small>{row.plan === "monthly" ? "Oficial" : "Galleta"}</small>
+                        </strong>
+                      </div>
+                    </td>
+                    <td className="points-cell text-center" style={{ fontSize: "18px", color: "var(--gold)", fontWeight: 1000 }}>{row.points}</td>
+                    <td className="text-center" style={{ fontWeight: 700 }}>{row.winRate}%</td>
+                    <td className="optional text-center">{row.played}</td>
+                    <td className="optional text-center">{row.wins}</td>
+                    <td className="optional text-center">{row.draws}</td>
+                    <td className="optional text-center">{row.losses}</td>
+                    <td className="text-center" style={{ fontWeight: 900, fontSize: "16px", color: row.goals > 0 ? "var(--green)" : "var(--muted)" }}>{row.goals}</td>
+                  </tr>
+                ))}
             </tbody>
           </table>
         </div>
