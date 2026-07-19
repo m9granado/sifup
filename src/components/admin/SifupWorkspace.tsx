@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, MapPin, Medal, MessageCircle, Pencil, Plus, Save, Share, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
+import { ArrowDown, ArrowUp, BarChart2, CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, Filter, MapPin, Medal, MessageCircle, Pencil, Plus, Save, Share, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
 import {
   createMatchAction,
   markMatchPlayerPaidAction,
@@ -3225,6 +3225,337 @@ function TeamSelectorRow({ row, onChange, players, standings }: { row: MatchPlay
           Ninguno
         </button>
       </div>
+    </div>
+  );
+}
+
+type SortCriterion = "points" | "winRate" | "played" | "wins" | "goals";
+
+const SORT_LABELS: Record<SortCriterion, string> = {
+  points: "Puntos",
+  winRate: "Rendimiento %",
+  played: "Partidos jugados",
+  wins: "Victorias",
+  goals: "Goles",
+};
+
+export function PlayerComparisonPage({ initialData }: InitialDataProps) {
+  const { data } = useSifupData(initialData);
+  const [sortBy, setSortBy] = useState<SortCriterion>("points");
+  const [planFilter, setPlanFilter] = useState<"all" | "monthly" | "perMatch">("all");
+  const [minMatches, setMinMatches] = useState(1);
+  const [ascending, setAscending] = useState(false);
+
+  const rows = useMemo(() => {
+    const base = data.players
+      .filter((p) => p.active)
+      .filter((p) => planFilter === "all" || p.paymentPlan === planFilter)
+      .map((player) => {
+        const stats = computePlayerStats(player, data);
+        const totalGoals = data.matchPlayers
+          .filter((mp) => (mp.playerId === player.id || mp.name === player.name) && mp.attendanceStatus === "confirmed")
+          .reduce((sum, mp) => sum + (mp.goals ?? 0), 0);
+        return {
+          id: player.id,
+          name: player.name,
+          nickname: player.nickname,
+          shortName: player.shortName,
+          isGoalkeeper: player.isGoalkeeper,
+          plan: player.paymentPlan,
+          skillLevel: player.skillLevel,
+          ...stats,
+          goals: totalGoals,
+        };
+      })
+      .filter((r) => r.played >= minMatches);
+
+    base.sort((a, b) => {
+      const diff = (b[sortBy] as number) - (a[sortBy] as number);
+      if (diff !== 0) return ascending ? -diff : diff;
+      return b.points - a.points || b.winRate - a.winRate;
+    });
+
+    return base;
+  }, [data, sortBy, planFilter, minMatches, ascending]);
+
+  const topPlayer = rows[0];
+
+  const criterionMax = useMemo(() => {
+    if (!rows.length) return 1;
+    return Math.max(...rows.map((r) => r[sortBy] as number)) || 1;
+  }, [rows, sortBy]);
+
+  return (
+    <div className="max-w-4xl mx-auto w-full px-4 pt-4 pb-12 space-y-6">
+      <section className="hero">
+        <div className="hero-bg" aria-hidden="true" />
+        <div className="hero-copy">
+          <div className="label-row">
+            <span>SIFUP</span>
+            <strong>Comparación de jugadores</strong>
+          </div>
+          <h1>Mejores jugadores</h1>
+          <p>Compará el rendimiento de todos los jugadores según el criterio que elijas.</p>
+        </div>
+        <div className="hero-metrics" aria-label="Totales">
+          <article className="metric cyan">
+            <span>Jugadores</span>
+            <strong>{rows.length}</strong>
+          </article>
+          {topPlayer ? (
+            <article className="metric lime">
+              <span>Líder actual</span>
+              <strong style={{ fontSize: "14px" }}>{topPlayer.shortName || topPlayer.name.split(" ")[0]}</strong>
+            </article>
+          ) : null}
+        </div>
+      </section>
+
+      {/* Controls */}
+      <section className="panel" style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "16px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+          <Filter size={14} style={{ color: "var(--green)" }} />
+          <h2 style={{ fontSize: "14px", fontWeight: 700, margin: 0 }}>Criterio de ranking</h2>
+        </div>
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+          {(Object.keys(SORT_LABELS) as SortCriterion[]).map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setSortBy(key)}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                sortBy === key
+                  ? "bg-(--green) text-(--bg-deep)"
+                  : "bg-white/[0.08] text-(--muted) hover:bg-white/[0.14] hover:text-white"
+              }`}
+            >
+              {key === sortBy ? <BarChart2 size={11} /> : null}
+              {SORT_LABELS[key]}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setAscending((v) => !v)}
+            className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold bg-white/[0.08] text-(--muted) hover:bg-white/[0.14] hover:text-white transition"
+            title={ascending ? "Orden ascendente" : "Orden descendente"}
+          >
+            {ascending ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
+            {ascending ? "Asc" : "Desc"}
+          </button>
+        </div>
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", alignItems: "center" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            <label style={{ fontSize: "11px", color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Plan
+            </label>
+            <div style={{ display: "flex", gap: "6px" }}>
+              {(["all", "monthly", "perMatch"] as const).map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => setPlanFilter(opt)}
+                  className={`h-8 px-3 text-xs font-bold rounded transition ${
+                    planFilter === opt
+                      ? "bg-white/[0.2] text-white"
+                      : "bg-white/[0.06] text-(--muted) hover:bg-white/[0.12]"
+                  }`}
+                >
+                  {opt === "all" ? "Todos" : opt === "monthly" ? "Oficiales" : "Galletas"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            <label style={{ fontSize: "11px", color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Mín. partidos: <strong style={{ color: "var(--green)" }}>{minMatches}</strong>
+            </label>
+            <input
+              type="range"
+              min={1}
+              max={20}
+              value={minMatches}
+              onChange={(e) => setMinMatches(Number(e.target.value))}
+              style={{ accentColor: "var(--green)", width: "120px" }}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Ranking visual bars */}
+      <section className="panel" style={{ padding: "20px 24px" }}>
+        <div className="panel-heading" style={{ marginBottom: "16px" }}>
+          <div>
+            <h2>Ranking por {SORT_LABELS[sortBy].toLowerCase()}</h2>
+            <p>{rows.length} jugadores con al menos {minMatches} partido{minMatches !== 1 ? "s" : ""}.</p>
+          </div>
+          <span className="panel-icon gold"><Trophy size={16} /></span>
+        </div>
+
+        {rows.length === 0 ? (
+          <p style={{ color: "var(--muted)", fontSize: "14px" }}>Sin jugadores que cumplan el filtro.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {rows.map((row, index) => {
+              const value = row[sortBy] as number;
+              const pct = criterionMax > 0 ? (value / criterionMax) * 100 : 0;
+              const isTop = index === 0;
+              return (
+                <div key={row.id} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  <span style={{
+                    minWidth: "24px",
+                    textAlign: "right",
+                    fontSize: "13px",
+                    fontWeight: 900,
+                    color: isTop ? "var(--gold)" : "var(--muted)",
+                  }}>
+                    {index + 1}
+                  </span>
+                  <span style={{
+                    minWidth: "28px",
+                    height: "28px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderRadius: "50%",
+                    background: isTop ? "var(--gold)" : "rgba(255,255,255,0.08)",
+                    fontSize: "10px",
+                    fontWeight: 900,
+                    color: isTop ? "#000" : "var(--muted)",
+                    flexShrink: 0,
+                  }}>
+                    {row.shortName ? row.shortName.toUpperCase().slice(0, 2) : row.name.slice(0, 2).toUpperCase()}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "4px" }}>
+                      <span style={{ fontSize: "13px", fontWeight: 700, color: isTop ? "var(--gold)" : "white" }}>
+                        {row.name}
+                        {row.isGoalkeeper ? " 🧤" : ""}
+                      </span>
+                      <span style={{
+                        fontSize: "14px",
+                        fontWeight: 900,
+                        color: isTop ? "var(--gold)" : "var(--green)",
+                        marginLeft: "8px",
+                        flexShrink: 0,
+                      }}>
+                        {sortBy === "winRate" ? `${value}%` : value}
+                      </span>
+                    </div>
+                    <div style={{ height: "6px", borderRadius: "4px", background: "rgba(255,255,255,0.07)", overflow: "hidden" }}>
+                      <div style={{
+                        height: "100%",
+                        width: `${pct}%`,
+                        borderRadius: "4px",
+                        background: isTop ? "var(--gold)" : "var(--green)",
+                        transition: "width 0.4s ease",
+                      }} />
+                    </div>
+                    <div style={{ fontSize: "10px", color: "var(--muted)", marginTop: "3px" }}>
+                      {row.form} · {row.played} PJ · {row.goals} goles
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* Stats comparison table */}
+      <section className="panel ranking-panel">
+        <div className="ranking-head">
+          <div>
+            <h2>Tabla comparativa</h2>
+            <p>Todos los stats lado a lado. Hacé clic en un encabezado para ordenar.</p>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Jugador</th>
+                <th
+                  className="text-center"
+                  style={{ cursor: "pointer", color: sortBy === "points" ? "var(--gold)" : undefined }}
+                  onClick={() => { setSortBy("points"); setAscending(false); }}
+                  title="Ordenar por puntos"
+                >
+                  Pts
+                </th>
+                <th
+                  className="text-center"
+                  style={{ cursor: "pointer", color: sortBy === "winRate" ? "var(--gold)" : undefined }}
+                  onClick={() => { setSortBy("winRate"); setAscending(false); }}
+                  title="Ordenar por rendimiento"
+                >
+                  Rend %
+                </th>
+                <th
+                  className="optional text-center"
+                  style={{ cursor: "pointer", color: sortBy === "played" ? "var(--gold)" : undefined }}
+                  onClick={() => { setSortBy("played"); setAscending(false); }}
+                  title="Ordenar por PJ"
+                >
+                  PJ
+                </th>
+                <th className="optional text-center">G</th>
+                <th className="optional text-center">E</th>
+                <th className="optional text-center">P</th>
+                <th
+                  className="optional text-center"
+                  style={{ cursor: "pointer", color: sortBy === "goals" ? "var(--gold)" : undefined }}
+                  onClick={() => { setSortBy("goals"); setAscending(false); }}
+                  title="Ordenar por goles"
+                >
+                  ⚽
+                </th>
+                <th className="optional text-center">Nivel</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={row.id}>
+                  <td style={{ fontWeight: 900, color: index === 0 ? "var(--gold)" : undefined }}>{index + 1}</td>
+                  <td>
+                    <div className="player">
+                      <span className={row.plan !== "monthly" ? "galleta-bubble" : undefined}>
+                        {row.shortName ? row.shortName.toUpperCase() : row.name.slice(0, 2).toUpperCase()}
+                      </span>
+                      <strong>
+                        <div className="flex items-center gap-1.5">
+                          <b>{row.name}</b>
+                          {row.isGoalkeeper ? (
+                            <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider gap-0.5">
+                              🧤 ARQ
+                            </span>
+                          ) : null}
+                        </div>
+                        <small>{row.plan === "monthly" ? "Oficial" : "Galleta"} · {row.nickname || ""}</small>
+                      </strong>
+                    </div>
+                  </td>
+                  <td className="points-cell text-center" style={{ fontSize: "18px", color: "var(--gold)", fontWeight: 1000 }}>{row.points}</td>
+                  <td className="text-center" style={{ fontWeight: 700 }}>{row.winRate}%</td>
+                  <td className="optional text-center">{row.played}</td>
+                  <td className="optional text-center">{row.wins}</td>
+                  <td className="optional text-center">{row.draws}</td>
+                  <td className="optional text-center">{row.losses}</td>
+                  <td className="optional text-center">{row.goals}</td>
+                  <td className="optional text-center">
+                    <span style={{ fontSize: "11px", letterSpacing: "1px" }}>
+                      {"★".repeat(row.skillLevel ?? 0)}{"☆".repeat(5 - (row.skillLevel ?? 0))}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }
