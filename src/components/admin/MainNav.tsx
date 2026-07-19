@@ -19,6 +19,7 @@ export function MainNav({ isAdmin, nextMatchId }: { isAdmin: boolean; nextMatchI
     ...(isAdmin && nextMatchId ? [{ href: `/matches/${nextMatchId}/teams`, label: "Equipos", icon: "icon-shield" }] : []),
     ...(isAdmin ? [{ href: "/payments", label: "Pagos", icon: "icon-wallet" }] : []),
     { href: "/standings", label: "Rankings", icon: "icon-trophy" },
+    { href: "/comparacion", label: "Comparar", icon: "icon-ball" },
   ];
 
   const teamsHref = nextMatchId ? `/matches/${nextMatchId}/teams` : undefined;
