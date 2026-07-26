@@ -1203,7 +1203,7 @@ function PlayerCollectionRow({
       <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
         {standing ? <div className="text-right leading-tight md:hidden"><p className="text-base font-black text-(--gold)">{standing.points}</p><p className="text-[10px] font-bold uppercase tracking-wide text-(--muted)">pts</p></div> : null}
         {isAdmin && onTeamChange ? <TeamToggle value={row.team} onChange={onTeamChange} /> : null}
-        {!player && isAdmin && onAssociate ? (
+        {!row.playerId && isAdmin && onAssociate ? (
           <button type="button" onClick={onAssociate} className="inline-flex items-center gap-1 rounded-md border border-(--cyan)/35 bg-(--cyan)/10 px-2 py-1.5 text-xs font-bold text-(--cyan) hover:bg-(--cyan)/20" title={`Asociar ${row.name} a un jugador existente`}>
             <UserPlus size={14} />
             Asociar
@@ -1662,10 +1662,11 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
     const row = rows.find((item) => item.id === associatingRowId);
     if (!row) return;
     const updatedPlayer = addPlayerAlias(player, row.name);
-    savePlayerAction(updatedPlayer)
+    const nextRows = rows.map((item) => item.id === row.id ? { ...item, playerId: player.id, updatedAt: new Date().toISOString() } : item);
+    Promise.all([savePlayerAction(updatedPlayer), saveMatchDetailAction(currentMatch.id, nextRows)])
       .then(() => {
-        commit(upsertPlayer(data, updatedPlayer));
-        setRows((current) => current.map((item) => item.id === row.id ? { ...item, playerId: player.id, updatedAt: new Date().toISOString() } : item));
+        commit(replaceMatchPlayers(upsertPlayer(data, updatedPlayer), currentMatch.id, nextRows));
+        setRows(nextRows);
         setAssociatingRowId(null);
         setError("");
       })
