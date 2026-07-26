@@ -702,14 +702,18 @@ export function MatchesPage({ initialData }: InitialDataProps) {
                   }`}
                 >
                   {result ? (
-                    <div className="flex flex-col gap-2">
+                    <div className="flex flex-col gap-3">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <h2 className="text-lg font-bold text-white">
-                            Rojo {result.scoreA} - {result.scoreB} Amarillo
+                          <div className="flex items-center gap-2 text-(--gold)">
+                            <Trophy size={16} aria-hidden="true" />
+                            <p className="text-xs font-black uppercase tracking-wide">Partido finalizado</p>
+                          </div>
+                          <h2 className="mt-1 text-lg font-black text-white">
+                            {result.winner === "draw" ? "Empate" : `Ganó el equipo ${teamLabel(result.winner)}`}
                           </h2>
                           <p className="mt-1 text-sm font-medium text-(--muted)">
-                            {match.weekLabel || match.date} · {result.winner === "draw" ? "Empate" : `Gana ${teamLabel(result.winner)}`}
+                            {match.weekLabel || match.date} · {match.location}
                           </p>
                         </div>
                         <div className="flex flex-col items-end gap-2">
@@ -717,12 +721,15 @@ export function MatchesPage({ initialData }: InitialDataProps) {
                         </div>
                       </div>
                       {winners.length > 0 ? (
-                        <div className="flex flex-wrap gap-1 mt-1">
+                        <div className="rounded-lg border border-(--gold)/45 bg-(--gold)/12 p-3">
+                          <p className="mb-2 text-xs font-black uppercase tracking-wide text-(--gold)">Jugadores ganadores</p>
+                          <div className="flex flex-wrap gap-2">
                           {winners.map((w) => (
-                            <span key={w.id} className="inline-flex items-center rounded bg-(--green)/15 px-1.5 py-0.5 text-[9px] font-black text-(--green) uppercase tracking-wider">
+                            <span key={w.id} className="inline-flex items-center rounded-md bg-(--gold) px-3 py-1.5 text-sm font-black text-(--bg-deep)">
                               {w.name}
                             </span>
                           ))}
+                          </div>
                         </div>
                       ) : null}
                     </div>
