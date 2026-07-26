@@ -94,7 +94,7 @@ function addPlayerAlias(player: Player, alias: string) {
   if (!cleanAlias) return player;
   const aliases = player.nickname.split(/[|,/]/).map((item) => item.trim()).filter(Boolean);
   if (aliases.some((item) => item.toLocaleLowerCase("es-CL") === cleanAlias.toLocaleLowerCase("es-CL"))) return player;
-  return { ...player, nickname: [...aliases, cleanAlias].join(" | "), updatedAt: new Date().toISOString() };
+  return { ...player, nickname: [...aliases, cleanAlias].join(", "), updatedAt: new Date().toISOString() };
 }
 
 function normalizePhone(phone: string) {
@@ -1384,7 +1384,7 @@ function AssociatePlayerModal({
   return (
     <Modal title={`Asociar ${row.name}`} onClose={onClose}>
       <div className="space-y-4">
-        <p className="text-sm text-(--muted)">Elige el jugador correspondiente. El nombre de WhatsApp se guardará como una variante para reconocerlo automáticamente después.</p>
+        <p className="text-sm text-(--muted)">Elige el jugador correspondiente. El nombre de WhatsApp se agregará a su lista de apodos, separada por comas, para reconocerlo automáticamente después.</p>
         <Input label="Buscar jugador" value={query} onChange={setQuery} />
         <div className="max-h-72 space-y-1 overflow-auto">
           {filtered.map((player) => (
