@@ -39,6 +39,10 @@ type InitialDataProps = { initialData: SifupData };
 type PlayerStanding = {
   rank: number;
   points: number;
+  played: number;
+  wins: number;
+  draws: number;
+  losses: number;
 };
 type TeamAssignableRow = Pick<MatchPlayer, "attendanceStatus" | "name" | "playerId" | "team" | "whatsappOrder">;
 type RankedTeamRow<T extends TeamAssignableRow> = {
@@ -121,17 +125,22 @@ function buildPlayerStandings(data: SifupData) {
       const appearances = data.matchPlayers.filter((row) => (row.name === player.name || row.playerId === player.id) && row.attendanceStatus === "confirmed");
       let wins = 0;
       let draws = 0;
+      let losses = 0;
       appearances.forEach((row) => {
         const result = data.results.find((item) => item.matchId === row.matchId);
         if (!result || row.team === "none") return;
         if (result.winner === "draw") draws += 1;
         else if (result.winner === row.team) wins += 1;
+        else losses += 1;
       });
       const winRate = appearances.length ? Math.round((wins / appearances.length) * 100) : 0;
       return {
         id: player.id,
         name: player.name,
         played: appearances.length,
+        wins,
+        draws,
+        losses,
         winRate,
         points: wins * WIN_POINTS + draws * DRAW_POINTS,
       };
@@ -139,7 +148,7 @@ function buildPlayerStandings(data: SifupData) {
     .sort((a, b) => b.points - a.points || b.winRate - a.winRate || b.played - a.played);
 
   return new Map(ranked.flatMap((row, index) => {
-    const standing = { rank: index + 1, points: row.points };
+    const standing = { rank: index + 1, points: row.points, played: row.played, wins: row.wins, draws: row.draws, losses: row.losses };
     return [[row.id, standing], [row.name.toLowerCase(), standing]] as const;
   }));
 }
@@ -1048,7 +1057,7 @@ function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; pl
   const teamsAssigned = hasTeamsAssigned(rows);
   const teamA = confirmedRows.filter((row) => row.team === "A");
   const teamB = confirmedRows.filter((row) => row.team === "B");
-  const unassigned = confirmedRows.filter((row) => row.team === "none");
+  const unassigned = confirmedRows.filter((row) => row.team !== "A" && row.team !== "B");
   const pointsA = teamRankingTotal(rows, players, standings, "A");
   const pointsB = teamRankingTotal(rows, players, standings, "B");
 
@@ -1070,12 +1079,14 @@ function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; pl
           {unassigned.length > 0 ? (
             <div className="space-y-2 rounded-md border border-(--border) bg-white/[0.04] p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">Sin asignar ({unassigned.length})</p>
+              <PlayerRankingHeader />
               <div className="space-y-2">{unassigned.map(renderRow)}</div>
             </div>
           ) : null}
           <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr] lg:items-start">
             <div className="space-y-2 rounded-md border-2 border-(--red)/35 bg-(--red)/10 p-3">
               <p className="text-sm font-bold text-(--red)">Equipo Rojo ({teamA.length}) - {pointsA} pts ranking</p>
+              <PlayerRankingHeader />
               <div className="space-y-2">
                 {teamA.map(renderRow)}
                 {teamA.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
@@ -1086,6 +1097,7 @@ function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; pl
             </div>
             <div className="space-y-2 rounded-md border-2 border-(--gold)/35 bg-(--gold)/10 p-3">
               <p className="text-sm font-bold text-(--gold)">Equipo Amarillo ({teamB.length}) - {pointsB} pts ranking</p>
+              <PlayerRankingHeader />
               <div className="space-y-2">
                 {teamB.map(renderRow)}
                 {teamB.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
@@ -1094,7 +1106,7 @@ function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; pl
           </div>
         </>
       ) : (
-        <div className="space-y-2">{confirmedRows.map(renderRow)}</div>
+        <div className="space-y-2"><PlayerRankingHeader />{confirmedRows.map(renderRow)}</div>
       )}
       {outRows.length > 0 ? (
         <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
@@ -1106,6 +1118,20 @@ function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; pl
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function PlayerRankingHeader() {
+  return (
+    <div className="hidden grid-cols-[minmax(180px,1fr)_repeat(5,36px)_40px] items-center gap-2 px-3 text-[10px] font-black uppercase tracking-wide text-(--muted) md:grid">
+      <span>Jugador</span>
+      <span className="text-center text-(--gold)">Pts</span>
+      <span className="text-center">PJ</span>
+      <span className="text-center">G</span>
+      <span className="text-center">E</span>
+      <span className="text-center">P</span>
+      <span aria-hidden="true" />
     </div>
   );
 }
@@ -1135,12 +1161,12 @@ function PlayerCollectionRow({
   const playerId = player?.id;
   const isArq = player?.isGoalkeeper === true;
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-(--border) bg-white/[0.04] px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="flex h-7 min-w-7 items-center justify-center rounded-full bg-white/[0.08] px-2 text-xs font-bold text-(--muted) ring-1 ring-(--border)">{standing ? `#${standing.rank}` : "-"}</span>
+    <div className="flex min-w-0 items-center gap-3 rounded-lg border border-(--border) bg-white/[0.04] p-3 text-sm transition hover:border-white/20 hover:bg-white/[0.07]">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.08] text-sm font-black text-white">{standing ? `#${standing.rank}` : "-"}</span>
         {teamsAssigned ? <span className={`h-3 w-3 shrink-0 rounded-full ${teamDot(row.team)}`} /> : null}
-        <div className="min-w-0">
-          <p className="truncate font-semibold text-white">
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-bold text-white">
             {playerId ? <Link href={`/players/${playerId}`} className="hover:underline">{row.name}</Link> : row.name}
             {isArq ? (
               <span className="ml-2 inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider gap-0.5" title="Arquero">
@@ -1148,10 +1174,20 @@ function PlayerCollectionRow({
               </span>
             ) : null}
           </p>
-          <p className="text-xs text-(--muted)">{standing ? `${standing.points} pts` : "Sin ranking"}</p>
+          <p className="mt-0.5 text-xs font-medium text-(--muted)">{standing ? `Ranking #${standing.rank}` : "Sin ranking"}</p>
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
+      {standing ? (
+        <div className="hidden grid-cols-5 gap-2 text-center md:grid">
+          <span className="w-9 text-sm font-black text-(--gold)">{standing.points}</span>
+          <span className="w-9 text-xs font-bold text-white">{standing.played}</span>
+          <span className="w-9 text-xs font-bold text-(--green)">{standing.wins}</span>
+          <span className="w-9 text-xs font-bold text-(--muted)">{standing.draws}</span>
+          <span className="w-9 text-xs font-bold text-(--red)">{standing.losses}</span>
+        </div>
+      ) : null}
+      <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
+        {standing ? <div className="text-right leading-tight md:hidden"><p className="text-base font-black text-(--gold)">{standing.points}</p><p className="text-[10px] font-bold uppercase tracking-wide text-(--muted)">pts</p></div> : null}
         {isAdmin && onTeamChange ? <TeamToggle value={row.team} onChange={onTeamChange} /> : null}
         {whatsapp ? (
           <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15" aria-label={`WhatsApp ${row.name}`}>
@@ -3155,7 +3191,7 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
   const confirmedRows = rows.filter((r) => r.attendanceStatus === "confirmed");
   const teamA = confirmedRows.filter((row) => row.team === "A");
   const teamB = confirmedRows.filter((row) => row.team === "B");
-  const unassigned = confirmedRows.filter((row) => row.team === "none");
+  const unassigned = confirmedRows.filter((row) => row.team !== "A" && row.team !== "B");
 
   const pointsA = teamA.reduce((sum, row) => sum + (standingForMatchRow(row, data.players, standings)?.points ?? 0), 0);
   const pointsB = teamB.reduce((sum, row) => sum + (standingForMatchRow(row, data.players, standings)?.points ?? 0), 0);
