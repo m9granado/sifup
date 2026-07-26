@@ -7,6 +7,7 @@ import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard
 import {
   createMatchAction,
   markMatchPlayerPaidAction,
+  saveMatchAction,
   saveMatchDetailAction,
   saveMonthlyPaymentAction,
   savePlayerAction,
@@ -1384,6 +1385,7 @@ function MatchHero({
   standings,
   isAdmin,
   onSave,
+  onEdit,
   isPending,
   previous,
   next,
@@ -1395,6 +1397,7 @@ function MatchHero({
   standings: Map<string, PlayerStanding>;
   isAdmin: boolean;
   onSave: () => void;
+  onEdit: () => void;
   isPending: boolean;
   previous?: Match;
   next?: Match;
@@ -1455,6 +1458,7 @@ function MatchHero({
                 <Users size={16} />
                 Equipos
               </Link>
+              {isAdmin ? <Button variant="secondary" onClick={onEdit}><Pencil size={16} />Editar partido</Button> : null}
               {isAdmin ? <Button onClick={onSave} disabled={isPending}><Save size={16} />Guardar</Button> : null}
             </div>
           </div>
@@ -1471,16 +1475,16 @@ function MatchHero({
           <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
             <div className="rounded-lg border border-(--red)/35 bg-(--red)/10 p-4">
               <p className="text-sm font-black uppercase tracking-wide text-(--red)">Equipo Rojo</p>
-              <p className="mt-2 text-5xl font-black leading-none text-white">{showResult ? result?.scoreA : teamA.length}</p>
-              <p className="mt-1 text-xs font-bold uppercase text-(--muted)">{showResult ? "goles" : `jugadores · ${pointsA} pts`}</p>
+              <p className={`mt-2 text-2xl font-black leading-none ${showResult && result?.winner === "A" ? "text-(--red)" : "text-white"}`}>{showResult ? (result?.winner === "A" ? "Ganador" : result?.winner === "draw" ? "Empate" : "") : teamA.length}</p>
+              <p className="mt-1 text-xs font-bold uppercase text-(--muted)">{showResult ? "resultado final" : `jugadores · ${pointsA} pts`}</p>
             </div>
             <div className="grid place-items-center">
               <span className="rounded-full border border-white/15 bg-white/[0.08] px-4 py-2 text-sm font-black text-white">VS</span>
             </div>
             <div className="rounded-lg border border-(--gold)/45 bg-(--gold)/10 p-4 lg:text-right">
               <p className="text-sm font-black uppercase tracking-wide text-(--gold)">Equipo Amarillo</p>
-              <p className="mt-2 text-5xl font-black leading-none text-white">{showResult ? result?.scoreB : teamB.length}</p>
-              <p className="mt-1 text-xs font-bold uppercase text-(--muted)">{showResult ? "goles" : `jugadores · ${pointsB} pts`}</p>
+              <p className={`mt-2 text-2xl font-black leading-none ${showResult && result?.winner === "B" ? "text-(--gold)" : "text-white"}`}>{showResult ? (result?.winner === "B" ? "Ganador" : result?.winner === "draw" ? "Empate" : "") : teamB.length}</p>
+              <p className="mt-1 text-xs font-bold uppercase text-(--muted)">{showResult ? "resultado final" : `jugadores · ${pointsB} pts`}</p>
             </div>
           </div>
           ) : null}
@@ -1497,9 +1501,9 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const match = data.matches.find((item) => item.id === id);
   const result = data.results.find((item) => item.matchId === id);
   const [rows, setRows] = useState(() => data.matchPlayers.filter((row) => row.matchId === id));
-  const [scoreA, setScoreA] = useState(result?.scoreA ?? 0);
-  const [scoreB, setScoreB] = useState(result?.scoreB ?? 0);
+  const [winner, setWinner] = useState<MatchResult["winner"]>(result?.winner ?? "draw");
   const [resultNotes, setResultNotes] = useState(result?.notes ?? "");
+  const [editingMatch, setEditingMatch] = useState<Pick<Match, "date" | "time" | "location"> | null>(null);
   const [error, setError] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [showAddPlayer, setShowAddPlayer] = useState(false);
@@ -1558,15 +1562,43 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   }
 
   function save() {
-    const derivedWinner: MatchResult["winner"] = scoreA > scoreB ? "A" : scoreB > scoreA ? "B" : "draw";
-    const nextResult: MatchResult = { id: result?.id ?? newId("result"), matchId: currentMatch.id, scoreA, scoreB, winner: derivedWinner, notes: resultNotes };
+    const nextResult = matchIsUpcoming(currentMatch) ? undefined : {
+      id: result?.id ?? newId("result"),
+      matchId: currentMatch.id,
+      scoreA: winner === "A" ? 1 : 0,
+      scoreB: winner === "B" ? 1 : 0,
+      winner,
+      notes: resultNotes,
+    } satisfies MatchResult;
     startTransition(async () => {
       try {
         await saveMatchDetailAction(currentMatch.id, rows, nextResult);
-        commit(upsertResult(replaceMatchPlayers(data, currentMatch.id, rows), nextResult));
+        const nextData = replaceMatchPlayers(data, currentMatch.id, rows);
+        commit(nextResult ? upsertResult(nextData, nextResult) : nextData);
         setError("");
       } catch (err) {
         setError(err instanceof Error ? err.message : "No se pudo guardar el partido.");
+      }
+    });
+  }
+
+  function saveMatchInfo() {
+    if (!editingMatch) return;
+    const nextMatch: Match = {
+      ...currentMatch,
+      ...editingMatch,
+      weekLabel: weekLabel(editingMatch.date),
+      monthKey: monthKey(editingMatch.date),
+      updatedAt: new Date().toISOString(),
+    };
+    startTransition(async () => {
+      try {
+        await saveMatchAction(nextMatch, rows);
+        commit(replaceMatchPlayers(upsertMatch(data, nextMatch), currentMatch.id, rows));
+        setEditingMatch(null);
+        setError("");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo actualizar el partido.");
       }
     });
   }
@@ -1581,6 +1613,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         standings={standings}
         isAdmin={isAdmin}
         onSave={save}
+        onEdit={() => setEditingMatch({ date: currentMatch.date, time: currentMatch.time, location: currentMatch.location })}
         isPending={isPending}
         previous={previous}
         next={next}
@@ -1588,59 +1621,63 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: equipos y resultado son solo lectura." /> : null}
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
+      {editingMatch ? (
+        <Modal title="Editar partido" onClose={() => setEditingMatch(null)}>
+          <div className="space-y-4">
+            <p className="text-sm text-(--muted)">Actualiza la fecha, hora o ubicacion del partido.</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input label="Fecha" type="date" value={editingMatch.date} onChange={(date) => setEditingMatch({ ...editingMatch, date })} />
+              <Input label="Hora" type="time" value={editingMatch.time} onChange={(time) => setEditingMatch({ ...editingMatch, time })} />
+            </div>
+            <Input label="Ubicacion" value={editingMatch.location} onChange={(location) => setEditingMatch({ ...editingMatch, location })} />
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setEditingMatch(null)}>Cancelar</Button>
+              <Button onClick={saveMatchInfo} disabled={isPending}><Save size={16} />Guardar cambios</Button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+
       {/* Marcador final / Resultado en la parte superior */}
       <div className="mt-4">
-        {isAdmin ? (
+        {isAdmin && !matchIsUpcoming(currentMatch) ? (
           <Card className="space-y-4">
             <div>
               <h2 className="font-semibold">Resultado final</h2>
-              <p className="mt-1 text-sm text-(--muted)">Ingresá el marcador real. El ganador se infiere automáticamente.</p>
+              <p className="mt-1 text-sm text-(--muted)">Elige el equipo ganador o marca empate. No se registran goles.</p>
             </div>
             <div className="flex items-center justify-center gap-4">
               <div className="flex flex-col items-center gap-1">
                 <span className="text-xs font-black uppercase tracking-wide text-(--red)">Rojo</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={scoreA}
-                  onChange={(e) => setScoreA(Math.max(0, Number(e.target.value)))}
-                  className="h-16 w-20 rounded-md border border-(--red)/40 bg-(--red)/10 text-center text-3xl font-black text-(--red) focus:outline-none focus:border-(--red)"
-                />
+                <button type="button" onClick={() => setWinner("A")} className={`h-16 min-w-28 rounded-md border px-4 text-sm font-black transition ${winner === "A" ? "border-(--red) bg-(--red)/25 text-(--red)" : "border-(--red)/40 bg-(--red)/10 text-white hover:bg-(--red)/20"}`}>
+                  Gana Rojo
+                </button>
               </div>
               <div className="flex flex-col items-center gap-1">
                 <span className="text-sm font-black text-(--muted)">vs</span>
                 {(() => {
-                  const w = scoreA > scoreB ? "A" : scoreB > scoreA ? "B" : "draw";
+                  const w = winner;
                   return (
-                    <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${w === "A" ? "bg-(--red)/20 text-(--red)" : w === "B" ? "bg-(--gold)/20 text-(--gold)" : "bg-white/10 text-(--muted)"}`}>
+                    <button type="button" onClick={() => setWinner("draw")} className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${w === "A" ? "bg-(--red)/20 text-(--red)" : w === "B" ? "bg-(--gold)/20 text-(--gold)" : "bg-white/10 text-(--muted)"}`}>
                       {w === "A" ? "Gana Rojo" : w === "B" ? "Gana Amarillo" : "Empate"}
-                    </span>
+                    </button>
                   );
                 })()}
               </div>
               <div className="flex flex-col items-center gap-1">
                 <span className="text-xs font-black uppercase tracking-wide text-(--gold)">Amarillo</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={scoreB}
-                  onChange={(e) => setScoreB(Math.max(0, Number(e.target.value)))}
-                  className="h-16 w-20 rounded-md border border-(--gold)/40 bg-(--gold)/10 text-center text-3xl font-black text-(--gold) focus:outline-none focus:border-(--gold)"
-                />
+                <button type="button" onClick={() => setWinner("B")} className={`h-16 min-w-28 rounded-md border px-4 text-sm font-black transition ${winner === "B" ? "border-(--gold) bg-(--gold)/25 text-(--gold)" : "border-(--gold)/40 bg-(--gold)/10 text-white hover:bg-(--gold)/20"}`}>
+                  Gana Amarillo
+                </button>
               </div>
             </div>
-            <p className="text-xs text-(--muted) text-center">
-              Usá "Editar" en cada jugador para registrar los goles individuales.
-            </p>
             <textarea className="min-h-16 w-full rounded-md border border-(--border) bg-(--panel-strong) p-2 text-sm text-white" value={resultNotes} onChange={(event) => setResultNotes(event.target.value)} placeholder="Notas del resultado (opcional)" />
           </Card>
         ) : result && !matchIsUpcoming(currentMatch) ? (
           <Card>
             <h2 className="font-semibold">Resultado final</h2>
-            <p className="mt-2 text-3xl font-black">
-              <span className="text-(--red)">{result.scoreA}</span>
-              <span className="text-(--muted) mx-3">-</span>
-              <span className="text-(--gold)">{result.scoreB}</span>
+            <p className={`mt-2 text-2xl font-black ${result.winner === "A" ? "text-(--red)" : result.winner === "B" ? "text-(--gold)" : "text-white"}`}>
+              {result.winner === "draw" ? "Empate" : `Ganó el equipo ${teamLabel(result.winner)}`}
             </p>
             <p className="mt-1 text-sm text-(--muted)">
               Rojo vs Amarillo · {result.winner === "draw" ? "Empate" : `Gana ${teamLabel(result.winner)}`}
@@ -2524,7 +2561,7 @@ export function PlayerDetailPage({ id, initialData }: { id: string } & InitialDa
               <p className="text-xs text-(--muted)">{match?.date} · {teamLabel(row.team)}</p>
             </div>
             <div className="flex items-center gap-2 text-xs text-(--muted)">
-              {result ? <span>Rojo {result.scoreA} - {result.scoreB} Amarillo</span> : <span>Sin resultado</span>}
+              {result ? <span>{result.winner === "draw" ? "Empate" : `Ganó ${teamLabel(result.winner)}`}</span> : <span>Sin resultado</span>}
               <span className={pendingForMatchRow(row) > 0 ? "text-(--red)" : "text-(--green)"}>{formatCurrency(pendingForMatchRow(row))}</span>
             </div>
           </Link>
@@ -2934,7 +2971,7 @@ export function StandingsPage({ initialData }: InitialDataProps) {
                 >
                   <div className="flex flex-col gap-0.5">
                     <strong className="text-sm font-bold text-white">
-                      Rojo {result.scoreA} - {result.scoreB} Amarillo
+                      {result.winner === "draw" ? "Empate" : `Ganó el equipo ${teamLabel(result.winner)}`}
                     </strong>
                     <span className="text-[11px] text-(--muted) font-medium">
                       {index === 0 ? "Semana pasada" : `Hace ${index + 1} semanas`}
