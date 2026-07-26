@@ -44,6 +44,7 @@ type PlayerStanding = {
   draws: number;
   losses: number;
 };
+type MatchHistory = Pick<SifupData, "matches" | "matchPlayers" | "results">;
 type TeamAssignableRow = Pick<MatchPlayer, "attendanceStatus" | "name" | "playerId" | "team" | "whatsappOrder">;
 type RankedTeamRow<T extends TeamAssignableRow> = {
   row: T;
@@ -196,6 +197,25 @@ function computePlayerStats(player: Player, data: SifupData) {
 function standingForMatchRow(row: Pick<MatchPlayer, "playerId" | "name">, players: Player[], standings: Map<string, PlayerStanding>) {
   const player = playerForMatchRow(row, players);
   return standings.get(player?.id ?? "") ?? standings.get(row.name.toLowerCase());
+}
+
+function recentFormForMatchRow(row: Pick<MatchPlayer, "playerId" | "name">, history: MatchHistory) {
+  return [...history.matches]
+    .filter((match) => history.results.some((result) => result.matchId === match.id))
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 5)
+    .map((match) => {
+      const appearance = history.matchPlayers.find((item) =>
+        item.matchId === match.id &&
+        item.attendanceStatus === "confirmed" &&
+        (row.playerId ? item.playerId === row.playerId : item.name === row.name),
+      );
+      const result = history.results.find((item) => item.matchId === match.id);
+
+      if (!appearance || appearance.team === "none" || !result) return { match, outcome: "absent" as const };
+      if (result.winner === "draw") return { match, outcome: "draw" as const };
+      return { match, outcome: result.winner === appearance.team ? "win" as const : "loss" as const };
+    });
 }
 
 function rowOrder(row: Pick<MatchPlayer, "whatsappOrder"> & Partial<Pick<MatchPlayer, "id">>, index: number) {
@@ -1063,7 +1083,7 @@ function EditableRows({
   );
 }
 
-function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; players: Player[]; standings: Map<string, PlayerStanding> }) {
+function PublicMatchRows({ rows, players, standings, history }: { rows: MatchPlayer[]; players: Player[]; standings: Map<string, PlayerStanding>; history: MatchHistory }) {
   const confirmedRows = rankedConfirmedRows(rows, players, standings);
   const outRows = rows.filter((row) => row.attendanceStatus === "out");
   const teamsAssigned = hasTeamsAssigned(rows);
@@ -1079,6 +1099,7 @@ function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; pl
       row={row}
       players={players}
       standings={standings}
+      history={history}
       teamsAssigned={teamsAssigned}
       isAdmin={false}
     />
@@ -1152,6 +1173,7 @@ function PlayerCollectionRow({
   row,
   players,
   standings,
+  history,
   teamsAssigned,
   isAdmin,
   onTeamChange,
@@ -1162,6 +1184,7 @@ function PlayerCollectionRow({
   row: MatchPlayer;
   players: Player[];
   standings: Map<string, PlayerStanding>;
+  history: MatchHistory;
   teamsAssigned: boolean;
   isAdmin: boolean;
   onTeamChange?: (team: Team) => void;
@@ -1174,6 +1197,7 @@ function PlayerCollectionRow({
   const player = playerForMatchRow(row, players);
   const playerId = player?.id;
   const isArq = player?.isGoalkeeper === true;
+  const recentForm = recentFormForMatchRow(row, history);
   return (
     <div className="flex min-w-0 items-center gap-3 rounded-lg border border-(--border) bg-white/[0.04] p-3 text-sm transition hover:border-white/20 hover:bg-white/[0.07]">
       <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -1189,6 +1213,19 @@ function PlayerCollectionRow({
             ) : null}
           </p>
           <p className="mt-0.5 text-xs font-medium text-(--muted)">{standing ? `Ranking #${standing.rank}` : "Sin ranking"}</p>
+          <div className="mt-1 flex items-center gap-1" aria-label={`Últimos ${recentForm.length} partidos de ${row.name}`}>
+            {recentForm.map(({ match, outcome }) => {
+              const style = outcome === "win"
+                ? "bg-(--green)"
+                : outcome === "draw"
+                  ? "bg-white/35"
+                  : outcome === "loss"
+                    ? "bg-(--red)"
+                    : "border border-white/25";
+              const label = outcome === "win" ? "Victoria" : outcome === "draw" ? "Empate" : outcome === "loss" ? "Derrota" : "No jugó";
+              return <span key={match.id} className={`h-2.5 w-2.5 rounded-full ${style}`} title={`${match.weekLabel}: ${label}`} />;
+            })}
+          </div>
         </div>
       </div>
       {standing ? (
@@ -1203,7 +1240,7 @@ function PlayerCollectionRow({
       <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
         {standing ? <div className="text-right leading-tight md:hidden"><p className="text-base font-black text-(--gold)">{standing.points}</p><p className="text-[10px] font-bold uppercase tracking-wide text-(--muted)">pts</p></div> : null}
         {isAdmin && onTeamChange ? <TeamToggle value={row.team} onChange={onTeamChange} /> : null}
-        {!row.playerId && isAdmin && onAssociate ? (
+        {isAdmin && onAssociate ? (
           <button type="button" onClick={onAssociate} className="inline-flex items-center gap-1 rounded-md border border-(--cyan)/35 bg-(--cyan)/10 px-2 py-1.5 text-xs font-bold text-(--cyan) hover:bg-(--cyan)/20" title={`Asociar ${row.name} a un jugador existente`}>
             <UserPlus size={14} />
             Asociar
@@ -1233,6 +1270,7 @@ function TeamAssignmentBoard({
   rows,
   players,
   standings,
+  history,
   onOpenDetails,
   onRemove,
   onAddPlayer,
@@ -1241,6 +1279,7 @@ function TeamAssignmentBoard({
   rows: MatchPlayer[];
   players: Player[];
   standings: Map<string, PlayerStanding>;
+  history: MatchHistory;
   onOpenDetails: (rowId: string) => void;
   onRemove: (rowId: string) => void;
   onAddPlayer: () => void;
@@ -1259,6 +1298,7 @@ function TeamAssignmentBoard({
       row={row}
       players={players}
       standings={standings}
+      history={history}
       teamsAssigned={false}
       isAdmin
       onOpenDetails={() => onOpenDetails(row.id)}
@@ -1810,13 +1850,14 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             rows={rows}
             players={data.players}
             standings={standings}
+            history={{ matches: data.matches, matchPlayers: data.matchPlayers, results: data.results }}
             onOpenDetails={(rowId) => setEditingIndex(rows.findIndex((row) => row.id === rowId))}
             onRemove={removeRow}
             onAddPlayer={() => setShowAddPlayer(true)}
             onAssociate={setAssociatingRowId}
           />
         ) : (
-          <PublicMatchRows rows={rows} players={data.players} standings={standings} />
+          <PublicMatchRows rows={rows} players={data.players} standings={standings} history={{ matches: data.matches, matchPlayers: data.matchPlayers, results: data.results }} />
         )}
       </Card>
 
