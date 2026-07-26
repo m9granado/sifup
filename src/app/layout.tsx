@@ -16,8 +16,11 @@ export const metadata: Metadata = {
   title: "SIFUP",
   description: "Internal football admin dashboard",
   icons: {
-    icon: [{ url: "/brand/sifup-logo-v1.png", type: "image/png" }],
-    apple: [{ url: "/brand/sifup-logo-v1.png", type: "image/png" }],
+    icon: [
+      { url: "/brand/sifup-favicon.png", type: "image/png" },
+      { url: "/favicon.ico", type: "image/x-icon" },
+    ],
+    apple: [{ url: "/brand/sifup-favicon.png", type: "image/png" }],
   },
 };
 
