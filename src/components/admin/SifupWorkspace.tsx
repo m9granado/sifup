@@ -70,6 +70,7 @@ function weekLabel(date: string) {
 
 function findKnownPlayer(players: Player[], name: string) {
   const clean = name.trim().toLowerCase();
+  const normalized = clean === "wictor" ? "victor" : clean;
 
   // Normalized group aliases for Piti / Pituto / Cristopher
   const pitiAliases = ["piti", "pituto", "cristopher"];
@@ -82,7 +83,18 @@ function findKnownPlayer(players: Player[], name: string) {
     if (found) return found;
   }
 
-  return players.find((player) => player.name.toLowerCase() === clean || player.nickname.toLowerCase() === clean);
+  return players.find((player) => {
+    const aliases = [player.name, ...player.nickname.split(/[|,/]/)].map((alias) => alias.trim().toLowerCase());
+    return aliases.includes(clean) || aliases.includes(normalized);
+  });
+}
+
+function addPlayerAlias(player: Player, alias: string) {
+  const cleanAlias = alias.trim();
+  if (!cleanAlias) return player;
+  const aliases = player.nickname.split(/[|,/]/).map((item) => item.trim()).filter(Boolean);
+  if (aliases.some((item) => item.toLocaleLowerCase("es-CL") === cleanAlias.toLocaleLowerCase("es-CL"))) return player;
+  return { ...player, nickname: [...aliases, cleanAlias].join(" | "), updatedAt: new Date().toISOString() };
 }
 
 function normalizePhone(phone: string) {
@@ -1145,6 +1157,7 @@ function PlayerCollectionRow({
   onTeamChange,
   onOpenDetails,
   onRemove,
+  onAssociate,
 }: {
   row: MatchPlayer;
   players: Player[];
@@ -1154,6 +1167,7 @@ function PlayerCollectionRow({
   onTeamChange?: (team: Team) => void;
   onOpenDetails?: () => void;
   onRemove?: () => void;
+  onAssociate?: () => void;
 }) {
   const standing = standingForMatchRow(row, players, standings);
   const whatsapp = whatsappHref(row.phone);
@@ -1189,6 +1203,12 @@ function PlayerCollectionRow({
       <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
         {standing ? <div className="text-right leading-tight md:hidden"><p className="text-base font-black text-(--gold)">{standing.points}</p><p className="text-[10px] font-bold uppercase tracking-wide text-(--muted)">pts</p></div> : null}
         {isAdmin && onTeamChange ? <TeamToggle value={row.team} onChange={onTeamChange} /> : null}
+        {!player && isAdmin && onAssociate ? (
+          <button type="button" onClick={onAssociate} className="inline-flex items-center gap-1 rounded-md border border-(--cyan)/35 bg-(--cyan)/10 px-2 py-1.5 text-xs font-bold text-(--cyan) hover:bg-(--cyan)/20" title={`Asociar ${row.name} a un jugador existente`}>
+            <UserPlus size={14} />
+            Asociar
+          </button>
+        ) : null}
         {whatsapp ? (
           <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15" aria-label={`WhatsApp ${row.name}`}>
             <MessageCircle size={16} />
@@ -1216,6 +1236,7 @@ function TeamAssignmentBoard({
   onOpenDetails,
   onRemove,
   onAddPlayer,
+  onAssociate,
 }: {
   rows: MatchPlayer[];
   players: Player[];
@@ -1223,8 +1244,11 @@ function TeamAssignmentBoard({
   onOpenDetails: (rowId: string) => void;
   onRemove: (rowId: string) => void;
   onAddPlayer: () => void;
+  onAssociate: (rowId: string) => void;
 }) {
-  const confirmedRanked = rankedConfirmedRows(rows, players, standings);
+  const confirmedRanked = rows
+    .filter((row) => row.attendanceStatus === "confirmed")
+    .sort((a, b) => whatsappOrderFor(a) - whatsappOrderFor(b) || a.name.localeCompare(b.name));
   const outRows = sortRowsWithMonthlyLast(rows.filter((row) => row.attendanceStatus === "out"), players);
   const confirmedCount = confirmedRanked.length;
   const missing = Math.max(SQUAD_TARGET - confirmedCount, 0);
@@ -1239,6 +1263,7 @@ function TeamAssignmentBoard({
       isAdmin
       onOpenDetails={() => onOpenDetails(row.id)}
       onRemove={() => onRemove(row.id)}
+      onAssociate={() => onAssociate(row.id)}
     />
   );
 
@@ -1334,6 +1359,41 @@ function AddPlayerModal({
             <UserPlus size={16} />
             Crear y agregar
           </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function AssociatePlayerModal({
+  row,
+  candidates,
+  onClose,
+  onAssociate,
+}: {
+  row?: MatchPlayer;
+  candidates: Player[];
+  onClose: () => void;
+  onAssociate: (player: Player) => void;
+}) {
+  const [query, setQuery] = useState("");
+  if (!row) return null;
+  const normalizedQuery = query.trim().toLocaleLowerCase("es-CL");
+  const filtered = candidates.filter((player) => !normalizedQuery || `${player.name} ${player.nickname}`.toLocaleLowerCase("es-CL").includes(normalizedQuery));
+
+  return (
+    <Modal title={`Asociar ${row.name}`} onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-sm text-(--muted)">Elige el jugador correspondiente. El nombre de WhatsApp se guardará como una variante para reconocerlo automáticamente después.</p>
+        <Input label="Buscar jugador" value={query} onChange={setQuery} />
+        <div className="max-h-72 space-y-1 overflow-auto">
+          {filtered.map((player) => (
+            <button key={player.id} type="button" onClick={() => onAssociate(player)} className="flex w-full items-center justify-between gap-3 rounded-md border border-(--border) px-3 py-2 text-left transition hover:bg-white/[0.06]">
+              <span className="min-w-0"><span className="block truncate font-bold text-white">{player.name}</span><span className="block truncate text-xs text-(--muted)">{player.nickname || "Sin apodo"}</span></span>
+              <span className="shrink-0 text-xs font-bold text-(--cyan)">Asociar</span>
+            </button>
+          ))}
+          {filtered.length === 0 ? <p className="py-4 text-center text-sm text-(--muted)">No hay jugadores que coincidan.</p> : null}
         </div>
       </div>
     </Modal>
@@ -1543,6 +1603,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const [error, setError] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [showAddPlayer, setShowAddPlayer] = useState(false);
+  const [associatingRowId, setAssociatingRowId] = useState<string | null>(null);
   const standings = useMemo(() => buildPlayerStandings(data), [data]);
 
   if (!match) return <PageTitle title="Partido no encontrado" description="No existe en la base de datos." />;
@@ -1595,6 +1656,20 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         setError("");
       })
       .catch((err) => setError(err instanceof Error ? err.message : "No se pudo crear el jugador."));
+  }
+
+  function associatePlayer(player: Player) {
+    const row = rows.find((item) => item.id === associatingRowId);
+    if (!row) return;
+    const updatedPlayer = addPlayerAlias(player, row.name);
+    savePlayerAction(updatedPlayer)
+      .then(() => {
+        commit(upsertPlayer(data, updatedPlayer));
+        setRows((current) => current.map((item) => item.id === row.id ? { ...item, playerId: player.id, updatedAt: new Date().toISOString() } : item));
+        setAssociatingRowId(null);
+        setError("");
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo asociar el jugador."));
   }
 
   function save() {
@@ -1737,6 +1812,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             onOpenDetails={(rowId) => setEditingIndex(rows.findIndex((row) => row.id === rowId))}
             onRemove={removeRow}
             onAddPlayer={() => setShowAddPlayer(true)}
+            onAssociate={setAssociatingRowId}
           />
         ) : (
           <PublicMatchRows rows={rows} players={data.players} standings={standings} />
@@ -1810,6 +1886,14 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
           onClose={() => setShowAddPlayer(false)}
           onAddExisting={addExistingPlayer}
           onCreateAndAdd={createAndAddPlayer}
+        />
+      ) : null}
+      {associatingRowId ? (
+        <AssociatePlayerModal
+          row={rows.find((item) => item.id === associatingRowId)}
+          candidates={data.players}
+          onClose={() => setAssociatingRowId(null)}
+          onAssociate={associatePlayer}
         />
       ) : null}
     </>
