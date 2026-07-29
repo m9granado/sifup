@@ -483,18 +483,21 @@ function CopyBlock({ title, text }: { title: string; text: string }) {
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center" onClick={onClose}>
       <div
-        className="panel max-h-[90vh] w-full max-w-lg overflow-auto p-4"
+        className="panel w-full max-w-lg overflow-auto rounded-b-none rounded-t-2xl sm:rounded-2xl"
+        style={{ maxHeight: "calc(90dvh - env(safe-area-inset-bottom, 0px))", paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="sticky top-0 mb-3 flex items-center justify-between gap-3 bg-(--panel) px-4 pt-4">
           <h2 className="text-lg font-black text-white">{title}</h2>
           <button type="button" onClick={onClose} className="rounded-md p-1 text-(--muted) hover:bg-white/[0.08] hover:text-white" aria-label="Cerrar">
             <X size={18} />
           </button>
         </div>
-        {children}
+        <div className="px-4">
+          {children}
+        </div>
       </div>
     </div>
   );
@@ -1179,7 +1182,6 @@ function PlayerCollectionRow({
   onTeamChange,
   onOpenDetails,
   onRemove,
-  onAssociate,
 }: {
   row: MatchPlayer;
   players: Player[];
@@ -1190,7 +1192,6 @@ function PlayerCollectionRow({
   onTeamChange?: (team: Team) => void;
   onOpenDetails?: () => void;
   onRemove?: () => void;
-  onAssociate?: () => void;
 }) {
   const standing = standingForMatchRow(row, players, standings);
   const whatsapp = whatsappHref(row.phone);
@@ -1240,17 +1241,6 @@ function PlayerCollectionRow({
       <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
         {standing ? <div className="text-right leading-tight md:hidden"><p className="text-base font-black text-(--gold)">{standing.points}</p><p className="text-[10px] font-bold uppercase tracking-wide text-(--muted)">pts</p></div> : null}
         {isAdmin && onTeamChange ? <TeamToggle value={row.team} onChange={onTeamChange} /> : null}
-        {isAdmin && onAssociate ? (
-          <button type="button" onClick={onAssociate} className="inline-flex items-center gap-1 rounded-md border border-(--cyan)/35 bg-(--cyan)/10 px-2 py-1.5 text-xs font-bold text-(--cyan) hover:bg-(--cyan)/20" title={`Asociar ${row.name} a un jugador existente`}>
-            <UserPlus size={14} />
-            Asociar
-          </button>
-        ) : null}
-        {whatsapp ? (
-          <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15" aria-label={`WhatsApp ${row.name}`}>
-            <MessageCircle size={16} />
-          </a>
-        ) : null}
         {isAdmin && onOpenDetails ? (
           <button type="button" onClick={onOpenDetails} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14]" aria-label={`Editar ${row.name}`}>
             <Pencil size={16} />
@@ -1274,7 +1264,6 @@ function TeamAssignmentBoard({
   onOpenDetails,
   onRemove,
   onAddPlayer,
-  onAssociate,
 }: {
   rows: MatchPlayer[];
   players: Player[];
@@ -1283,7 +1272,6 @@ function TeamAssignmentBoard({
   onOpenDetails: (rowId: string) => void;
   onRemove: (rowId: string) => void;
   onAddPlayer: () => void;
-  onAssociate: (rowId: string) => void;
 }) {
   const confirmedRanked = rows
     .filter((row) => row.attendanceStatus === "confirmed")
@@ -1303,7 +1291,6 @@ function TeamAssignmentBoard({
       isAdmin
       onOpenDetails={() => onOpenDetails(row.id)}
       onRemove={() => onRemove(row.id)}
-      onAssociate={() => onAssociate(row.id)}
     />
   );
 
@@ -1426,9 +1413,9 @@ function AssociatePlayerModal({
       <div className="space-y-4">
         <p className="text-sm text-(--muted)">Elige el jugador correspondiente. El nombre de WhatsApp se agregará a su lista de apodos, separada por comas, para reconocerlo automáticamente después.</p>
         <Input label="Buscar jugador" value={query} onChange={setQuery} />
-        <div className="max-h-72 space-y-1 overflow-auto">
+        <div className="max-h-[45vh] space-y-1 overflow-auto overscroll-contain rounded-md">
           {filtered.map((player) => (
-            <button key={player.id} type="button" onClick={() => onAssociate(player)} className="flex w-full items-center justify-between gap-3 rounded-md border border-(--border) px-3 py-2 text-left transition hover:bg-white/[0.06]">
+            <button key={player.id} type="button" onClick={() => onAssociate(player)} className="flex w-full items-center justify-between gap-3 rounded-md border border-(--border) px-3 py-3 text-left transition active:bg-white/[0.10] hover:bg-white/[0.06]">
               <span className="min-w-0"><span className="block truncate font-bold text-white">{player.name}</span><span className="block truncate text-xs text-(--muted)">{player.nickname || "Sin apodo"}</span></span>
               <span className="shrink-0 text-xs font-bold text-(--cyan)">Asociar</span>
             </button>
@@ -1444,15 +1431,17 @@ function PlayerDetailModal({
   row,
   onClose,
   onSave,
+  onAssociate,
 }: {
   row: MatchPlayer;
   onClose: () => void;
   onSave: (patch: Partial<MatchPlayer>) => void;
+  onAssociate?: () => void;
 }) {
   const [draft, setDraft] = useState(row);
   return (
     <Modal title={`Editar ${row.name}`} onClose={onClose}>
-      <div className="space-y-3">
+      <div className="space-y-3 pb-2">
         <Input label="Nombre" value={draft.name} onChange={(value) => setDraft({ ...draft, name: value })} />
         <Input label="Telefono" value={draft.phone} onChange={(value) => setDraft({ ...draft, phone: value })} />
         <label className="space-y-1 text-sm font-medium text-(--muted)">
@@ -1471,7 +1460,15 @@ function PlayerDetailModal({
         </div>
         <Input label="Goles en este partido" type="number" value={String(draft.goals ?? 0)} onChange={(value) => setDraft({ ...draft, goals: Math.max(0, Number(value)) })} />
         <Input label="Nota" value={draft.note} onChange={(value) => setDraft({ ...draft, note: value })} />
-        <Button onClick={() => onSave(draft)}><Save size={16} />Guardar</Button>
+        <div className="flex gap-2">
+          {onAssociate ? (
+            <Button variant="secondary" onClick={onAssociate}>
+              <UserPlus size={16} />
+              Asociar jugador
+            </Button>
+          ) : null}
+          <Button onClick={() => onSave(draft)}><Save size={16} />Guardar</Button>
+        </div>
       </div>
     </Modal>
   );
@@ -1644,6 +1641,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [showAddPlayer, setShowAddPlayer] = useState(false);
   const [associatingRowId, setAssociatingRowId] = useState<string | null>(null);
+  const [showResultModal, setShowResultModal] = useState(false);
   const standings = useMemo(() => buildPlayerStandings(data), [data]);
 
   if (!match) return <PageTitle title="Partido no encontrado" description="No existe en la base de datos." />;
@@ -1714,22 +1712,35 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   }
 
   function save() {
-    const nextResult = matchIsUpcoming(currentMatch) ? undefined : {
+    startTransition(async () => {
+      try {
+        await saveMatchDetailAction(currentMatch.id, rows);
+        commit(replaceMatchPlayers(data, currentMatch.id, rows));
+        setError("");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo guardar el partido.");
+      }
+    });
+  }
+
+  function saveResult() {
+    const nextResult: MatchResult = {
       id: result?.id ?? newId("result"),
       matchId: currentMatch.id,
       scoreA: winner === "A" ? 1 : 0,
       scoreB: winner === "B" ? 1 : 0,
       winner,
       notes: resultNotes,
-    } satisfies MatchResult;
+    };
     startTransition(async () => {
       try {
         await saveMatchDetailAction(currentMatch.id, rows, nextResult);
         const nextData = replaceMatchPlayers(data, currentMatch.id, rows);
-        commit(nextResult ? upsertResult(nextData, nextResult) : nextData);
+        commit(upsertResult(nextData, nextResult));
+        setShowResultModal(false);
         setError("");
       } catch (err) {
-        setError(err instanceof Error ? err.message : "No se pudo guardar el partido.");
+        setError(err instanceof Error ? err.message : "No se pudo guardar el resultado.");
       }
     });
   }
@@ -1790,53 +1801,32 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         </Modal>
       ) : null}
 
-      {/* Marcador final / Resultado en la parte superior */}
-      <div className="mt-4">
-        {isAdmin && !matchIsUpcoming(currentMatch) ? (
-          <Card className="space-y-4">
-            <div>
-              <h2 className="font-semibold">Resultado final</h2>
-              <p className="mt-1 text-sm text-(--muted)">Elige el equipo ganador o marca empate. No se registran goles.</p>
-            </div>
-            <div className="flex items-center justify-center gap-4">
-              <div className="flex flex-col items-center gap-1">
-                <span className="text-xs font-black uppercase tracking-wide text-(--red)">Rojo</span>
-                <button type="button" onClick={() => setWinner("A")} className={`h-16 min-w-28 rounded-md border px-4 text-sm font-black transition ${winner === "A" ? "border-(--red) bg-(--red)/25 text-(--red)" : "border-(--red)/40 bg-(--red)/10 text-white hover:bg-(--red)/20"}`}>
-                  Gana Rojo
-                </button>
+      {/* Resultado */}
+      {!matchIsUpcoming(currentMatch) ? (
+        <div className="mt-4">
+          {result ? (
+            <Card className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Resultado final</p>
+                <p className={`mt-1 text-xl font-black ${result.winner === "A" ? "text-(--red)" : result.winner === "B" ? "text-(--gold)" : "text-white"}`}>
+                  {result.winner === "draw" ? "Empate" : `Ganó el equipo ${teamLabel(result.winner)}`}
+                </p>
               </div>
-              <div className="flex flex-col items-center gap-1">
-                <span className="text-sm font-black text-(--muted)">vs</span>
-                {(() => {
-                  const w = winner;
-                  return (
-                    <button type="button" onClick={() => setWinner("draw")} className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${w === "A" ? "bg-(--red)/20 text-(--red)" : w === "B" ? "bg-(--gold)/20 text-(--gold)" : "bg-white/10 text-(--muted)"}`}>
-                      {w === "A" ? "Gana Rojo" : w === "B" ? "Gana Amarillo" : "Empate"}
-                    </button>
-                  );
-                })()}
-              </div>
-              <div className="flex flex-col items-center gap-1">
-                <span className="text-xs font-black uppercase tracking-wide text-(--gold)">Amarillo</span>
-                <button type="button" onClick={() => setWinner("B")} className={`h-16 min-w-28 rounded-md border px-4 text-sm font-black transition ${winner === "B" ? "border-(--gold) bg-(--gold)/25 text-(--gold)" : "border-(--gold)/40 bg-(--gold)/10 text-white hover:bg-(--gold)/20"}`}>
-                  Gana Amarillo
-                </button>
-              </div>
-            </div>
-            <textarea className="min-h-16 w-full rounded-md border border-(--border) bg-(--panel-strong) p-2 text-sm text-white" value={resultNotes} onChange={(event) => setResultNotes(event.target.value)} placeholder="Notas del resultado (opcional)" />
-          </Card>
-        ) : result && !matchIsUpcoming(currentMatch) ? (
-          <Card>
-            <h2 className="font-semibold">Resultado final</h2>
-            <p className={`mt-2 text-2xl font-black ${result.winner === "A" ? "text-(--red)" : result.winner === "B" ? "text-(--gold)" : "text-white"}`}>
-              {result.winner === "draw" ? "Empate" : `Ganó el equipo ${teamLabel(result.winner)}`}
-            </p>
-            <p className="mt-1 text-sm text-(--muted)">
-              Rojo vs Amarillo · {result.winner === "draw" ? "Empate" : `Gana ${teamLabel(result.winner)}`}
-            </p>
-          </Card>
-        ) : null}
-      </div>
+              {isAdmin ? (
+                <Button variant="secondary" onClick={() => setShowResultModal(true)}>
+                  <Pencil size={16} />
+                  Editar
+                </Button>
+              ) : null}
+            </Card>
+          ) : isAdmin ? (
+            <Button onClick={() => setShowResultModal(true)}>
+              <Trophy size={16} />
+              Registrar resultado
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
 
       <Card className="mt-4 space-y-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -1854,7 +1844,6 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             onOpenDetails={(rowId) => setEditingIndex(rows.findIndex((row) => row.id === rowId))}
             onRemove={removeRow}
             onAddPlayer={() => setShowAddPlayer(true)}
-            onAssociate={setAssociatingRowId}
           />
         ) : (
           <PublicMatchRows rows={rows} players={data.players} standings={standings} history={{ matches: data.matches, matchPlayers: data.matchPlayers, results: data.results }} />
@@ -1919,6 +1908,11 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             updateRow(editingIndex, patch);
             setEditingIndex(null);
           }}
+          onAssociate={() => {
+            const rowId = rows[editingIndex].id;
+            setEditingIndex(null);
+            setAssociatingRowId(rowId);
+          }}
         />
       ) : null}
 
@@ -1938,7 +1932,81 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
           onAssociate={associatePlayer}
         />
       ) : null}
+
+      {showResultModal ? (
+        <ResultModal
+          winner={winner}
+          onWinnerChange={setWinner}
+          notes={resultNotes}
+          onNotesChange={setResultNotes}
+          onSave={saveResult}
+          onClose={() => setShowResultModal(false)}
+          isPending={isPending}
+        />
+      ) : null}
     </>
+  );
+}
+
+function ResultModal({
+  winner,
+  onWinnerChange,
+  notes,
+  onNotesChange,
+  onSave,
+  onClose,
+  isPending,
+}: {
+  winner: MatchResult["winner"];
+  onWinnerChange: (w: MatchResult["winner"]) => void;
+  notes: string;
+  onNotesChange: (n: string) => void;
+  onSave: () => void;
+  onClose: () => void;
+  isPending: boolean;
+}) {
+  return (
+    <Modal title="Resultado final" onClose={onClose}>
+      <div className="space-y-4 pb-2">
+        <p className="text-sm text-(--muted)">Elige el equipo ganador o empate. No se registran goles.</p>
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => onWinnerChange("A")}
+            className={`flex flex-col items-center gap-1 rounded-xl border p-4 transition active:scale-95 ${winner === "A" ? "border-(--red) bg-(--red)/25" : "border-(--red)/40 bg-(--red)/10 hover:bg-(--red)/20"}`}
+          >
+            <span className="text-xs font-black uppercase tracking-wide text-(--red)">Rojo</span>
+            <span className={`mt-1 text-sm font-black ${winner === "A" ? "text-(--red)" : "text-white"}`}>Gana</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onWinnerChange("draw")}
+            className={`flex flex-col items-center gap-1 rounded-xl border p-4 transition active:scale-95 ${winner === "draw" ? "border-white bg-white/15" : "border-white/20 bg-white/[0.05] hover:bg-white/[0.10]"}`}
+          >
+            <span className="text-xs font-black uppercase tracking-wide text-(--muted)">VS</span>
+            <span className={`mt-1 text-sm font-black ${winner === "draw" ? "text-white" : "text-(--muted)"}`}>Empate</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onWinnerChange("B")}
+            className={`flex flex-col items-center gap-1 rounded-xl border p-4 transition active:scale-95 ${winner === "B" ? "border-(--gold) bg-(--gold)/25" : "border-(--gold)/40 bg-(--gold)/10 hover:bg-(--gold)/20"}`}
+          >
+            <span className="text-xs font-black uppercase tracking-wide text-(--gold)">Amarillo</span>
+            <span className={`mt-1 text-sm font-black ${winner === "B" ? "text-(--gold)" : "text-white"}`}>Gana</span>
+          </button>
+        </div>
+        <textarea
+          className="min-h-16 w-full rounded-md border border-(--border) bg-(--panel-strong) p-3 text-sm text-white placeholder:text-(--muted)"
+          value={notes}
+          onChange={(event) => onNotesChange(event.target.value)}
+          placeholder="Notas del resultado (opcional)"
+        />
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button onClick={onSave} disabled={isPending}><Save size={16} />Guardar resultado</Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
