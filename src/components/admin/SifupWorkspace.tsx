@@ -2832,48 +2832,91 @@ function PlayerMergeForm({ player, players, onMerged }: { player: Player; player
 }
 
 type PlayerHistoryItem = { row: MatchPlayer; match: Match; result: MatchResult | undefined };
+type PlayerHistorySortKey = "date" | "attendance" | "team" | "result" | "points" | "debt";
 
 function PlayerMatchHistory({ history }: { history: PlayerHistoryItem[] }) {
-  const sortedHistory = [...history].sort((left, right) => `${right.match.date} ${right.match.time}`.localeCompare(`${left.match.date} ${left.match.time}`));
+  const [sort, setSort] = useState<{ key: PlayerHistorySortKey; direction: "asc" | "desc" }>({ key: "date", direction: "desc" });
+  const detailsFor = (item: PlayerHistoryItem) => {
+    const result = item.result;
+    const isConfirmed = item.row.attendanceStatus === "confirmed";
+    const didNotAttend = item.row.attendanceStatus === "out";
+    const isPending = !didNotAttend && (!isConfirmed || !result || item.row.team === "none");
+    const isDraw = isConfirmed && result?.winner === "draw" && item.row.team !== "none";
+    const isWin = Boolean(isConfirmed && result && !isDraw && item.row.team !== "none" && result.winner === item.row.team);
+    const attendance = didNotAttend
+      ? "No estuvo"
+      : item.row.attendanceStatus === "confirmed"
+        ? "Confirmado"
+        : item.row.attendanceStatus === "maybe"
+          ? "Tal vez"
+          : "En espera";
+    const outcome = didNotAttend ? "No estuvo" : isPending ? "Pendiente" : isDraw ? "Empate" : isWin ? "Victoria" : "Derrota";
+    const points = isConfirmed ? pointsForMatchRow(item.row, result) : 0;
+    return { attendance, didNotAttend, isPending, isDraw, isWin, outcome, points, debt: pendingForMatchRow(item.row) };
+  };
+  const valueFor = (item: PlayerHistoryItem) => {
+    const details = detailsFor(item);
+    return {
+      date: `${item.match.date} ${item.match.time}`,
+      attendance: details.attendance,
+      team: teamLabel(item.row.team),
+      result: details.outcome,
+      points: details.points,
+      debt: details.debt,
+    };
+  };
+  const sortedHistory = [...history].sort((left, right) => {
+    const leftValue = valueFor(left)[sort.key];
+    const rightValue = valueFor(right)[sort.key];
+    const comparison = typeof leftValue === "number" && typeof rightValue === "number" ? leftValue - rightValue : String(leftValue).localeCompare(String(rightValue), "es");
+    return sort.direction === "asc" ? comparison : -comparison;
+  });
+  const toggleSort = (key: PlayerHistorySortKey) => setSort((current) => ({ key, direction: current.key === key && current.direction === "desc" ? "asc" : "desc" }));
+  const columns: { key: PlayerHistorySortKey; label: string; className?: string }[] = [
+    { key: "date", label: "Fecha", className: "text-left" },
+    { key: "attendance", label: "Asistencia" },
+    { key: "team", label: "Equipo" },
+    { key: "result", label: "Resultado" },
+    { key: "points", label: "Pts" },
+    { key: "debt", label: "Deuda" },
+  ];
 
   return (
-    <div className="space-y-3">
-      {sortedHistory.map((item) => {
-        const result = item.result;
-        const isPending = !result || item.row.team === "none";
-        const isDraw = result?.winner === "draw" && item.row.team !== "none";
-        const isWin = Boolean(result && !isDraw && item.row.team !== "none" && result.winner === item.row.team);
-        const points = pointsForMatchRow(item.row, result);
-        const debt = pendingForMatchRow(item.row);
-        const outcomeLabel = isPending ? "Pendiente" : isDraw ? "Empate" : isWin ? "Victoria" : "Derrota";
-        const iconClass = isPending
-          ? "border-2 border-white/20 bg-white/[0.03] text-(--muted)"
-          : isDraw
-            ? "border border-white/10 bg-white/[0.12] text-(--muted)"
-            : isWin
-              ? "bg-(--green) text-(--bg-deep) shadow-[0_0_24px_rgba(18,214,154,0.34)]"
-              : "bg-(--red)/90 text-white shadow-[0_0_24px_rgba(239,68,68,0.24)]";
-
-        return (
-          <Link key={item.row.id} href={`/matches/${item.match.id}`} className="group flex items-center gap-4 rounded-xl border border-(--border) bg-white/[0.04] p-4 transition hover:border-white/25 hover:bg-white/[0.08]">
-            <span className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full ${iconClass}`} aria-label={outcomeLabel}>
-              {isPending ? null : isDraw ? <span className="text-2xl font-black">−</span> : isWin ? <Check size={28} strokeWidth={4} /> : <X size={25} strokeWidth={3.5} />}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <strong className="text-base text-white">{item.match.date}</strong>
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${item.row.team === "A" ? "bg-(--red)/15 text-(--red)" : item.row.team === "B" ? "bg-(--gold)/15 text-(--gold)" : "bg-white/[0.08] text-(--muted)"}`}>{teamLabel(item.row.team)}</span>
-              </span>
-              <span className="mt-1 block text-sm font-semibold text-(--muted)">{item.match.weekLabel || "Partido registrado"} · {outcomeLabel}</span>
-              {debt > 0 ? <span className="mt-1 block text-xs font-bold text-(--red)">Deuda: {formatCurrency(debt)}</span> : null}
-            </span>
-            <span className={`shrink-0 text-right ${isPending ? "text-(--muted)" : "text-(--gold)"}`}>
-              <strong className="block text-xl font-black">{isPending ? "—" : `+${points}`}</strong>
-              <span className="text-[10px] font-bold uppercase tracking-wide">{isPending ? "Pendiente" : "pts"}</span>
-            </span>
-          </Link>
-        );
-      })}
+    <div className="overflow-x-auto rounded-lg border border-(--border)">
+      <table className="w-full min-w-[700px] text-sm">
+        <thead className="border-b border-(--border) bg-white/[0.04] text-[10px] font-black uppercase tracking-wide text-(--muted)">
+          <tr>
+            {columns.map((column) => {
+              const active = sort.key === column.key;
+              return <th key={column.key} aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"} className={`px-3 py-2 text-center ${column.className ?? ""}`}><button type="button" onClick={() => toggleSort(column.key)} className="inline-flex items-center gap-1 hover:text-white">{column.label}<span aria-hidden="true" className={active ? "text-white" : "text-(--muted)/60"}>{active ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span></button></th>;
+            })}
+          </tr>
+        </thead>
+        <tbody>
+          {sortedHistory.map((item) => {
+            const details = detailsFor(item);
+            const iconClass = details.didNotAttend
+              ? "border border-(--red)/45 bg-(--red)/12 text-(--red)"
+              : details.isPending
+                ? "border border-white/20 bg-white/[0.03] text-(--muted)"
+                : details.isDraw
+                  ? "border border-white/10 bg-white/[0.12] text-(--muted)"
+                  : details.isWin
+                    ? "bg-(--green) text-(--bg-deep)"
+                    : "bg-(--red)/90 text-white";
+            return (
+              <tr key={item.row.id} className={`border-b border-(--border) last:border-0 hover:bg-white/[0.04] ${details.didNotAttend ? "bg-(--red)/5" : ""}`}>
+                <td className="px-3 py-3 font-bold text-white"><Link href={`/matches/${item.match.id}`} className="hover:underline"><span className="block">{item.match.date}</span><span className="text-xs font-medium text-(--muted)">{item.match.weekLabel || "Sin semana"}</span></Link></td>
+                <td className={`px-3 py-3 text-center text-xs font-black ${details.didNotAttend ? "text-(--red)" : details.attendance === "Confirmado" ? "text-(--green)" : "text-(--muted)"}`}>{details.attendance}</td>
+                <td className={`px-3 py-3 text-center text-xs font-bold ${item.row.team === "A" ? "text-(--red)" : item.row.team === "B" ? "text-(--gold)" : "text-(--muted)"}`}>{teamLabel(item.row.team)}</td>
+                <td className="px-3 py-3"><span className="flex items-center justify-center gap-2"><span className={`flex h-7 w-7 items-center justify-center rounded-full ${iconClass}`} title={details.outcome}>{details.didNotAttend ? <X size={14} strokeWidth={3} /> : details.isPending ? null : details.isDraw ? <strong>−</strong> : details.isWin ? <Check size={15} strokeWidth={4} /> : <X size={14} strokeWidth={3} />}</span><span className={`text-xs font-bold ${details.didNotAttend ? "text-(--red)" : "text-(--muted)"}`}>{details.outcome}</span></span></td>
+                <td className={`px-3 py-3 text-center font-black ${details.isPending || details.didNotAttend ? "text-(--muted)" : "text-(--gold)"}`}>{details.isPending || details.didNotAttend ? "—" : `+${details.points}`}</td>
+                <td className={`px-3 py-3 text-center font-bold ${details.debt > 0 ? "text-(--red)" : "text-(--green)"}`}>{formatCurrency(details.debt)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -2891,7 +2934,8 @@ export function PlayerDetailPage({ id, initialData }: { id: string } & InitialDa
   const stats = computePlayerStats(player, data);
   const standings = buildPlayerStandings(data);
   const standing = standings.get(player.id) ?? standings.get(player.name.toLowerCase());
-  const history = stats.appearances
+  const history = data.matchPlayers
+    .filter((row) => matchRowBelongsToPlayer(row, player, data.players))
     .map((row) => ({ row, match: data.matches.find((item) => item.id === row.matchId), result: data.results.find((item) => item.matchId === row.matchId) }))
     .filter((item): item is PlayerHistoryItem => Boolean(item.match));
 
