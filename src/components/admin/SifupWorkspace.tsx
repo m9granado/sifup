@@ -16,7 +16,7 @@ import {
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
 import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
-import { calculatePlayerRecord } from "@/lib/standings";
+import { calculatePlayerRecord, pointsForMatchRow } from "@/lib/standings";
 import { matchSummaryMessage, teamsMessage } from "@/lib/whatsapp";
 import { COURT_COST, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, SQUAD_TARGET } from "@/lib/sifup-constants";
 import type { ClubExpense, Match, MatchPlayer, MatchResult, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
@@ -2832,26 +2832,50 @@ function PlayerMergeForm({ player, players, onMerged }: { player: Player; player
 }
 
 type PlayerHistoryItem = { row: MatchPlayer; match: Match; result: MatchResult | undefined };
-type PlayerHistorySortKey = "date" | "team" | "result" | "debt";
 
-function PlayerMatchHistoryTable({ history }: { history: PlayerHistoryItem[] }) {
-  const [sort, setSort] = useState<{ key: PlayerHistorySortKey; direction: "asc" | "desc" }>({ key: "date", direction: "desc" });
-  const valueFor = (item: PlayerHistoryItem) => ({
-    date: item.match.date,
-    team: teamLabel(item.row.team),
-    result: item.result ? (item.result.winner === "draw" ? "Empate" : `Ganó ${teamLabel(item.result.winner)}`) : "Sin resultado",
-    debt: pendingForMatchRow(item.row),
-  });
-  const sortedHistory = [...history].sort((left, right) => {
-    const leftValue = valueFor(left)[sort.key];
-    const rightValue = valueFor(right)[sort.key];
-    const comparison = typeof leftValue === "number" && typeof rightValue === "number" ? leftValue - rightValue : String(leftValue).localeCompare(String(rightValue), "es");
-    return sort.direction === "asc" ? comparison : -comparison;
-  });
-  const toggleSort = (key: PlayerHistorySortKey) => setSort((current) => ({ key, direction: current.key === key && current.direction === "desc" ? "asc" : "desc" }));
-  const columns: { key: PlayerHistorySortKey; label: string; className?: string }[] = [{ key: "date", label: "Fecha", className: "text-left" }, { key: "team", label: "Equipo" }, { key: "result", label: "Resultado" }, { key: "debt", label: "Deuda" }];
+function PlayerMatchHistory({ history }: { history: PlayerHistoryItem[] }) {
+  const sortedHistory = [...history].sort((left, right) => `${right.match.date} ${right.match.time}`.localeCompare(`${left.match.date} ${left.match.time}`));
 
-  return <div className="overflow-x-auto rounded-lg border border-(--border)"><table className="w-full min-w-[560px] text-sm"><thead className="border-b border-(--border) bg-white/[0.04] text-[10px] font-black uppercase tracking-wide text-(--muted)"><tr>{columns.map((column) => { const active = sort.key === column.key; return <th key={column.key} aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"} className={`px-3 py-2 text-center ${column.className ?? ""}`}><button type="button" onClick={() => toggleSort(column.key)} className="inline-flex items-center gap-1 hover:text-white">{column.label}<span aria-hidden="true" className={active ? "text-white" : "text-(--muted)/60"}>{active ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span></button></th>; })}</tr></thead><tbody>{sortedHistory.map((item) => { const values = valueFor(item); const pending = values.debt > 0; return <tr key={item.row.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04]"><td className="px-3 py-3 font-bold text-white"><Link href={`/matches/${item.match.id}`} className="hover:underline"><span className="block">{item.match.date}</span><span className="text-xs font-medium text-(--muted)">{item.match.weekLabel || "Sin semana"}</span></Link></td><td className={`px-3 py-3 text-center text-xs font-bold ${item.row.team === "A" ? "text-(--red)" : item.row.team === "B" ? "text-(--gold)" : "text-(--muted)"}`}>{values.team}</td><td className="px-3 py-3 text-center text-xs font-bold text-(--muted)">{values.result}</td><td className={`px-3 py-3 text-center font-bold ${pending ? "text-(--red)" : "text-(--green)"}`}>{formatCurrency(values.debt)}</td></tr>; })}</tbody></table></div>;
+  return (
+    <div className="space-y-3">
+      {sortedHistory.map((item) => {
+        const result = item.result;
+        const isPending = !result || item.row.team === "none";
+        const isDraw = result?.winner === "draw" && item.row.team !== "none";
+        const isWin = Boolean(result && !isDraw && item.row.team !== "none" && result.winner === item.row.team);
+        const points = pointsForMatchRow(item.row, result);
+        const debt = pendingForMatchRow(item.row);
+        const outcomeLabel = isPending ? "Pendiente" : isDraw ? "Empate" : isWin ? "Victoria" : "Derrota";
+        const iconClass = isPending
+          ? "border-2 border-white/20 bg-white/[0.03] text-(--muted)"
+          : isDraw
+            ? "border border-white/10 bg-white/[0.12] text-(--muted)"
+            : isWin
+              ? "bg-(--green) text-(--bg-deep) shadow-[0_0_24px_rgba(18,214,154,0.34)]"
+              : "bg-(--red)/90 text-white shadow-[0_0_24px_rgba(239,68,68,0.24)]";
+
+        return (
+          <Link key={item.row.id} href={`/matches/${item.match.id}`} className="group flex items-center gap-4 rounded-xl border border-(--border) bg-white/[0.04] p-4 transition hover:border-white/25 hover:bg-white/[0.08]">
+            <span className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full ${iconClass}`} aria-label={outcomeLabel}>
+              {isPending ? null : isDraw ? <span className="text-2xl font-black">−</span> : isWin ? <Check size={28} strokeWidth={4} /> : <X size={25} strokeWidth={3.5} />}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <strong className="text-base text-white">{item.match.date}</strong>
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${item.row.team === "A" ? "bg-(--red)/15 text-(--red)" : item.row.team === "B" ? "bg-(--gold)/15 text-(--gold)" : "bg-white/[0.08] text-(--muted)"}`}>{teamLabel(item.row.team)}</span>
+              </span>
+              <span className="mt-1 block text-sm font-semibold text-(--muted)">{item.match.weekLabel || "Partido registrado"} · {outcomeLabel}</span>
+              {debt > 0 ? <span className="mt-1 block text-xs font-bold text-(--red)">Deuda: {formatCurrency(debt)}</span> : null}
+            </span>
+            <span className={`shrink-0 text-right ${isPending ? "text-(--muted)" : "text-(--gold)"}`}>
+              <strong className="block text-xl font-black">{isPending ? "—" : `+${points}`}</strong>
+              <span className="text-[10px] font-bold uppercase tracking-wide">{isPending ? "Pendiente" : "pts"}</span>
+            </span>
+          </Link>
+        );
+      })}
+    </div>
+  );
 }
 
 export function PlayerDetailPage({ id, initialData }: { id: string } & InitialDataProps) {
@@ -2865,6 +2889,8 @@ export function PlayerDetailPage({ id, initialData }: { id: string } & InitialDa
   if (!player) return <PageTitle title="Jugador no encontrado" description="No existe en la base de datos." />;
 
   const stats = computePlayerStats(player, data);
+  const standings = buildPlayerStandings(data);
+  const standing = standings.get(player.id) ?? standings.get(player.name.toLowerCase());
   const history = stats.appearances
     .map((row) => ({ row, match: data.matches.find((item) => item.id === row.matchId), result: data.results.find((item) => item.matchId === row.matchId) }))
     .filter((item): item is PlayerHistoryItem => Boolean(item.match));
@@ -2886,20 +2912,36 @@ export function PlayerDetailPage({ id, initialData }: { id: string } & InitialDa
       <PageTitle title={player.name} description={`${player.paymentPlan === "monthly" ? "Oficial" : "Galleta"} · ${player.nickname || "Sin pseudonimo"}`} />
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
       {isAdmin ? <div className="mb-4 flex flex-wrap gap-2"><Button variant="secondary" onClick={() => setEditingPlayer(player)}><Pencil size={16} />Editar datos</Button><Button variant="secondary" onClick={() => setMergingPlayer(player)} className="border-amber-500/40 text-amber-500 hover:bg-amber-500 hover:text-white"><Users size={16} />Fusionar jugador</Button></div> : null}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Partidos jugados" value={stats.played} />
-        <Stat label="G-E-P" value={stats.form} />
-        <Stat label="Win rate" value={`${stats.winRate}%`} />
-        <Stat label="Puntos" value={stats.points} />
-      </div>
+      <section className="relative overflow-hidden rounded-xl border border-(--gold)/30 bg-[linear-gradient(135deg,rgba(250,204,21,0.14),rgba(18,214,154,0.08)_48%,rgba(255,255,255,0.03))] p-5 shadow-(--shadow)">
+        <div className="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-(--gold)/10 blur-3xl" aria-hidden="true" />
+        <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-4">
+            <span className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl border border-(--gold)/45 bg-(--gold)/15 text-2xl font-black text-(--gold) shadow-[0_0_30px_rgba(250,204,21,0.18)]">
+              {standing ? `#${standing.rank}` : "—"}
+            </span>
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-(--gold)">Posición en el ranking</p>
+              <h2 className="mt-1 text-2xl font-black text-white">{player.nickname || player.name}</h2>
+              <p className="mt-1 text-sm font-semibold text-(--muted)">{stats.played} PJ · {stats.form} · {stats.winRate}% rendimiento</p>
+            </div>
+          </div>
+          <div className="border-t border-white/10 pt-4 text-left sm:border-l sm:border-t-0 sm:pl-6 sm:pt-0 sm:text-right">
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-(--muted)">Puntos acumulados</p>
+            <p className="mt-1 text-5xl font-black leading-none text-(--gold)">{stats.points}<span className="ml-1 text-base text-(--gold)/70">pts</span></p>
+          </div>
+        </div>
+      </section>
       <Card className="mt-4">
         <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Deuda pendiente</p>
         <p className={`mt-1 text-2xl font-black ${stats.pendingDebt > 0 ? "text-(--red)" : "text-(--green)"}`}>{formatCurrency(stats.pendingDebt)}</p>
       </Card>
       <Card className="mt-4 space-y-3">
-        <h2 className="font-semibold">Historial de partidos</h2>
+        <div>
+          <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Trayectoria</p>
+          <h2 className="mt-1 text-xl font-black text-white">Historial de partidos</h2>
+        </div>
         {history.length === 0 ? <p className="text-sm text-(--muted)">Todavia no jugo ningun partido.</p> : null}
-        {history.length > 0 ? <PlayerMatchHistoryTable history={history} /> : null}
+        {history.length > 0 ? <PlayerMatchHistory history={history} /> : null}
       </Card>
       {editingPlayer ? <Modal title={`Editar ${editingPlayer.name}`} onClose={() => setEditingPlayer(null)}><PlayerEditorForm player={editingPlayer} onSave={savePlayer} allowMerge={false} /></Modal> : null}
       {mergingPlayer ? <Modal title={`Fusionar ${mergingPlayer.name}`} onClose={() => setMergingPlayer(null)}><PlayerMergeForm player={mergingPlayer} players={data.players} onMerged={(targetId) => { setMergingPlayer(null); router.replace(`/players/${targetId}`); router.refresh(); }} /></Modal> : null}
