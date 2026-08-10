@@ -1425,11 +1425,13 @@ function AddPlayerModal({
 function AssociatePlayerModal({
   row,
   candidates,
+  matchPlayers,
   onClose,
   onAssociate,
 }: {
   row?: MatchPlayer;
   candidates: Player[];
+  matchPlayers: MatchPlayer[];
   onClose: () => void;
   onAssociate: (player: Player) => void;
 }) {
@@ -1437,6 +1439,10 @@ function AssociatePlayerModal({
   if (!row) return null;
   const normalizedQuery = query.trim().toLocaleLowerCase("es-CL");
   const filtered = candidates.filter((player) => !normalizedQuery || `${player.name} ${player.nickname}`.toLocaleLowerCase("es-CL").includes(normalizedQuery));
+  const playedMatches = (player: Player) => matchPlayers.filter((item) =>
+    item.attendanceStatus === "confirmed" &&
+    (item.playerId === player.id || findKnownPlayer(candidates, item.name)?.id === player.id),
+  ).length;
 
   return (
     <Modal title={`Asociar ${row.name}`} onClose={onClose}>
@@ -1446,7 +1452,7 @@ function AssociatePlayerModal({
         <div className="max-h-[45vh] space-y-1 overflow-auto overscroll-contain rounded-md">
           {filtered.map((player) => (
             <button key={player.id} type="button" onClick={() => onAssociate(player)} className="flex w-full items-center justify-between gap-3 rounded-md border border-(--border) px-3 py-3 text-left transition active:bg-white/[0.10] hover:bg-white/[0.06]">
-              <span className="min-w-0"><span className="block truncate font-bold text-white">{player.name}</span><span className="block truncate text-xs text-(--muted)">{player.nickname || "Sin apodo"}</span></span>
+              <span className="min-w-0"><span className="block truncate font-bold text-white">{player.name}</span><span className="block truncate text-xs text-(--muted)">{player.nickname || "Sin apodo"} · {playedMatches(player)} PJ</span></span>
               <span className="shrink-0 text-xs font-bold text-(--cyan)">Asociar</span>
             </button>
           ))}
@@ -1730,7 +1736,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
     const row = rows.find((item) => item.id === associatingRowId);
     if (!row) return;
     const updatedPlayer = addPlayerAlias(player, row.name);
-    const nextRows = rows.map((item) => item.id === row.id ? { ...item, playerId: player.id, updatedAt: new Date().toISOString() } : item);
+    const nextRows = rows.map((item) => item.id === row.id ? { ...item, playerId: player.id, name: player.name, updatedAt: new Date().toISOString() } : item);
     Promise.all([savePlayerAction(updatedPlayer), saveMatchDetailAction(currentMatch.id, nextRows)])
       .then(() => {
         commit(replaceMatchPlayers(upsertPlayer(data, updatedPlayer), currentMatch.id, nextRows));
@@ -1958,6 +1964,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         <AssociatePlayerModal
           row={rows.find((item) => item.id === associatingRowId)}
           candidates={data.players}
+          matchPlayers={data.matchPlayers}
           onClose={() => setAssociatingRowId(null)}
           onAssociate={associatePlayer}
         />
