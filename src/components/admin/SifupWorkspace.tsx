@@ -1114,7 +1114,23 @@ function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; pl
 
 type MatchPlayerSortKey = "name" | "rank" | "points" | "played" | "wins" | "draws" | "losses";
 
-function MatchPlayersTable({ rows, players, standings, teamsAssigned }: { rows: MatchPlayer[]; players: Player[]; standings: Map<string, PlayerStanding>; teamsAssigned: boolean }) {
+function MatchPlayersTable({
+  rows,
+  players,
+  standings,
+  teamsAssigned,
+  onOpenDetails,
+  onRemove,
+  onAssociate,
+}: {
+  rows: MatchPlayer[];
+  players: Player[];
+  standings: Map<string, PlayerStanding>;
+  teamsAssigned: boolean;
+  onOpenDetails?: (row: MatchPlayer) => void;
+  onRemove?: (row: MatchPlayer) => void;
+  onAssociate?: (row: MatchPlayer) => void;
+}) {
   const [sort, setSort] = useState<{ key: MatchPlayerSortKey; direction: "asc" | "desc" }>({ key: "points", direction: "desc" });
   const columns: { key: MatchPlayerSortKey; label: string; className?: string }[] = [
     { key: "name", label: "Jugador", className: "text-left" },
@@ -1144,6 +1160,7 @@ function MatchPlayersTable({ rows, players, standings, teamsAssigned }: { rows: 
     return (leftStanding?.rank ?? Number.POSITIVE_INFINITY) - (rightStanding?.rank ?? Number.POSITIVE_INFINITY);
   });
   const toggleSort = (key: MatchPlayerSortKey) => setSort((current) => ({ key, direction: current.key === key && current.direction === "desc" ? "asc" : "desc" }));
+  const hasActions = Boolean(onOpenDetails || onRemove || onAssociate);
 
   return (
     <div className="overflow-x-auto rounded-lg border border-(--border)">
@@ -1161,6 +1178,7 @@ function MatchPlayersTable({ rows, players, standings, teamsAssigned }: { rows: 
               );
             })}
             {teamsAssigned ? <th className="px-3 py-2 text-center">Equipo</th> : null}
+            {hasActions ? <th className="px-3 py-2 text-center">Acciones</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -1178,6 +1196,15 @@ function MatchPlayersTable({ rows, players, standings, teamsAssigned }: { rows: 
                 <td className="px-3 py-3 text-center font-bold text-(--muted)">{standing?.draws ?? "—"}</td>
                 <td className="px-3 py-3 text-center font-bold text-(--red)">{standing?.losses ?? "—"}</td>
                 {teamsAssigned ? <td className={`px-3 py-3 text-center text-xs font-bold ${row.team === "A" ? "text-(--red)" : row.team === "B" ? "text-(--gold)" : "text-(--muted)"}`}>{row.team === "A" ? "Rojo" : row.team === "B" ? "Amarillo" : "Sin asignar"}</td> : null}
+                {hasActions ? (
+                  <td className="px-3 py-2">
+                    <div className="flex justify-center gap-1">
+                      {onAssociate ? <button type="button" onClick={() => onAssociate(row)} className="rounded-md p-1.5 text-(--cyan) hover:bg-(--cyan)/15" aria-label={`Asociar ${playerName}`} title="Asociar jugador"><UserPlus size={16} /></button> : null}
+                      {onOpenDetails ? <button type="button" onClick={() => onOpenDetails(row)} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14]" aria-label={`Editar ${playerName}`} title="Editar"><Pencil size={16} /></button> : null}
+                      {onRemove ? <button type="button" onClick={() => onRemove(row)} className="rounded-md p-1.5 text-(--red) hover:bg-(--red)/15" aria-label={`Quitar ${playerName} del partido`} title="Quitar"><UserMinus size={16} /></button> : null}
+                    </div>
+                  </td>
+                ) : null}
               </tr>
             );
           })}
@@ -1290,17 +1317,17 @@ function TeamAssignmentBoard({
   rows,
   players,
   standings,
-  history,
   onOpenDetails,
   onRemove,
+  onAssociate,
   onAddPlayer,
 }: {
   rows: MatchPlayer[];
   players: Player[];
   standings: Map<string, PlayerStanding>;
-  history: MatchHistory;
   onOpenDetails: (rowId: string) => void;
   onRemove: (rowId: string) => void;
+  onAssociate: (rowId: string) => void;
   onAddPlayer: () => void;
 }) {
   const confirmedRanked = rows
@@ -1309,20 +1336,6 @@ function TeamAssignmentBoard({
   const outRows = sortRowsWithMonthlyLast(rows.filter((row) => row.attendanceStatus === "out"), players);
   const confirmedCount = confirmedRanked.length;
   const missing = Math.max(SQUAD_TARGET - confirmedCount, 0);
-
-  const renderRow = (row: MatchPlayer) => (
-    <PlayerCollectionRow
-      key={row.id}
-      row={row}
-      players={players}
-      standings={standings}
-      history={history}
-      teamsAssigned={false}
-      isAdmin
-      onOpenDetails={() => onOpenDetails(row.id)}
-      onRemove={() => onRemove(row.id)}
-    />
-  );
 
   return (
     <div className="space-y-4">
@@ -1338,7 +1351,15 @@ function TeamAssignmentBoard({
           </Button>
         </div>
       </div>
-      <div className="space-y-2">{confirmedRanked.map(renderRow)}</div>
+      <MatchPlayersTable
+        rows={confirmedRanked}
+        players={players}
+        standings={standings}
+        teamsAssigned={hasTeamsAssigned(rows)}
+        onAssociate={(row) => onAssociate(row.id)}
+        onOpenDetails={(row) => onOpenDetails(row.id)}
+        onRemove={(row) => onRemove(row.id)}
+      />
       {outRows.length > 0 ? (
         <div className="space-y-2 rounded-md border border-white/10 bg-white/[0.03] p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">No pueden ({outRows.length})</p>
@@ -1876,10 +1897,10 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             rows={rows}
             players={data.players}
             standings={standings}
-            history={{ matches: data.matches, matchPlayers: data.matchPlayers, results: data.results }}
             onOpenDetails={(rowId) => setEditingIndex(rows.findIndex((row) => row.id === rowId))}
             onRemove={removeRow}
             onAddPlayer={() => setShowAddPlayer(true)}
+            onAssociate={setAssociatingRowId}
           />
         ) : (
           <PublicMatchRows rows={rows} players={data.players} standings={standings} />
