@@ -16,8 +16,9 @@ import {
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
 import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
+import { calculatePlayerRecord } from "@/lib/standings";
 import { matchSummaryMessage, teamsMessage } from "@/lib/whatsapp";
-import { COURT_COST, DRAW_POINTS, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, SQUAD_TARGET, WIN_POINTS } from "@/lib/sifup-constants";
+import { COURT_COST, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, SQUAD_TARGET } from "@/lib/sifup-constants";
 import type { ClubExpense, Match, MatchPlayer, MatchResult, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
 
 const sampleInput = `martes 30 junio, 21 horas, agrupacion de sordos:
@@ -140,26 +141,11 @@ function buildPlayerStandings(data: SifupData) {
   const ranked = data.players
     .map((player) => {
       const appearances = data.matchPlayers.filter((row) => matchRowBelongsToPlayer(row, player, data.players) && row.attendanceStatus === "confirmed");
-      let wins = 0;
-      let draws = 0;
-      let losses = 0;
-      appearances.forEach((row) => {
-        const result = data.results.find((item) => item.matchId === row.matchId);
-        if (!result || row.team === "none") return;
-        if (result.winner === "draw") draws += 1;
-        else if (result.winner === row.team) wins += 1;
-        else losses += 1;
-      });
-      const winRate = appearances.length ? Math.round((wins / appearances.length) * 100) : 0;
+      const record = calculatePlayerRecord(appearances, data.results);
       return {
         id: player.id,
         name: player.name,
-        played: appearances.length,
-        wins,
-        draws,
-        losses,
-        winRate,
-        points: wins * WIN_POINTS + draws * DRAW_POINTS,
+        ...record,
       };
     })
     .sort((a, b) => b.points - a.points || b.winRate - a.winRate || b.played - a.played);
@@ -172,28 +158,12 @@ function buildPlayerStandings(data: SifupData) {
 
 function computePlayerStats(player: Player, data: SifupData) {
   const appearances = data.matchPlayers.filter((row) => matchRowBelongsToPlayer(row, player, data.players) && row.attendanceStatus === "confirmed");
-  let wins = 0;
-  let losses = 0;
-  let draws = 0;
-  appearances.forEach((row) => {
-    const result = data.results.find((item) => item.matchId === row.matchId);
-    if (!result || row.team === "none") return;
-    if (result.winner === "draw") draws += 1;
-    else if (result.winner === row.team) wins += 1;
-    else losses += 1;
-  });
+  const record = calculatePlayerRecord(appearances, data.results);
   const matchDebt = appearances.reduce((sum, row) => sum + Math.max(row.amountDue - row.amountPaid, 0), 0);
   const monthlyDebt = data.monthlyPayments.filter((payment) => payment.playerId === player.id).reduce((sum, payment) => sum + Math.max(payment.expectedAmount - payment.amountPaid, 0), 0);
-  const decided = wins + losses + draws;
   return {
     appearances,
-    played: appearances.length,
-    wins,
-    losses,
-    draws,
-    winRate: appearances.length ? Math.round((wins / appearances.length) * 100) : 0,
-    points: wins * WIN_POINTS + draws * DRAW_POINTS,
-    form: decided ? `${wins}-${draws}-${losses}` : "0-0-0",
+    ...record,
     pendingDebt: matchDebt + monthlyDebt,
   };
 }

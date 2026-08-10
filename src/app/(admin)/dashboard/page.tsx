@@ -2,11 +2,9 @@ import Link from "next/link";
 import { CalendarDays, CircleDollarSign, MapPin, Medal, Trophy } from "lucide-react";
 import { getSifupData } from "@/lib/repository";
 import { SQUAD_TARGET } from "@/lib/sifup-constants";
+import { calculatePlayerRecord, pointsForMatchRow } from "@/lib/standings";
 import { formatCurrency, sortByWhatsappOrder, summarizeMatch, whatsappOrderFor } from "@/lib/store";
 import type { Match, MatchPlayer, MatchResult, Player, Team, Winner } from "@/lib/types";
-
-const WIN_POINTS = 4;
-const DRAW_POINTS = 2;
 
 type ResultWithMatch = { result: MatchResult; match: Match };
 type PlayerStanding = {
@@ -72,20 +70,7 @@ function buildStandings(players: Player[], matchPlayers: MatchPlayer[], results:
   return players
     .map((player) => {
       const appearances = matchPlayers.filter((row) => (row.name === player.name || row.playerId === player.id) && row.attendanceStatus === "confirmed");
-      let wins = 0;
-      let losses = 0;
-      let draws = 0;
-
-      appearances.forEach((row) => {
-        const result = results.find((item) => item.matchId === row.matchId);
-        if (!result || row.team === "none") return;
-        if (result.winner === "draw") draws += 1;
-        else if (result.winner === row.team) wins += 1;
-        else losses += 1;
-      });
-
-      const decided = wins + losses + draws;
-      const winRate = appearances.length ? Math.round((wins / appearances.length) * 100) : 0;
+      const record = calculatePlayerRecord(appearances, results);
 
       return {
         id: player.id,
@@ -93,13 +78,7 @@ function buildStandings(players: Player[], matchPlayers: MatchPlayer[], results:
         nickname: player.nickname,
         plan: player.paymentPlan,
         shortName: player.shortName || "",
-        played: appearances.length,
-        wins,
-        draws,
-        losses,
-        winRate,
-        points: wins * WIN_POINTS + draws * DRAW_POINTS,
-        form: decided ? `${wins}-${draws}-${losses}` : "0-0-0",
+        ...record,
       };
     })
     .sort((a, b) => b.points - a.points || b.winRate - a.winRate || b.played - a.played);
@@ -135,8 +114,7 @@ function topConfirmedRows(rows: MatchPlayer[], players: Player[], lookup: Return
 
 function pointsRowsForResult(rows: MatchPlayer[], winner: Winner | undefined) {
   if (!winner) return [];
-  if (winner === "draw") return rows.filter((row) => row.team === "A" || row.team === "B");
-  return rows.filter((row) => row.team === winner);
+  return rows.filter((row) => row.team === "A" || row.team === "B");
 }
 
 export default async function Page() {
@@ -159,7 +137,6 @@ export default async function Page() {
   const standings = fullStandings.slice(0, 5);
   const nextTopRows = topConfirmedRows(nextMatchRows, data.players, standingMap);
   const scoringRows = pointsRowsForResult(lastResultRows, winner);
-  const scoredPoints = winner === "draw" ? DRAW_POINTS : WIN_POINTS;
 
   return (
     <>
@@ -354,7 +331,7 @@ export default async function Page() {
                 <div className="mt-3 flex flex-wrap gap-2">
                   {scoringRows.map((row) => (
                     <span key={row.id} className={`rounded-md border px-2.5 py-1.5 text-xs font-black ${rowTeamClasses(row.team)}`}>
-                      {playerNickname(row, data.players)} +{scoredPoints} pts
+                      {playerNickname(row, data.players)} +{pointsForMatchRow(row, lastResult.result)} pts
                     </span>
                   ))}
                   {scoringRows.length === 0 ? <span className="text-sm text-(--muted)">Sin jugadores con puntos registrados.</span> : null}
