@@ -128,6 +128,10 @@ function playerForMatchRow(row: Pick<MatchPlayer, "playerId" | "name">, players:
   return players.find((player) => player.id === row.playerId) ?? findKnownPlayer(players, row.name);
 }
 
+function matchRowBelongsToPlayer(row: Pick<MatchPlayer, "playerId" | "name">, player: Player, players: Player[]) {
+  return row.playerId === player.id || playerForMatchRow(row, players)?.id === player.id;
+}
+
 function isMonthlyMatchRow(row: MatchPlayer, players: Player[]) {
   return playerForMatchRow(row, players)?.paymentPlan === "monthly" || row.note.toLowerCase().includes("mensualidad");
 }
@@ -135,7 +139,7 @@ function isMonthlyMatchRow(row: MatchPlayer, players: Player[]) {
 function buildPlayerStandings(data: SifupData) {
   const ranked = data.players
     .map((player) => {
-      const appearances = data.matchPlayers.filter((row) => (row.name === player.name || row.playerId === player.id) && row.attendanceStatus === "confirmed");
+      const appearances = data.matchPlayers.filter((row) => matchRowBelongsToPlayer(row, player, data.players) && row.attendanceStatus === "confirmed");
       let wins = 0;
       let draws = 0;
       let losses = 0;
@@ -167,7 +171,7 @@ function buildPlayerStandings(data: SifupData) {
 }
 
 function computePlayerStats(player: Player, data: SifupData) {
-  const appearances = data.matchPlayers.filter((row) => (row.name === player.name || row.playerId === player.id) && row.attendanceStatus === "confirmed");
+  const appearances = data.matchPlayers.filter((row) => matchRowBelongsToPlayer(row, player, data.players) && row.attendanceStatus === "confirmed");
   let wins = 0;
   let losses = 0;
   let draws = 0;
@@ -1086,64 +1090,14 @@ function EditableRows({
   );
 }
 
-function PublicMatchRows({ rows, players, standings, history }: { rows: MatchPlayer[]; players: Player[]; standings: Map<string, PlayerStanding>; history: MatchHistory }) {
+function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; players: Player[]; standings: Map<string, PlayerStanding> }) {
   const confirmedRows = rankedConfirmedRows(rows, players, standings);
   const outRows = rows.filter((row) => row.attendanceStatus === "out");
   const teamsAssigned = hasTeamsAssigned(rows);
-  const teamA = confirmedRows.filter((row) => row.team === "A");
-  const teamB = confirmedRows.filter((row) => row.team === "B");
-  const unassigned = confirmedRows.filter((row) => row.team !== "A" && row.team !== "B");
-  const pointsA = teamRankingTotal(rows, players, standings, "A");
-  const pointsB = teamRankingTotal(rows, players, standings, "B");
-
-  const renderRow = (row: MatchPlayer) => (
-    <PlayerCollectionRow
-      key={row.id}
-      row={row}
-      players={players}
-      standings={standings}
-      history={history}
-      teamsAssigned={teamsAssigned}
-      isAdmin={false}
-    />
-  );
 
   return (
     <div className="space-y-4">
-      {teamsAssigned ? (
-        <>
-          {unassigned.length > 0 ? (
-            <div className="space-y-2 rounded-md border border-(--border) bg-white/[0.04] p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">Sin asignar ({unassigned.length})</p>
-              <PlayerRankingHeader />
-              <div className="space-y-2">{unassigned.map(renderRow)}</div>
-            </div>
-          ) : null}
-          <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr] lg:items-start">
-            <div className="space-y-2 rounded-md border-2 border-(--red)/35 bg-(--red)/10 p-3">
-              <p className="text-sm font-bold text-(--red)">Equipo Rojo ({teamA.length}) - {pointsA} pts ranking</p>
-              <PlayerRankingHeader />
-              <div className="space-y-2">
-                {teamA.map(renderRow)}
-                {teamA.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
-              </div>
-            </div>
-            <div className="hidden items-center justify-center px-2 lg:flex">
-              <span className="rounded-full bg-white/[0.12] px-3 py-1 text-xs font-bold text-(--muted)">VS</span>
-            </div>
-            <div className="space-y-2 rounded-md border-2 border-(--gold)/35 bg-(--gold)/10 p-3">
-              <p className="text-sm font-bold text-(--gold)">Equipo Amarillo ({teamB.length}) - {pointsB} pts ranking</p>
-              <PlayerRankingHeader />
-              <div className="space-y-2">
-                {teamB.map(renderRow)}
-                {teamB.length === 0 ? <p className="text-sm text-(--muted)">Sin jugadores</p> : null}
-              </div>
-            </div>
-          </div>
-        </>
-      ) : (
-        <div className="space-y-2"><PlayerRankingHeader />{confirmedRows.map(renderRow)}</div>
-      )}
+      <MatchPlayersTable rows={confirmedRows} players={players} standings={standings} teamsAssigned={teamsAssigned} />
       {outRows.length > 0 ? (
         <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">No pueden ({outRows.length})</p>
@@ -1154,6 +1108,81 @@ function PublicMatchRows({ rows, players, standings, history }: { rows: MatchPla
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+type MatchPlayerSortKey = "name" | "rank" | "points" | "played" | "wins" | "draws" | "losses";
+
+function MatchPlayersTable({ rows, players, standings, teamsAssigned }: { rows: MatchPlayer[]; players: Player[]; standings: Map<string, PlayerStanding>; teamsAssigned: boolean }) {
+  const [sort, setSort] = useState<{ key: MatchPlayerSortKey; direction: "asc" | "desc" }>({ key: "points", direction: "desc" });
+  const columns: { key: MatchPlayerSortKey; label: string; className?: string }[] = [
+    { key: "name", label: "Jugador", className: "text-left" },
+    { key: "rank", label: "Ranking" },
+    { key: "points", label: "Pts", className: "text-(--gold)" },
+    { key: "played", label: "PJ" },
+    { key: "wins", label: "G", className: "text-(--green)" },
+    { key: "draws", label: "E" },
+    { key: "losses", label: "P", className: "text-(--red)" },
+  ];
+  const sortedRows = [...rows].sort((left, right) => {
+    const leftPlayer = playerForMatchRow(left, players);
+    const rightPlayer = playerForMatchRow(right, players);
+    const leftStanding = standingForMatchRow(left, players, standings);
+    const rightStanding = standingForMatchRow(right, players, standings);
+    const value = (row: MatchPlayer, player: Player | undefined, standing: PlayerStanding | undefined) => {
+      if (sort.key === "name") return player?.name ?? row.name;
+      if (sort.key === "rank") return standing?.rank ?? Number.POSITIVE_INFINITY;
+      return standing?.[sort.key] ?? -1;
+    };
+    const leftValue = value(left, leftPlayer, leftStanding);
+    const rightValue = value(right, rightPlayer, rightStanding);
+    const comparison = typeof leftValue === "string" && typeof rightValue === "string"
+      ? leftValue.localeCompare(rightValue, "es")
+      : Number(leftValue) - Number(rightValue);
+    if (comparison !== 0) return sort.direction === "asc" ? comparison : -comparison;
+    return (leftStanding?.rank ?? Number.POSITIVE_INFINITY) - (rightStanding?.rank ?? Number.POSITIVE_INFINITY);
+  });
+  const toggleSort = (key: MatchPlayerSortKey) => setSort((current) => ({ key, direction: current.key === key && current.direction === "desc" ? "asc" : "desc" }));
+
+  return (
+    <div className="overflow-x-auto rounded-lg border border-(--border)">
+      <table className="w-full min-w-[680px] text-sm">
+        <thead className="border-b border-(--border) bg-white/[0.04] text-[10px] font-black uppercase tracking-wide text-(--muted)">
+          <tr>
+            {columns.map((column) => {
+              const active = sort.key === column.key;
+              return (
+                <th key={column.key} aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"} className={`px-3 py-2 text-center ${column.className ?? ""}`}>
+                  <button type="button" onClick={() => toggleSort(column.key)} className="inline-flex items-center gap-1 hover:text-white">
+                    {column.label}<span aria-hidden="true" className={active ? "text-white" : "text-(--muted)/60"}>{active ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span>
+                  </button>
+                </th>
+              );
+            })}
+            {teamsAssigned ? <th className="px-3 py-2 text-center">Equipo</th> : null}
+          </tr>
+        </thead>
+        <tbody>
+          {sortedRows.map((row) => {
+            const player = playerForMatchRow(row, players);
+            const standing = standingForMatchRow(row, players, standings);
+            const playerName = player?.name ?? row.name;
+            return (
+              <tr key={row.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04]">
+                <td className="px-3 py-3 font-bold text-white">{player ? <Link href={`/players/${player.id}`} className="hover:underline">{playerName}</Link> : playerName}</td>
+                <td className="px-3 py-3 text-center text-xs font-bold text-(--muted)">{standing ? `#${standing.rank} · ${standing.played} PJ` : "Sin ranking"}</td>
+                <td className="px-3 py-3 text-center font-black text-(--gold)">{standing?.points ?? "—"}</td>
+                <td className="px-3 py-3 text-center font-bold text-white">{standing?.played ?? "—"}</td>
+                <td className="px-3 py-3 text-center font-bold text-(--green)">{standing?.wins ?? "—"}</td>
+                <td className="px-3 py-3 text-center font-bold text-(--muted)">{standing?.draws ?? "—"}</td>
+                <td className="px-3 py-3 text-center font-bold text-(--red)">{standing?.losses ?? "—"}</td>
+                {teamsAssigned ? <td className={`px-3 py-3 text-center text-xs font-bold ${row.team === "A" ? "text-(--red)" : row.team === "B" ? "text-(--gold)" : "text-(--muted)"}`}>{row.team === "A" ? "Rojo" : row.team === "B" ? "Amarillo" : "Sin asignar"}</td> : null}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -1197,6 +1226,7 @@ function PlayerCollectionRow({
   const whatsapp = whatsappHref(row.phone);
   const player = playerForMatchRow(row, players);
   const playerId = player?.id;
+  const playerName = player?.name ?? row.name;
   const isArq = player?.isGoalkeeper === true;
   const recentForm = recentFormForMatchRow(row, history);
   return (
@@ -1206,14 +1236,14 @@ function PlayerCollectionRow({
         {teamsAssigned ? <span className={`h-3 w-3 shrink-0 rounded-full ${teamDot(row.team)}`} /> : null}
         <div className="min-w-0 flex-1">
           <p className="truncate font-bold text-white">
-            {playerId ? <Link href={`/players/${playerId}`} className="hover:underline">{row.name}</Link> : row.name}
+            {playerId ? <Link href={`/players/${playerId}`} className="hover:underline">{playerName}</Link> : playerName}
             {isArq ? (
               <span className="ml-2 inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider gap-0.5" title="Arquero">
                 🧤 ARQ
               </span>
             ) : null}
           </p>
-          <p className="mt-0.5 text-xs font-medium text-(--muted)">{standing ? `Ranking #${standing.rank}` : "Sin ranking"}</p>
+          <p className="mt-0.5 text-xs font-medium text-(--muted)">{standing ? `Ranking #${standing.rank} · ${standing.played} PJ` : "Sin ranking"}</p>
           <div className="mt-1 flex items-center gap-1" aria-label={`Últimos ${recentForm.length} partidos de ${row.name}`}>
             {recentForm.map(({ match, outcome }) => {
               const style = outcome === "win"
@@ -1846,7 +1876,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             onAddPlayer={() => setShowAddPlayer(true)}
           />
         ) : (
-          <PublicMatchRows rows={rows} players={data.players} standings={standings} history={{ matches: data.matches, matchPlayers: data.matchPlayers, results: data.results }} />
+          <PublicMatchRows rows={rows} players={data.players} standings={standings} />
         )}
       </Card>
 

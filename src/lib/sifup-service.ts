@@ -433,7 +433,8 @@ function scorePlayerMatch(player: Player, target: string): { matchType: PlayerMa
 }
 
 function findKnownPlayer(players: Player[], name: string) {
-  const target = normalizeName(name);
+  const rawTarget = normalizeName(name);
+  const target = rawTarget === "wictor" ? "victor" : rawTarget;
 
   // Normalize aliases for Piti / Pituto / Cristopher
   const pitiAliases = ["piti", "pituto", "cristopher"];
