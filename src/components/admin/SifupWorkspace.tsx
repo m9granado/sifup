@@ -2902,7 +2902,7 @@ function PlayerMatchHistory({ history }: { history: PlayerHistoryItem[] }) {
               : details.isPending
                 ? "border border-white/20 bg-white/[0.03] text-(--muted)"
                 : details.isDraw
-                  ? "border border-white/10 bg-white/[0.12] text-(--muted)"
+                  ? "border border-(--gold)/45 bg-(--gold)/15 text-(--gold)"
                   : details.isWin
                     ? "bg-(--green) text-(--bg-deep)"
                     : "bg-(--red)/90 text-white";
@@ -2910,7 +2910,7 @@ function PlayerMatchHistory({ history }: { history: PlayerHistoryItem[] }) {
             <tr key={item.match.id} className={`border-b border-(--border) last:border-0 hover:bg-white/[0.04] ${details.didNotAttend ? "bg-(--red)/5" : ""}`}>
                 <td className="px-3 py-3 font-bold text-white"><Link href={`/matches/${item.match.id}`} className="hover:underline">{item.match.date}</Link></td>
                 <td className={`px-3 py-3 text-center font-black ${details.isPending || details.didNotAttend ? "text-(--muted)" : "text-(--gold)"}`}>{details.isPending || details.didNotAttend ? "—" : `+${details.points}`}</td>
-                <td className="px-3 py-3"><span className="flex items-center justify-center gap-2"><span className={`flex h-7 w-7 items-center justify-center rounded-full ${iconClass}`} title={details.outcome}>{details.didNotAttend ? <X size={14} strokeWidth={3} /> : details.isPending ? null : details.isDraw ? <strong>−</strong> : details.isWin ? <Check size={15} strokeWidth={4} /> : <X size={14} strokeWidth={3} />}</span><span className={`text-xs font-bold ${details.didNotAttend ? "text-(--red)" : "text-(--muted)"}`}>{details.outcome}</span></span></td>
+                <td className="px-3 py-3"><span className="flex items-center justify-center gap-2"><span className={`flex h-7 w-7 items-center justify-center rounded-full ${iconClass}`} title={details.outcome}>{details.didNotAttend ? <X size={14} strokeWidth={3} /> : details.isPending ? null : details.isDraw ? <strong>−</strong> : details.isWin ? <Check size={15} strokeWidth={4} /> : <X size={14} strokeWidth={3} />}</span><span className={`text-xs font-bold ${details.didNotAttend ? "text-(--red)" : details.isDraw ? "text-(--gold)" : "text-(--muted)"}`}>{details.outcome}</span></span></td>
                 <td className={`px-3 py-3 text-center font-bold ${details.debt > 0 ? "text-(--red)" : "text-(--green)"}`}>{formatCurrency(details.debt)}</td>
               </tr>
             );
