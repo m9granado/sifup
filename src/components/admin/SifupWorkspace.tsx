@@ -2831,37 +2831,35 @@ function PlayerMergeForm({ player, players, onMerged }: { player: Player; player
   );
 }
 
-type PlayerHistoryItem = { row: MatchPlayer; match: Match; result: MatchResult | undefined };
-type PlayerHistorySortKey = "date" | "attendance" | "team" | "result" | "points" | "debt";
+type PlayerHistoryItem = { row: MatchPlayer | undefined; match: Match; result: MatchResult | undefined };
+type PlayerHistorySortKey = "date" | "result" | "debt";
 
 function PlayerMatchHistory({ history }: { history: PlayerHistoryItem[] }) {
   const [sort, setSort] = useState<{ key: PlayerHistorySortKey; direction: "asc" | "desc" }>({ key: "date", direction: "desc" });
   const detailsFor = (item: PlayerHistoryItem) => {
     const result = item.result;
-    const isConfirmed = item.row.attendanceStatus === "confirmed";
-    const didNotAttend = item.row.attendanceStatus === "out";
-    const isPending = !didNotAttend && (!isConfirmed || !result || item.row.team === "none");
-    const isDraw = isConfirmed && result?.winner === "draw" && item.row.team !== "none";
-    const isWin = Boolean(isConfirmed && result && !isDraw && item.row.team !== "none" && result.winner === item.row.team);
-    const attendance = didNotAttend
+    const row = item.row;
+    const isConfirmed = row?.attendanceStatus === "confirmed";
+    const didNotAttend = !row || row.attendanceStatus === "out";
+    const isPending = !didNotAttend && (!isConfirmed || !result || row?.team === "none");
+    const isDraw = isConfirmed && result?.winner === "draw" && row?.team !== "none";
+    const isWin = Boolean(isConfirmed && result && !isDraw && row?.team !== "none" && result.winner === row?.team);
+    const attendance = !row || row.attendanceStatus === "out"
       ? "No estuvo"
-      : item.row.attendanceStatus === "confirmed"
+      : row.attendanceStatus === "confirmed"
         ? "Confirmado"
-        : item.row.attendanceStatus === "maybe"
+        : row.attendanceStatus === "maybe"
           ? "Tal vez"
           : "En espera";
-    const outcome = didNotAttend ? "No estuvo" : isPending ? "Pendiente" : isDraw ? "Empate" : isWin ? "Victoria" : "Derrota";
-    const points = isConfirmed ? pointsForMatchRow(item.row, result) : 0;
-    return { attendance, didNotAttend, isPending, isDraw, isWin, outcome, points, debt: pendingForMatchRow(item.row) };
+    const outcome = didNotAttend ? "No estuvo" : isPending ? (isConfirmed ? "Pendiente" : attendance) : isDraw ? "Empate" : isWin ? "Victoria" : "Derrota";
+    const points = row && isConfirmed ? pointsForMatchRow(row, result) : 0;
+    return { attendance, didNotAttend, isPending, isDraw, isWin, outcome, points, debt: row ? pendingForMatchRow(row) : 0 };
   };
   const valueFor = (item: PlayerHistoryItem) => {
     const details = detailsFor(item);
     return {
       date: `${item.match.date} ${item.match.time}`,
-      attendance: details.attendance,
-      team: teamLabel(item.row.team),
       result: details.outcome,
-      points: details.points,
       debt: details.debt,
     };
   };
@@ -2874,16 +2872,13 @@ function PlayerMatchHistory({ history }: { history: PlayerHistoryItem[] }) {
   const toggleSort = (key: PlayerHistorySortKey) => setSort((current) => ({ key, direction: current.key === key && current.direction === "desc" ? "asc" : "desc" }));
   const columns: { key: PlayerHistorySortKey; label: string; className?: string }[] = [
     { key: "date", label: "Fecha", className: "text-left" },
-    { key: "attendance", label: "Asistencia" },
-    { key: "team", label: "Equipo" },
-    { key: "result", label: "Resultado" },
-    { key: "points", label: "Pts" },
+    { key: "result", label: "Estado" },
     { key: "debt", label: "Deuda" },
   ];
 
   return (
     <div className="overflow-x-auto rounded-lg border border-(--border)">
-      <table className="w-full min-w-[700px] text-sm">
+      <table className="w-full min-w-[440px] text-sm">
         <thead className="border-b border-(--border) bg-white/[0.04] text-[10px] font-black uppercase tracking-wide text-(--muted)">
           <tr>
             {columns.map((column) => {
@@ -2905,12 +2900,9 @@ function PlayerMatchHistory({ history }: { history: PlayerHistoryItem[] }) {
                     ? "bg-(--green) text-(--bg-deep)"
                     : "bg-(--red)/90 text-white";
             return (
-              <tr key={item.row.id} className={`border-b border-(--border) last:border-0 hover:bg-white/[0.04] ${details.didNotAttend ? "bg-(--red)/5" : ""}`}>
-                <td className="px-3 py-3 font-bold text-white"><Link href={`/matches/${item.match.id}`} className="hover:underline"><span className="block">{item.match.date}</span><span className="text-xs font-medium text-(--muted)">{item.match.weekLabel || "Sin semana"}</span></Link></td>
-                <td className={`px-3 py-3 text-center text-xs font-black ${details.didNotAttend ? "text-(--red)" : details.attendance === "Confirmado" ? "text-(--green)" : "text-(--muted)"}`}>{details.attendance}</td>
-                <td className={`px-3 py-3 text-center text-xs font-bold ${item.row.team === "A" ? "text-(--red)" : item.row.team === "B" ? "text-(--gold)" : "text-(--muted)"}`}>{teamLabel(item.row.team)}</td>
+            <tr key={item.match.id} className={`border-b border-(--border) last:border-0 hover:bg-white/[0.04] ${details.didNotAttend ? "bg-(--red)/5" : ""}`}>
+                <td className="px-3 py-3 font-bold text-white"><Link href={`/matches/${item.match.id}`} className="inline-flex items-center gap-2 hover:underline"><span>{item.match.date}</span><strong className={details.isPending || details.didNotAttend ? "text-(--muted)" : "text-(--gold)"}>{details.isPending || details.didNotAttend ? "—" : `+${details.points}`}</strong></Link></td>
                 <td className="px-3 py-3"><span className="flex items-center justify-center gap-2"><span className={`flex h-7 w-7 items-center justify-center rounded-full ${iconClass}`} title={details.outcome}>{details.didNotAttend ? <X size={14} strokeWidth={3} /> : details.isPending ? null : details.isDraw ? <strong>−</strong> : details.isWin ? <Check size={15} strokeWidth={4} /> : <X size={14} strokeWidth={3} />}</span><span className={`text-xs font-bold ${details.didNotAttend ? "text-(--red)" : "text-(--muted)"}`}>{details.outcome}</span></span></td>
-                <td className={`px-3 py-3 text-center font-black ${details.isPending || details.didNotAttend ? "text-(--muted)" : "text-(--gold)"}`}>{details.isPending || details.didNotAttend ? "—" : `+${details.points}`}</td>
                 <td className={`px-3 py-3 text-center font-bold ${details.debt > 0 ? "text-(--red)" : "text-(--green)"}`}>{formatCurrency(details.debt)}</td>
               </tr>
             );
@@ -2934,10 +2926,11 @@ export function PlayerDetailPage({ id, initialData }: { id: string } & InitialDa
   const stats = computePlayerStats(player, data);
   const standings = buildPlayerStandings(data);
   const standing = standings.get(player.id) ?? standings.get(player.name.toLowerCase());
-  const history = data.matchPlayers
-    .filter((row) => matchRowBelongsToPlayer(row, player, data.players))
-    .map((row) => ({ row, match: data.matches.find((item) => item.id === row.matchId), result: data.results.find((item) => item.matchId === row.matchId) }))
-    .filter((item): item is PlayerHistoryItem => Boolean(item.match));
+  const history = data.matches.map((match) => ({
+    match,
+    row: data.matchPlayers.find((row) => row.matchId === match.id && matchRowBelongsToPlayer(row, player, data.players)),
+    result: data.results.find((item) => item.matchId === match.id),
+  }));
 
   function savePlayer(patch: Partial<Player>) {
     if (!editingPlayer) return;
