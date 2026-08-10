@@ -2841,7 +2841,7 @@ function PlayerMergeForm({ player, players, onMerged }: { player: Player; player
   );
 }
 
-type PlayerHistoryItem = { row: MatchPlayer; match: Match; result?: MatchResult };
+type PlayerHistoryItem = { row: MatchPlayer; match: Match; result: MatchResult | undefined };
 type PlayerHistorySortKey = "date" | "team" | "result" | "debt";
 
 function PlayerMatchHistoryTable({ history }: { history: PlayerHistoryItem[] }) {
