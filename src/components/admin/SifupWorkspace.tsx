@@ -2706,7 +2706,7 @@ function PlayerRow({
   );
 }
 
-function PlayerEditorForm({ player, onSave, players = [] }: { player: Player; onSave: (patch: Partial<Player>) => void; players?: Player[] }) {
+function PlayerEditorForm({ player, onSave, players = [], allowMerge = true }: { player: Player; onSave: (patch: Partial<Player>) => void; players?: Player[]; allowMerge?: boolean }) {
   const [draft, setDraft] = useState(draftPlayerWithIsGoalkeeper(player));
   const whatsapp = whatsappHref(draft.phone);
 
@@ -2775,7 +2775,7 @@ function PlayerEditorForm({ player, onSave, players = [] }: { player: Player; on
         ) : null}
       </div>
 
-      {otherPlayers.length > 0 ? (
+      {allowMerge && otherPlayers.length > 0 ? (
         <div className="border-t border-white/10 pt-4 mt-4 space-y-3">
           <h3 className="text-sm font-bold uppercase tracking-wider text-amber-500">Fusionar Jugador (Irreversible)</h3>
           <p className="text-xs text-(--muted)">
@@ -2811,20 +2811,91 @@ function PlayerEditorForm({ player, onSave, players = [] }: { player: Player; on
   );
 }
 
+function PlayerMergeForm({ player, players, onMerged }: { player: Player; players: Player[]; onMerged: (targetId: string) => void }) {
+  const [mergeTargetId, setMergeTargetId] = useState("");
+  const [error, setError] = useState("");
+  const [isMerging, startMergeTransition] = useTransition();
+  const otherPlayers = useMemo(() => players.filter((item) => item.id !== player.id).sort((a, b) => a.name.localeCompare(b.name)), [players, player.id]);
+  const target = otherPlayers.find((item) => item.id === mergeTargetId);
+
+  function merge() {
+    if (!target) return;
+    if (!confirm(`¿Estás seguro de fusionar a ${player.name} dentro de ${target.name}? Esta acción es irreversible, moverá todos sus registros y eliminará a ${player.name}.`)) return;
+    startMergeTransition(async () => {
+      try {
+        await mergePlayersAction(player.id, target.id);
+        onMerged(target.id);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo fusionar el jugador.");
+      }
+    });
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-(--muted)">Los partidos y pagos de <b className="text-white">{player.name}</b> pasarán al jugador destino. Esta acción no se puede deshacer.</p>
+      <label className="space-y-1 text-sm font-medium text-(--muted)"><span>Jugador destino</span><select value={mergeTargetId} onChange={(event) => setMergeTargetId(event.target.value)} disabled={isMerging} className="h-10 w-full rounded-md border border-(--border) bg-(--panel-strong) px-3 text-sm text-white"><option value="">-- Seleccionar jugador --</option>{otherPlayers.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.paymentPlan === "monthly" ? "mensual" : "galleta"})</option>)}</select></label>
+      {error ? <p className="text-sm font-semibold text-(--red)">{error}</p> : null}
+      <div className="flex justify-end"><Button variant="secondary" onClick={merge} disabled={!target || isMerging} className="border-amber-500/40 text-amber-500 hover:bg-amber-500 hover:text-white">{isMerging ? "Fusionando..." : "Fusionar jugador"}</Button></div>
+    </div>
+  );
+}
+
+type PlayerHistoryItem = { row: MatchPlayer; match: Match; result?: MatchResult };
+type PlayerHistorySortKey = "date" | "team" | "result" | "debt";
+
+function PlayerMatchHistoryTable({ history }: { history: PlayerHistoryItem[] }) {
+  const [sort, setSort] = useState<{ key: PlayerHistorySortKey; direction: "asc" | "desc" }>({ key: "date", direction: "desc" });
+  const valueFor = (item: PlayerHistoryItem) => ({
+    date: item.match.date,
+    team: teamLabel(item.row.team),
+    result: item.result ? (item.result.winner === "draw" ? "Empate" : `Ganó ${teamLabel(item.result.winner)}`) : "Sin resultado",
+    debt: pendingForMatchRow(item.row),
+  });
+  const sortedHistory = [...history].sort((left, right) => {
+    const leftValue = valueFor(left)[sort.key];
+    const rightValue = valueFor(right)[sort.key];
+    const comparison = typeof leftValue === "number" && typeof rightValue === "number" ? leftValue - rightValue : String(leftValue).localeCompare(String(rightValue), "es");
+    return sort.direction === "asc" ? comparison : -comparison;
+  });
+  const toggleSort = (key: PlayerHistorySortKey) => setSort((current) => ({ key, direction: current.key === key && current.direction === "desc" ? "asc" : "desc" }));
+  const columns: { key: PlayerHistorySortKey; label: string; className?: string }[] = [{ key: "date", label: "Fecha", className: "text-left" }, { key: "team", label: "Equipo" }, { key: "result", label: "Resultado" }, { key: "debt", label: "Deuda" }];
+
+  return <div className="overflow-x-auto rounded-lg border border-(--border)"><table className="w-full min-w-[560px] text-sm"><thead className="border-b border-(--border) bg-white/[0.04] text-[10px] font-black uppercase tracking-wide text-(--muted)"><tr>{columns.map((column) => { const active = sort.key === column.key; return <th key={column.key} aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"} className={`px-3 py-2 text-center ${column.className ?? ""}`}><button type="button" onClick={() => toggleSort(column.key)} className="inline-flex items-center gap-1 hover:text-white">{column.label}<span aria-hidden="true" className={active ? "text-white" : "text-(--muted)/60"}>{active ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span></button></th>; })}</tr></thead><tbody>{sortedHistory.map((item) => { const values = valueFor(item); const pending = values.debt > 0; return <tr key={item.row.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04]"><td className="px-3 py-3 font-bold text-white"><Link href={`/matches/${item.match.id}`} className="hover:underline"><span className="block">{item.match.date}</span><span className="text-xs font-medium text-(--muted)">{item.match.weekLabel || "Sin semana"}</span></Link></td><td className={`px-3 py-3 text-center text-xs font-bold ${item.row.team === "A" ? "text-(--red)" : item.row.team === "B" ? "text-(--gold)" : "text-(--muted)"}`}>{values.team}</td><td className="px-3 py-3 text-center text-xs font-bold text-(--muted)">{values.result}</td><td className={`px-3 py-3 text-center font-bold ${pending ? "text-(--red)" : "text-(--green)"}`}>{formatCurrency(values.debt)}</td></tr>; })}</tbody></table></div>;
+}
+
 export function PlayerDetailPage({ id, initialData }: { id: string } & InitialDataProps) {
-  const { data } = useSifupData(initialData);
+  const isAdmin = useIsAdmin();
+  const router = useRouter();
+  const { data, commit } = useSifupData(initialData);
+  const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
+  const [mergingPlayer, setMergingPlayer] = useState<Player | null>(null);
+  const [error, setError] = useState("");
   const player = data.players.find((item) => item.id === id);
   if (!player) return <PageTitle title="Jugador no encontrado" description="No existe en la base de datos." />;
 
   const stats = computePlayerStats(player, data);
   const history = stats.appearances
     .map((row) => ({ row, match: data.matches.find((item) => item.id === row.matchId), result: data.results.find((item) => item.matchId === row.matchId) }))
-    .filter((item) => item.match)
-    .sort((a, b) => (b.match?.date ?? "").localeCompare(a.match?.date ?? ""));
+    .filter((item): item is PlayerHistoryItem => Boolean(item.match));
+
+  function savePlayer(patch: Partial<Player>) {
+    if (!editingPlayer) return;
+    const updated = { ...editingPlayer, ...patch, updatedAt: new Date().toISOString() };
+    savePlayerAction(updated)
+      .then(() => {
+        commit({ ...upsertPlayer(data, updated), matchPlayers: data.matchPlayers.map((row) => row.playerId === updated.id ? { ...row, name: updated.name, updatedAt: updated.updatedAt } : row) });
+        setEditingPlayer(null);
+        setError("");
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar el jugador."));
+  }
 
   return (
     <>
       <PageTitle title={player.name} description={`${player.paymentPlan === "monthly" ? "Oficial" : "Galleta"} · ${player.nickname || "Sin pseudonimo"}`} />
+      {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
+      {isAdmin ? <div className="mb-4 flex flex-wrap gap-2"><Button variant="secondary" onClick={() => setEditingPlayer(player)}><Pencil size={16} />Editar datos</Button><Button variant="secondary" onClick={() => setMergingPlayer(player)} className="border-amber-500/40 text-amber-500 hover:bg-amber-500 hover:text-white"><Users size={16} />Fusionar jugador</Button></div> : null}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Partidos jugados" value={stats.played} />
         <Stat label="G-E-P" value={stats.form} />
@@ -2835,26 +2906,13 @@ export function PlayerDetailPage({ id, initialData }: { id: string } & InitialDa
         <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Deuda pendiente</p>
         <p className={`mt-1 text-2xl font-black ${stats.pendingDebt > 0 ? "text-(--red)" : "text-(--green)"}`}>{formatCurrency(stats.pendingDebt)}</p>
       </Card>
-      <Card className="mt-4 space-y-2">
+      <Card className="mt-4 space-y-3">
         <h2 className="font-semibold">Historial de partidos</h2>
         {history.length === 0 ? <p className="text-sm text-(--muted)">Todavia no jugo ningun partido.</p> : null}
-        {history.map(({ row, match, result }) => (
-          <Link
-            key={row.id}
-            href={`/matches/${match?.id}`}
-            className="flex flex-col gap-1 rounded-md border border-(--border) bg-white/[0.04] px-3 py-2 text-sm hover:bg-white/[0.08] sm:flex-row sm:items-center sm:justify-between"
-          >
-            <div>
-              <p className="font-semibold text-white">{match?.weekLabel || match?.date}</p>
-              <p className="text-xs text-(--muted)">{match?.date} · {teamLabel(row.team)}</p>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-(--muted)">
-              {result ? <span>{result.winner === "draw" ? "Empate" : `Ganó ${teamLabel(result.winner)}`}</span> : <span>Sin resultado</span>}
-              <span className={pendingForMatchRow(row) > 0 ? "text-(--red)" : "text-(--green)"}>{formatCurrency(pendingForMatchRow(row))}</span>
-            </div>
-          </Link>
-        ))}
+        {history.length > 0 ? <PlayerMatchHistoryTable history={history} /> : null}
       </Card>
+      {editingPlayer ? <Modal title={`Editar ${editingPlayer.name}`} onClose={() => setEditingPlayer(null)}><PlayerEditorForm player={editingPlayer} onSave={savePlayer} allowMerge={false} /></Modal> : null}
+      {mergingPlayer ? <Modal title={`Fusionar ${mergingPlayer.name}`} onClose={() => setMergingPlayer(null)}><PlayerMergeForm player={mergingPlayer} players={data.players} onMerged={(targetId) => { setMergingPlayer(null); router.replace(`/players/${targetId}`); router.refresh(); }} /></Modal> : null}
     </>
   );
 }
