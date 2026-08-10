@@ -2611,30 +2611,11 @@ export function PlayersPage({ initialData }: InitialDataProps) {
         <Card className="space-y-3">
           <h2 className="font-semibold">Oficiales</h2>
           <p className="text-xs text-(--muted)">Mensualidad de {month} y meses anteriores.</p>
-          {oficiales.map((player) => {
-            const payment = monthlyPaymentFor(player, month, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === month));
-            const paid = payment?.paymentStatus === "paid";
-            const history = upsertMonthlyPayment(data.monthlyPayments.filter((item) => item.playerId === player.id), payment);
-            return (
-              <PlayerRow key={player.id} player={player} isAdmin={isAdmin} onEdit={() => setEditingPlayer(player)}>
-                <PaymentBadge status={paid ? "paid" : payment?.paymentStatus ?? "unpaid"} />
-                <PaymentHistory payments={history} />
-              </PlayerRow>
-            );
-          })}
+          <PlayerDirectoryTable players={oficiales} data={data} month={month} isAdmin={isAdmin} kind="monthly" onEdit={setEditingPlayer} />
         </Card>
         <Card className="space-y-3">
           <h2 className="font-semibold">Galletas</h2>
-          {galletas.map((player) => {
-            const debt = data.matchPlayers
-              .filter((row) => row.playerId === player.id)
-              .reduce((sum, row) => sum + Math.max(row.amountDue - row.amountPaid, 0), 0);
-            return (
-              <PlayerRow key={player.id} player={player} isAdmin={isAdmin} onEdit={() => setEditingPlayer(player)}>
-                <span className="rounded-full bg-white/[0.08] px-2 py-1 text-xs font-semibold text-(--muted) ring-1 ring-(--border)">{formatCurrency(debt)}</span>
-              </PlayerRow>
-            );
-          })}
+          <PlayerDirectoryTable players={galletas} data={data} month={month} isAdmin={isAdmin} kind="perMatch" onEdit={setEditingPlayer} />
         </Card>
       </div>
       {editingPlayer ? (
@@ -2669,39 +2650,70 @@ function PaymentHistory({ payments }: { payments: MonthlyPayment[] }) {
   );
 }
 
-function PlayerRow({
-  player,
-  isAdmin,
-  onEdit,
-  children,
-}: {
-  player: Player;
-  isAdmin: boolean;
-  onEdit: () => void;
-  children: React.ReactNode;
-}) {
-  const whatsapp = whatsappHref(player.phone);
+type PlayerDirectorySortKey = "name" | "nickname" | "played" | "points" | "status" | "debt";
+
+function PlayerDirectoryTable({ players, data, month, isAdmin, kind, onEdit }: { players: Player[]; data: SifupData; month: string; isAdmin: boolean; kind: PaymentPlan; onEdit: (player: Player) => void }) {
+  const [sort, setSort] = useState<{ key: PlayerDirectorySortKey; direction: "asc" | "desc" }>({ key: "name", direction: "asc" });
+  const rows = players.map((player) => {
+    const payment = kind === "monthly" ? monthlyPaymentFor(player, month, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === month)) : undefined;
+    const debt = kind === "monthly"
+      ? data.monthlyPayments.filter((item) => item.playerId === player.id).reduce((sum, item) => sum + Math.max(item.expectedAmount - item.amountPaid, 0), 0)
+      : data.matchPlayers.filter((item) => item.playerId === player.id).reduce((sum, item) => sum + Math.max(item.amountDue - item.amountPaid, 0), 0);
+    const history = payment ? upsertMonthlyPayment(data.monthlyPayments.filter((item) => item.playerId === player.id), payment) : [];
+    const stats = computePlayerStats(player, data);
+    return { player, payment, debt, history, played: stats.played, points: stats.points };
+  });
+  const sortedRows = [...rows].sort((left, right) => {
+    const value = (row: typeof rows[number]) => {
+      if (sort.key === "name") return row.player.name;
+      if (sort.key === "nickname") return row.player.nickname;
+      if (sort.key === "played") return row.played;
+      if (sort.key === "points") return row.points;
+      if (sort.key === "status") return row.payment?.paymentStatus ?? "";
+      return row.debt;
+    };
+    const leftValue = value(left);
+    const rightValue = value(right);
+    const comparison = typeof leftValue === "number" && typeof rightValue === "number" ? leftValue - rightValue : String(leftValue).localeCompare(String(rightValue), "es");
+    return sort.direction === "asc" ? comparison : -comparison;
+  });
+  const toggleSort = (key: PlayerDirectorySortKey) => setSort((current) => ({ key, direction: current.key === key && current.direction === "asc" ? "desc" : "asc" }));
+  const columns: { key: PlayerDirectorySortKey; label: string; className?: string }[] = [
+    { key: "name", label: "Jugador", className: "text-left" },
+    { key: "nickname", label: "Apodo", className: "text-left" },
+    { key: "played", label: "PJ" },
+    { key: "points", label: "Pts", className: "text-(--gold)" },
+    kind === "monthly" ? { key: "status", label: "Pago" } : { key: "debt", label: "Deuda" },
+  ];
+
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-(--border) bg-white/[0.04] px-3 py-2">
-      <div>
-        <p className="font-semibold text-white">{player.name}</p>
-        <p className="text-sm text-(--muted)">{player.nickname || "Sin pseudonimo"}</p>
-      </div>
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        {children}
-        {isAdmin && whatsapp ? (
-          <a
-            href={whatsapp}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--green) bg-(--green) px-3 text-sm font-bold text-(--bg-deep) hover:bg-(--green-dark) hover:text-white"
-          >
-            <MessageCircle size={16} />
-            Cobrar
-          </a>
-        ) : null}
-        {isAdmin ? <Button variant="secondary" onClick={onEdit}>Editar</Button> : null}
-      </div>
+    <div className="overflow-x-auto rounded-lg border border-(--border)">
+      <table className="w-full min-w-[520px] text-sm">
+        <thead className="border-b border-(--border) bg-white/[0.04] text-[10px] font-black uppercase tracking-wide text-(--muted)">
+          <tr>
+            {columns.map((column) => {
+              const active = sort.key === column.key;
+              return <th key={column.key} aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"} className={`px-3 py-2 text-center ${column.className ?? ""}`}><button type="button" onClick={() => toggleSort(column.key)} className="inline-flex items-center gap-1 hover:text-white">{column.label}<span aria-hidden="true" className={active ? "text-white" : "text-(--muted)/60"}>{active ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span></button></th>;
+            })}
+            {kind === "monthly" ? <th className="px-3 py-2 text-center">Historial</th> : null}
+            {isAdmin ? <th className="px-3 py-2 text-center">Acciones</th> : null}
+          </tr>
+        </thead>
+        <tbody>
+          {sortedRows.map(({ player, payment, debt, history, played, points }) => {
+            const whatsapp = whatsappHref(player.phone);
+            return <tr key={player.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04]">
+              <td className="px-3 py-3 font-bold text-white"><Link href={`/players/${player.id}`} className="hover:underline">{player.name}</Link></td>
+              <td className="px-3 py-3 text-(--muted)">{player.nickname || "Sin pseudónimo"}</td>
+              <td className="px-3 py-3 text-center font-bold text-white">{played}</td>
+              <td className="px-3 py-3 text-center font-black text-(--gold)">{points}</td>
+              {kind === "monthly" ? <td className="px-3 py-3 text-center"><PaymentBadge status={payment?.paymentStatus ?? "unpaid"} /></td> : <td className={`px-3 py-3 text-center font-bold ${debt > 0 ? "text-(--red)" : "text-(--green)"}`}>{formatCurrency(debt)}</td>}
+              {kind === "monthly" ? <td className="px-3 py-3"><PaymentHistory payments={history} /></td> : null}
+              {isAdmin ? <td className="px-3 py-2"><div className="flex justify-center gap-1">{whatsapp ? <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15" aria-label={`WhatsApp ${player.name}`} title="WhatsApp"><MessageCircle size={16} /></a> : null}<button type="button" onClick={() => onEdit(player)} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14]" aria-label={`Editar ${player.name}`} title="Editar"><Pencil size={16} /></button></div></td> : null}
+            </tr>;
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
