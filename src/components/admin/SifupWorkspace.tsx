@@ -734,6 +734,7 @@ export function MatchesPage({ initialData }: InitialDataProps) {
             const rows = data.matchPlayers.filter((row) => row.matchId === match.id);
             const summary = summarizeMatch(rows);
             const isNext = match.id === nextId;
+            const isCompactConfirmed = match.status === "confirmed" && !isNext;
             const result = data.results.find((r) => r.matchId === match.id);
             const winners = result && result.winner !== "draw"
               ? data.matchPlayers.filter((mp) => mp.matchId === match.id && mp.team === result.winner && mp.attendanceStatus === "confirmed")
@@ -762,7 +763,7 @@ export function MatchesPage({ initialData }: InitialDataProps) {
                             {result.winner === "draw" ? "Empate" : `Ganó el equipo ${teamLabel(result.winner)}`}
                           </h2>
                           <p className="mt-1 text-sm font-medium text-(--muted)">
-                            {match.weekLabel || match.date} · {match.location}
+                            {match.date}
                           </p>
                         </div>
                         <div className="flex flex-col items-end gap-2">
@@ -781,6 +782,11 @@ export function MatchesPage({ initialData }: InitialDataProps) {
                           </div>
                         </div>
                       ) : null}
+                    </div>
+                  ) : isCompactConfirmed ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <h2 className="min-w-0 truncate text-base font-medium text-white">{match.weekLabel || match.date}</h2>
+                      <StatusBadge value={matchStatusLabel(match.status)} />
                     </div>
                   ) : (
                     <div>
