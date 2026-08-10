@@ -3716,8 +3716,8 @@ function TeamSelectorRow({ row, onChange, players, standings }: { row: MatchPlay
           <span className="md:hidden">{row.name}</span>
           {player ? <Link href={`/players/${player.id}`} className="hidden hover:text-(--green) hover:underline md:inline">{row.name}</Link> : <span className="hidden md:inline">{row.name}</span>}
           {isArq ? (
-            <span className="ml-2 inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider gap-0.5" title="Arquero">
-              🧤 ARQ
+            <span aria-label="Arquero" title="Arquero" className="ml-2 inline-flex items-center gap-1 rounded-full border border-amber-400/45 bg-amber-400/15 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-300 shadow-[0_0_10px_rgba(251,191,36,0.2)]">
+              <span aria-hidden="true" className="text-sm leading-none">🧤</span> ARQ
             </span>
           ) : null}
         </p>
