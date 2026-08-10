@@ -3593,6 +3593,17 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
   const pointsA = teamA.reduce((sum, row) => sum + (standingForMatchRow(row, data.players, standings)?.points ?? 0), 0);
   const pointsB = teamB.reduce((sum, row) => sum + (standingForMatchRow(row, data.players, standings)?.points ?? 0), 0);
   const pointsDifference = Math.abs(pointsA - pointsB);
+  const sortByPoints = (teamRows: MatchPlayer[]) => [...teamRows].sort((left, right) => {
+    const leftStanding = standingForMatchRow(left, data.players, standings);
+    const rightStanding = standingForMatchRow(right, data.players, standings);
+    const pointsOrder = (rightStanding?.points ?? -1) - (leftStanding?.points ?? -1);
+    if (pointsOrder !== 0) return pointsOrder;
+    const rankOrder = (leftStanding?.rank ?? Number.POSITIVE_INFINITY) - (rightStanding?.rank ?? Number.POSITIVE_INFINITY);
+    return rankOrder !== 0 ? rankOrder : left.name.localeCompare(right.name, "es");
+  });
+  const sortedTeamA = sortByPoints(teamA);
+  const sortedTeamB = sortByPoints(teamB);
+  const sortedUnassigned = sortByPoints(unassigned);
 
   function handleTeamChange(rowId: string, team: Team) {
     setRows((current) =>
@@ -3638,40 +3649,24 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
       <div className="space-y-4">
-        <section className="rounded-lg border border-(--border) bg-white/[0.04] p-4">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="grid flex-1 grid-cols-2 gap-3">
-              <div className="rounded-md border border-(--red)/35 bg-(--red)/10 px-3 py-2.5">
-                <p className="text-[10px] font-black uppercase tracking-wide text-(--red)">Equipo Rojo</p>
-                <p className="mt-1 text-xl font-black text-white">{teamA.length} <span className="text-xs text-(--muted)">jugadores</span></p>
-                <p className="text-xs font-bold text-(--red)">{pointsA} pts</p>
-              </div>
-              <div className="rounded-md border border-(--gold)/40 bg-(--gold)/10 px-3 py-2.5 text-right">
-                <p className="text-[10px] font-black uppercase tracking-wide text-(--gold)">Equipo Amarillo</p>
-                <p className="mt-1 text-xl font-black text-white">{teamB.length} <span className="text-xs text-(--muted)">jugadores</span></p>
-                <p className="text-xs font-bold text-(--gold)">{pointsB} pts</p>
-              </div>
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:justify-end">
-              <p className={`text-xs font-bold ${pointsDifference === 0 ? "text-(--green)" : "text-(--muted)"}`}>
-                {pointsDifference === 0 ? "Equipos equilibrados" : `Diferencia: ${pointsDifference} pts`}
-              </p>
-              <Button variant="secondary" onClick={resetBalancedTeams} disabled={isPending}>
-                <Sparkles size={16} />
-                Equilibrar por Ranking
-              </Button>
-            </div>
-          </div>
-        </section>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-(--border) bg-white/[0.04] px-3 py-2">
+          <p className={`text-xs font-bold ${pointsDifference === 0 ? "text-(--green)" : "text-(--muted)"}`}>
+            {pointsDifference === 0 ? "Equipos equilibrados" : `Diferencia: ${pointsDifference} pts`}
+          </p>
+          <Button variant="secondary" onClick={resetBalancedTeams} disabled={isPending} className="h-8 px-2.5 text-xs">
+            <Sparkles size={14} />
+            Equilibrar por Ranking
+          </Button>
+        </div>
 
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
           <Card className="space-y-2 border-t-2 border-t-(--red)/70 bg-(--red)/5 p-3">
             <div className="flex items-center justify-between gap-3">
               <h2 className="flex items-center gap-2 text-sm font-bold text-white"><span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-(--red)" />Equipo Rojo</h2>
-              <span className="text-xs font-black text-(--red)">{teamA.length} jug.</span>
+              <div className="flex items-baseline gap-2"><span className="text-xs font-black text-(--muted)">{teamA.length} jug.</span><span className="text-lg font-black leading-none text-(--red)">{pointsA} pts</span></div>
             </div>
             <div className="space-y-1.5">
-              {teamA.map((row) => (
+              {sortedTeamA.map((row) => (
                 <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} />
               ))}
               {teamA.length === 0 ? <p className="text-sm text-(--muted) italic">Sin jugadores asignados</p> : null}
@@ -3681,10 +3676,10 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
           <Card className="space-y-2 border-t-2 border-t-(--gold)/70 bg-(--gold)/5 p-3">
             <div className="flex items-center justify-between gap-3">
               <h2 className="flex items-center gap-2 text-sm font-bold text-white"><span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-(--gold)" />Equipo Amarillo</h2>
-              <span className="text-xs font-black text-(--gold)">{teamB.length} jug.</span>
+              <div className="flex items-baseline gap-2"><span className="text-xs font-black text-(--muted)">{teamB.length} jug.</span><span className="text-lg font-black leading-none text-(--gold)">{pointsB} pts</span></div>
             </div>
             <div className="space-y-1.5">
-              {teamB.map((row) => (
+              {sortedTeamB.map((row) => (
                 <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} />
               ))}
               {teamB.length === 0 ? <p className="text-sm text-(--muted) italic">Sin jugadores asignados</p> : null}
@@ -3697,7 +3692,7 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
               <span className="text-xs font-black text-(--muted)">{unassigned.length} pendientes</span>
             </div>
             <div className="space-y-1.5">
-              {unassigned.map((row) => (
+              {sortedUnassigned.map((row) => (
                 <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} />
               ))}
               {unassigned.length === 0 ? <p className="rounded-md border border-(--green)/25 bg-(--green)/10 px-3 py-2 text-sm font-semibold text-(--green)">Todos los jugadores están asignados.</p> : null}
@@ -3726,7 +3721,7 @@ function TeamSelectorRow({ row, onChange, players, standings }: { row: MatchPlay
             </span>
           ) : null}
         </p>
-        <p className="text-xs text-(--muted)">{standing ? `#${standing.rank} · ${standing.points} pts` : "Sin ranking"}</p>
+        <p className="text-xs text-(--muted)">{standing ? <><span>#{standing.rank} · </span><span className="text-sm font-black text-(--gold)">{standing.points} pts</span></> : "Sin ranking"}</p>
       </div>
       <div className="flex shrink-0 items-center gap-1" role="group" aria-label={`Asignar equipo a ${row.name}`}>
         <button
