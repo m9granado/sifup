@@ -2597,8 +2597,6 @@ export function PlayersPage({ initialData }: InitialDataProps) {
   }
 
   const visiblePlayers = isAdmin ? data.players : data.players.filter((player) => player.active);
-  const oficiales = visiblePlayers.filter((player) => player.paymentPlan === "monthly");
-  const galletas = visiblePlayers.filter((player) => player.paymentPlan === "perMatch");
   const month = currentMonthKey();
 
   return (
@@ -2607,17 +2605,13 @@ export function PlayersPage({ initialData }: InitialDataProps) {
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: telefonos, WhatsApp y edicion quedan ocultos." /> : null}
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
       {isAdmin ? <Card className="mb-4 flex gap-2"><input className="h-10 min-w-0 flex-1 rounded-md border border-(--border) bg-(--panel-strong) px-3 text-sm text-white" value={name} onChange={(event) => setName(event.target.value)} placeholder="Nombre del jugador nuevo" /><Button onClick={addPlayer}><Plus size={16} />Agregar</Button></Card> : null}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="space-y-3">
-          <h2 className="font-semibold">Oficiales</h2>
-          <p className="text-xs text-(--muted)">Mensualidad de {month} y meses anteriores.</p>
-          <PlayerDirectoryTable players={oficiales} data={data} month={month} isAdmin={isAdmin} kind="monthly" onEdit={setEditingPlayer} />
-        </Card>
-        <Card className="space-y-3">
-          <h2 className="font-semibold">Galletas</h2>
-          <PlayerDirectoryTable players={galletas} data={data} month={month} isAdmin={isAdmin} kind="perMatch" onEdit={setEditingPlayer} />
-        </Card>
-      </div>
+      <Card className="space-y-3">
+        <div>
+          <h2 className="font-semibold">Jugadores</h2>
+          <p className="text-xs text-(--muted)">Oficiales y galletas en una sola tabla; ordena por cualquier columna.</p>
+        </div>
+        <PlayerDirectoryTable players={visiblePlayers} data={data} month={month} isAdmin={isAdmin} onEdit={setEditingPlayer} />
+      </Card>
       {editingPlayer ? (
         <Modal title={`Editar ${editingPlayer.name}`} onClose={() => setEditingPlayer(null)}>
           <PlayerEditorForm player={editingPlayer} onSave={savePlayer} players={data.players} />
@@ -2650,13 +2644,13 @@ function PaymentHistory({ payments }: { payments: MonthlyPayment[] }) {
   );
 }
 
-type PlayerDirectorySortKey = "name" | "nickname" | "played" | "points" | "status" | "debt";
+type PlayerDirectorySortKey = "position" | "name" | "plan" | "nickname" | "played" | "points" | "status" | "debt";
 
-function PlayerDirectoryTable({ players, data, month, isAdmin, kind, onEdit }: { players: Player[]; data: SifupData; month: string; isAdmin: boolean; kind: PaymentPlan; onEdit: (player: Player) => void }) {
+function PlayerDirectoryTable({ players, data, month, isAdmin, onEdit }: { players: Player[]; data: SifupData; month: string; isAdmin: boolean; onEdit: (player: Player) => void }) {
   const [sort, setSort] = useState<{ key: PlayerDirectorySortKey; direction: "asc" | "desc" }>({ key: "name", direction: "asc" });
   const rows = players.map((player) => {
-    const payment = kind === "monthly" ? monthlyPaymentFor(player, month, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === month)) : undefined;
-    const debt = kind === "monthly"
+    const payment = player.paymentPlan === "monthly" ? monthlyPaymentFor(player, month, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === month)) : undefined;
+    const debt = player.paymentPlan === "monthly"
       ? data.monthlyPayments.filter((item) => item.playerId === player.id).reduce((sum, item) => sum + Math.max(item.expectedAmount - item.amountPaid, 0), 0)
       : data.matchPlayers.filter((item) => item.playerId === player.id).reduce((sum, item) => sum + Math.max(item.amountDue - item.amountPaid, 0), 0);
     const history = payment ? upsertMonthlyPayment(data.monthlyPayments.filter((item) => item.playerId === player.id), payment) : [];
@@ -2665,7 +2659,9 @@ function PlayerDirectoryTable({ players, data, month, isAdmin, kind, onEdit }: {
   });
   const sortedRows = [...rows].sort((left, right) => {
     const value = (row: typeof rows[number]) => {
+      if (sort.key === "position") return row.player.isGoalkeeper ? "Arquero" : "Jugador de campo";
       if (sort.key === "name") return row.player.name;
+      if (sort.key === "plan") return row.player.paymentPlan;
       if (sort.key === "nickname") return row.player.nickname;
       if (sort.key === "played") return row.played;
       if (sort.key === "points") return row.points;
@@ -2679,11 +2675,14 @@ function PlayerDirectoryTable({ players, data, month, isAdmin, kind, onEdit }: {
   });
   const toggleSort = (key: PlayerDirectorySortKey) => setSort((current) => ({ key, direction: current.key === key && current.direction === "asc" ? "desc" : "asc" }));
   const columns: { key: PlayerDirectorySortKey; label: string; className?: string }[] = [
+    { key: "position", label: "Posición", className: "text-left" },
     { key: "name", label: "Jugador", className: "text-left" },
+    { key: "plan", label: "Tipo" },
     { key: "nickname", label: "Apodo", className: "text-left" },
     { key: "played", label: "PJ" },
     { key: "points", label: "Pts", className: "text-(--gold)" },
-    kind === "monthly" ? { key: "status", label: "Pago" } : { key: "debt", label: "Deuda" },
+    { key: "status", label: "Pago" },
+    { key: "debt", label: "Deuda" },
   ];
 
   return (
@@ -2695,7 +2694,7 @@ function PlayerDirectoryTable({ players, data, month, isAdmin, kind, onEdit }: {
               const active = sort.key === column.key;
               return <th key={column.key} aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"} className={`px-3 py-2 text-center ${column.className ?? ""}`}><button type="button" onClick={() => toggleSort(column.key)} className="inline-flex items-center gap-1 hover:text-white">{column.label}<span aria-hidden="true" className={active ? "text-white" : "text-(--muted)/60"}>{active ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span></button></th>;
             })}
-            {kind === "monthly" ? <th className="px-3 py-2 text-center">Historial</th> : null}
+            <th className="px-3 py-2 text-center">Historial</th>
             {isAdmin ? <th className="px-3 py-2 text-center">Acciones</th> : null}
           </tr>
         </thead>
@@ -2703,12 +2702,15 @@ function PlayerDirectoryTable({ players, data, month, isAdmin, kind, onEdit }: {
           {sortedRows.map(({ player, payment, debt, history, played, points }) => {
             const whatsapp = whatsappHref(player.phone);
             return <tr key={player.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04]">
+              <td className="px-3 py-3 text-xs font-bold text-white">{player.isGoalkeeper ? "🧤 Arquero" : "⚽ Jugador de campo"}</td>
               <td className="px-3 py-3 font-bold text-white"><Link href={`/players/${player.id}`} className="hover:underline">{player.name}</Link></td>
+              <td className="px-3 py-3 text-center text-xs font-bold text-(--muted)">{player.paymentPlan === "monthly" ? "Oficial" : "Galleta"}</td>
               <td className="px-3 py-3 text-(--muted)">{player.nickname || "Sin pseudónimo"}</td>
               <td className="px-3 py-3 text-center font-bold text-white">{played}</td>
               <td className="px-3 py-3 text-center font-black text-(--gold)">{points}</td>
-              {kind === "monthly" ? <td className="px-3 py-3 text-center"><PaymentBadge status={payment?.paymentStatus ?? "unpaid"} /></td> : <td className={`px-3 py-3 text-center font-bold ${debt > 0 ? "text-(--red)" : "text-(--green)"}`}>{formatCurrency(debt)}</td>}
-              {kind === "monthly" ? <td className="px-3 py-3"><PaymentHistory payments={history} /></td> : null}
+              <td className="px-3 py-3 text-center">{player.paymentPlan === "monthly" ? <PaymentBadge status={payment?.paymentStatus ?? "unpaid"} /> : <span className="text-xs font-bold text-(--muted)">Por partido</span>}</td>
+              <td className={`px-3 py-3 text-center font-bold ${debt > 0 ? "text-(--red)" : "text-(--green)"}`}>{formatCurrency(debt)}</td>
+              <td className="px-3 py-3">{player.paymentPlan === "monthly" ? <PaymentHistory payments={history} /> : <span className="text-xs text-(--muted)">—</span>}</td>
               {isAdmin ? <td className="px-3 py-2"><div className="flex justify-center gap-1">{whatsapp ? <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15" aria-label={`WhatsApp ${player.name}`} title="WhatsApp"><MessageCircle size={16} /></a> : null}<button type="button" onClick={() => onEdit(player)} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14]" aria-label={`Editar ${player.name}`} title="Editar"><Pencil size={16} /></button></div></td> : null}
             </tr>;
           })}
