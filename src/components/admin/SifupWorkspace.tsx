@@ -2702,7 +2702,7 @@ function PlayerDirectoryTable({ players, data, month, isAdmin, onEdit }: { playe
           {sortedRows.map(({ player, payment, debt, history, played, points }) => {
             const whatsapp = whatsappHref(player.phone);
             return <tr key={player.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04]">
-              <td className="px-3 py-3 text-xs font-bold text-white">{player.isGoalkeeper ? "🧤 Arquero" : "⚽ Jugador de campo"}</td>
+              <td className="px-3 py-2 text-center"><span aria-label={player.isGoalkeeper ? "Arquero" : "Jugador de campo"} title={player.isGoalkeeper ? "Arquero" : "Jugador de campo"} className={`inline-flex h-9 w-9 items-center justify-center rounded-full text-xl ring-2 ${player.isGoalkeeper ? "bg-amber-400 text-(--bg-deep) ring-amber-200 shadow-[0_0_16px_rgba(251,191,36,0.65)]" : "bg-emerald-950 ring-(--green)/70 shadow-[0_0_12px_rgba(18,214,154,0.35)]"}`}>{player.isGoalkeeper ? "🧤" : "⚽"}</span></td>
               <td className="px-3 py-3 font-bold text-white"><Link href={`/players/${player.id}`} className="hover:underline">{player.name}</Link></td>
               <td className="px-3 py-3 text-center text-xs font-bold text-(--muted)">{player.paymentPlan === "monthly" ? "Oficial" : "Galleta"}</td>
               <td className="px-3 py-3 text-(--muted)">{player.nickname || "Sin pseudónimo"}</td>
