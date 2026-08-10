@@ -788,7 +788,7 @@ export function MatchesPage({ initialData }: InitialDataProps) {
   );
 }
 
-function TeamSuggestionPreview<T extends TeamAssignableRow>({ rows, players, standings }: { rows: T[]; players: Player[]; standings: Map<string, PlayerStanding> }) {
+function NewMatchTeamSuggestion<T extends TeamAssignableRow>({ rows, players, standings }: { rows: T[]; players: Player[]; standings: Map<string, PlayerStanding> }) {
   const rankedRows = buildRankedTeamRows(rows, players, standings);
   const teamA = rankedRows.filter((item) => item.suggestedTeam === "A");
   const teamB = rankedRows.filter((item) => item.suggestedTeam === "B");
@@ -935,7 +935,7 @@ export function NewMatchPage({ initialData }: InitialDataProps) {
           {errors.map((error) => <p key={error} className="rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p>)}
         </Card>
         <div className="space-y-4">
-          <TeamSuggestionPreview rows={rows} players={data.players} standings={standings} />
+          <NewMatchTeamSuggestion rows={rows} players={data.players} standings={standings} />
           <MatchEditor match={match} setMatch={setMatch} rows={rows} updateRow={updateRow} knownLocations={data.matches.map((item) => item.location)} lastLocation={data.matches[0]?.location ?? ""} />
         </div>
       </div>
@@ -1088,7 +1088,7 @@ function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; pl
   );
 }
 
-type MatchPlayerSortKey = "name" | "rank" | "points" | "played" | "wins" | "draws" | "losses";
+type MatchPlayerSortKey = "name" | "rank" | "points" | "played" | "wins" | "draws" | "losses" | "team";
 
 function MatchPlayersTable({
   rows,
@@ -1124,6 +1124,7 @@ function MatchPlayersTable({
     const rightStanding = standingForMatchRow(right, players, standings);
     const value = (row: MatchPlayer, player: Player | undefined, standing: PlayerStanding | undefined) => {
       if (sort.key === "name") return player?.name ?? row.name;
+      if (sort.key === "team") return row.team;
       if (sort.key === "rank") return standing?.rank ?? Number.POSITIVE_INFINITY;
       return standing?.[sort.key] ?? -1;
     };
@@ -1153,7 +1154,16 @@ function MatchPlayersTable({
                 </th>
               );
             })}
-            {teamsAssigned ? <th className="px-3 py-2 text-center">Equipo</th> : null}
+            {teamsAssigned ? (() => {
+              const active = sort.key === "team";
+              return (
+                <th aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"} className="px-3 py-2 text-center">
+                  <button type="button" onClick={() => toggleSort("team")} className="inline-flex items-center gap-1 hover:text-white">
+                    Equipo<span aria-hidden="true" className={active ? "text-white" : "text-(--muted)/60"}>{active ? (sort.direction === "asc" ? "â†‘" : "â†“") : "â†•"}</span>
+                  </button>
+                </th>
+              );
+            })() : null}
             {hasActions ? <th className="px-3 py-2 text-center">Acciones</th> : null}
           </tr>
         </thead>
@@ -3582,6 +3592,7 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
 
   const pointsA = teamA.reduce((sum, row) => sum + (standingForMatchRow(row, data.players, standings)?.points ?? 0), 0);
   const pointsB = teamB.reduce((sum, row) => sum + (standingForMatchRow(row, data.players, standings)?.points ?? 0), 0);
+  const pointsDifference = Math.abs(pointsA - pointsB);
 
   function handleTeamChange(rowId: string, team: Team) {
     setRows((current) =>
@@ -3627,23 +3638,38 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
       <div className="space-y-4">
-        {/* Sugerencia preview */}
-        <TeamSuggestionPreview rows={rows} players={data.players} standings={standings} />
-
-        <div className="flex justify-between items-center bg-white/[0.04] p-3 rounded-md border border-(--border)">
-          <div className="flex gap-4 text-xs font-bold uppercase">
-            <span className="text-(--red)">Rojo: {pointsA} pts ({teamA.length} jug)</span>
-            <span className="text-(--gold)">Amarillo: {pointsB} pts ({teamB.length} jug)</span>
+        <section className="rounded-lg border border-(--border) bg-white/[0.04] p-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="grid flex-1 grid-cols-2 gap-3">
+              <div className="rounded-md border border-(--red)/35 bg-(--red)/10 px-3 py-2.5">
+                <p className="text-[10px] font-black uppercase tracking-wide text-(--red)">Equipo Rojo</p>
+                <p className="mt-1 text-xl font-black text-white">{teamA.length} <span className="text-xs text-(--muted)">jugadores</span></p>
+                <p className="text-xs font-bold text-(--red)">{pointsA} pts</p>
+              </div>
+              <div className="rounded-md border border-(--gold)/40 bg-(--gold)/10 px-3 py-2.5 text-right">
+                <p className="text-[10px] font-black uppercase tracking-wide text-(--gold)">Equipo Amarillo</p>
+                <p className="mt-1 text-xl font-black text-white">{teamB.length} <span className="text-xs text-(--muted)">jugadores</span></p>
+                <p className="text-xs font-bold text-(--gold)">{pointsB} pts</p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:justify-end">
+              <p className={`text-xs font-bold ${pointsDifference === 0 ? "text-(--green)" : "text-(--muted)"}`}>
+                {pointsDifference === 0 ? "Equipos equilibrados" : `Diferencia: ${pointsDifference} pts`}
+              </p>
+              <Button variant="secondary" onClick={resetBalancedTeams} disabled={isPending}>
+                <Sparkles size={16} />
+                Equilibrar por Ranking
+              </Button>
+            </div>
           </div>
-          <Button variant="secondary" onClick={resetBalancedTeams} disabled={isPending}>
-            <Sparkles size={16} />
-            Equilibrar por Ranking
-          </Button>
-        </div>
+        </section>
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           <Card className="space-y-3 border-t-2 border-t-(--red)/70 bg-(--red)/5">
-            <h2 className="font-bold text-(--red)">Equipo Rojo ({teamA.length})</h2>
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="font-bold text-(--red)">Equipo Rojo</h2>
+              <span className="text-xs font-black text-(--red)">{teamA.length} jug.</span>
+            </div>
             <div className="space-y-2">
               {teamA.map((row) => (
                 <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} />
@@ -3653,7 +3679,10 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
           </Card>
 
           <Card className="space-y-3 border-t-2 border-t-(--gold)/70 bg-(--gold)/5">
-            <h2 className="font-bold text-(--gold)">Equipo Amarillo ({teamB.length})</h2>
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="font-bold text-(--gold)">Equipo Amarillo</h2>
+              <span className="text-xs font-black text-(--gold)">{teamB.length} jug.</span>
+            </div>
             <div className="space-y-2">
               {teamB.map((row) => (
                 <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} />
@@ -3662,13 +3691,16 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
             </div>
           </Card>
 
-          <Card className="space-y-3 md:col-span-2 lg:col-span-1">
-            <h2 className="font-bold text-white">Sin equipo / Pendientes ({unassigned.length})</h2>
+          <Card className="space-y-3 border-t-2 border-t-white/25 md:col-span-2 lg:col-span-1">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="font-bold text-white">Sin equipo</h2>
+              <span className="text-xs font-black text-(--muted)">{unassigned.length} pendientes</span>
+            </div>
             <div className="space-y-2">
               {unassigned.map((row) => (
                 <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} />
               ))}
-              {unassigned.length === 0 ? <p className="text-sm text-(--muted) italic">Todos asignados</p> : null}
+              {unassigned.length === 0 ? <p className="rounded-md border border-(--green)/25 bg-(--green)/10 px-3 py-2 text-sm font-semibold text-(--green)">Todos los jugadores están asignados.</p> : null}
             </div>
           </Card>
         </div>
@@ -3682,7 +3714,7 @@ function TeamSelectorRow({ row, onChange, players, standings }: { row: MatchPlay
   const standing = standingForMatchRow(row, players, standings);
 
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-white/5 bg-white/[0.03] p-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-3 rounded-md border border-white/10 bg-white/[0.03] p-3">
       <div className="min-w-0">
         <p className="truncate font-semibold text-white">
           {row.name}
@@ -3692,29 +3724,32 @@ function TeamSelectorRow({ row, onChange, players, standings }: { row: MatchPlay
             </span>
           ) : null}
         </p>
-        <p className="text-xs text-(--muted)">{standing ? `${standing.points} pts` : "Sin ranking"}</p>
+        <p className="text-xs text-(--muted)">{standing ? `#${standing.rank} · ${standing.points} pts` : "Sin ranking"}</p>
       </div>
-      <div className="flex gap-1 shrink-0">
+      <div className="grid grid-cols-3 gap-1 rounded-md bg-black/20 p-1" role="group" aria-label={`Asignar equipo a ${row.name}`}>
         <button
           type="button"
           onClick={() => onChange("A")}
-          className={`h-8 px-3 text-xs font-black uppercase rounded transition ${row.team === "A" ? "bg-(--red) text-white" : "bg-white/[0.08] text-(--muted) hover:bg-white/[0.14]"}`}
+          aria-pressed={row.team === "A"}
+          className={`h-9 rounded px-2 text-[11px] font-black uppercase transition ${row.team === "A" ? "bg-(--red) text-white shadow-sm" : "text-(--muted) hover:bg-white/[0.10] hover:text-white"}`}
         >
           Rojo
         </button>
         <button
           type="button"
           onClick={() => onChange("B")}
-          className={`h-8 px-3 text-xs font-black uppercase rounded transition ${row.team === "B" ? "bg-(--gold) text-white" : "bg-white/[0.08] text-(--muted) hover:bg-white/[0.14]"}`}
+          aria-pressed={row.team === "B"}
+          className={`h-9 rounded px-2 text-[11px] font-black uppercase transition ${row.team === "B" ? "bg-(--gold) text-(--bg-deep) shadow-sm" : "text-(--muted) hover:bg-white/[0.10] hover:text-white"}`}
         >
           Amarillo
         </button>
         <button
           type="button"
           onClick={() => onChange("none")}
-          className={`h-8 px-3 text-xs font-black uppercase rounded transition ${row.team === "none" ? "bg-white/[0.2] text-white" : "bg-white/[0.08] text-(--muted) hover:bg-white/[0.14]"}`}
+          aria-pressed={row.team === "none"}
+          className={`h-9 rounded px-2 text-[11px] font-black uppercase transition ${row.team === "none" ? "bg-white/[0.2] text-white shadow-sm" : "text-(--muted) hover:bg-white/[0.10] hover:text-white"}`}
         >
-          Ninguno
+          Sin equipo
         </button>
       </div>
     </div>
