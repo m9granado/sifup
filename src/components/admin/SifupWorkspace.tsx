@@ -3664,13 +3664,13 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
           </div>
         </section>
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <Card className="space-y-3 border-t-2 border-t-(--red)/70 bg-(--red)/5">
-            <div className="flex items-baseline justify-between gap-3">
-              <h2 className="font-bold text-(--red)">Equipo Rojo</h2>
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          <Card className="space-y-2 border-t-2 border-t-(--red)/70 bg-(--red)/5 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-white"><span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-(--red)" />Equipo Rojo</h2>
               <span className="text-xs font-black text-(--red)">{teamA.length} jug.</span>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {teamA.map((row) => (
                 <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} />
               ))}
@@ -3678,12 +3678,12 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
             </div>
           </Card>
 
-          <Card className="space-y-3 border-t-2 border-t-(--gold)/70 bg-(--gold)/5">
-            <div className="flex items-baseline justify-between gap-3">
-              <h2 className="font-bold text-(--gold)">Equipo Amarillo</h2>
+          <Card className="space-y-2 border-t-2 border-t-(--gold)/70 bg-(--gold)/5 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-white"><span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-(--gold)" />Equipo Amarillo</h2>
               <span className="text-xs font-black text-(--gold)">{teamB.length} jug.</span>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {teamB.map((row) => (
                 <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} />
               ))}
@@ -3691,12 +3691,12 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
             </div>
           </Card>
 
-          <Card className="space-y-3 border-t-2 border-t-white/25 md:col-span-2 lg:col-span-1">
-            <div className="flex items-baseline justify-between gap-3">
-              <h2 className="font-bold text-white">Sin equipo</h2>
+          <Card className="space-y-2 border-t-2 border-t-white/25 p-3 md:col-span-2 lg:col-span-1">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-white"><span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-white/50" />Sin equipo</h2>
               <span className="text-xs font-black text-(--muted)">{unassigned.length} pendientes</span>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {unassigned.map((row) => (
                 <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} />
               ))}
@@ -3710,14 +3710,16 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
 }
 
 function TeamSelectorRow({ row, onChange, players, standings }: { row: MatchPlayer; onChange: (team: Team) => void; players: Player[]; standings: Map<string, PlayerStanding> }) {
-  const isArq = playerForMatchRow(row, players)?.isGoalkeeper === true;
+  const player = playerForMatchRow(row, players);
+  const isArq = player?.isGoalkeeper === true;
   const standing = standingForMatchRow(row, players, standings);
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border border-white/10 bg-white/[0.03] p-3">
+    <div className="flex items-center justify-between gap-2 rounded-md border border-white/10 bg-white/[0.03] px-2.5 py-2">
       <div className="min-w-0">
         <p className="truncate font-semibold text-white">
-          {row.name}
+          <span className="md:hidden">{row.name}</span>
+          {player ? <Link href={`/players/${player.id}`} className="hidden hover:text-(--green) hover:underline md:inline">{row.name}</Link> : <span className="hidden md:inline">{row.name}</span>}
           {isArq ? (
             <span className="ml-2 inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider gap-0.5" title="Arquero">
               🧤 ARQ
@@ -3726,30 +3728,36 @@ function TeamSelectorRow({ row, onChange, players, standings }: { row: MatchPlay
         </p>
         <p className="text-xs text-(--muted)">{standing ? `#${standing.rank} · ${standing.points} pts` : "Sin ranking"}</p>
       </div>
-      <div className="grid grid-cols-3 gap-1 rounded-md bg-black/20 p-1" role="group" aria-label={`Asignar equipo a ${row.name}`}>
+      <div className="flex shrink-0 items-center gap-1" role="group" aria-label={`Asignar equipo a ${row.name}`}>
         <button
           type="button"
           onClick={() => onChange("A")}
           aria-pressed={row.team === "A"}
-          className={`h-9 rounded px-2 text-[11px] font-black uppercase transition ${row.team === "A" ? "bg-(--red) text-white shadow-sm" : "text-(--muted) hover:bg-white/[0.10] hover:text-white"}`}
+          aria-label="Mover a Equipo Rojo"
+          title="Mover a Equipo Rojo"
+          className={`grid h-7 w-7 place-items-center rounded-full transition ${row.team === "A" ? "bg-(--red) ring-2 ring-(--red)/30 ring-offset-2 ring-offset-(--panel)" : "bg-(--red)/35 hover:bg-(--red)"}`}
         >
-          Rojo
+          <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-white/90" />
         </button>
         <button
           type="button"
           onClick={() => onChange("B")}
           aria-pressed={row.team === "B"}
-          className={`h-9 rounded px-2 text-[11px] font-black uppercase transition ${row.team === "B" ? "bg-(--gold) text-(--bg-deep) shadow-sm" : "text-(--muted) hover:bg-white/[0.10] hover:text-white"}`}
+          aria-label="Mover a Equipo Amarillo"
+          title="Mover a Equipo Amarillo"
+          className={`grid h-7 w-7 place-items-center rounded-full transition ${row.team === "B" ? "bg-(--gold) ring-2 ring-(--gold)/30 ring-offset-2 ring-offset-(--panel)" : "bg-(--gold)/35 hover:bg-(--gold)"}`}
         >
-          Amarillo
+          <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-white/90" />
         </button>
         <button
           type="button"
           onClick={() => onChange("none")}
           aria-pressed={row.team === "none"}
-          className={`h-9 rounded px-2 text-[11px] font-black uppercase transition ${row.team === "none" ? "bg-white/[0.2] text-white shadow-sm" : "text-(--muted) hover:bg-white/[0.10] hover:text-white"}`}
+          aria-label="Quitar del equipo"
+          title="Quitar del equipo"
+          className={`grid h-7 w-7 place-items-center rounded-full transition ${row.team === "none" ? "bg-white/35 ring-2 ring-white/20 ring-offset-2 ring-offset-(--panel)" : "bg-white/15 hover:bg-white/35"}`}
         >
-          Sin equipo
+          <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-white/90" />
         </button>
       </div>
     </div>
