@@ -1304,6 +1304,7 @@ function TeamAssignmentBoard({
   players,
   standings,
   onOpenDetails,
+  onMarkOut,
   onRemove,
   onAssociate,
   onAddPlayer,
