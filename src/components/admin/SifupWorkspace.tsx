@@ -1096,7 +1096,7 @@ function MatchPlayersTable({
   standings,
   teamsAssigned,
   onOpenDetails,
-  onRemove,
+  onMarkOut,
   onAssociate,
 }: {
   rows: MatchPlayer[];
@@ -1104,7 +1104,7 @@ function MatchPlayersTable({
   standings: Map<string, PlayerStanding>;
   teamsAssigned: boolean;
   onOpenDetails?: (row: MatchPlayer) => void;
-  onRemove?: (row: MatchPlayer) => void;
+  onMarkOut?: (row: MatchPlayer) => void;
   onAssociate?: (row: MatchPlayer) => void;
 }) {
   const [sort, setSort] = useState<{ key: MatchPlayerSortKey; direction: "asc" | "desc" }>({ key: "points", direction: "desc" });
@@ -1137,7 +1137,7 @@ function MatchPlayersTable({
     return (leftStanding?.rank ?? Number.POSITIVE_INFINITY) - (rightStanding?.rank ?? Number.POSITIVE_INFINITY);
   });
   const toggleSort = (key: MatchPlayerSortKey) => setSort((current) => ({ key, direction: current.key === key && current.direction === "desc" ? "asc" : "desc" }));
-  const hasActions = Boolean(onOpenDetails || onRemove || onAssociate);
+  const hasActions = Boolean(onOpenDetails || onMarkOut || onAssociate);
 
   return (
     <div className="overflow-x-auto rounded-lg border border-(--border)">
@@ -1187,7 +1187,7 @@ function MatchPlayersTable({
                     <div className="flex justify-center gap-1">
                       {onAssociate ? <button type="button" onClick={() => onAssociate(row)} className="rounded-md p-1.5 text-(--cyan) hover:bg-(--cyan)/15" aria-label={`Asociar ${playerName}`} title="Asociar jugador"><UserPlus size={16} /></button> : null}
                       {onOpenDetails ? <button type="button" onClick={() => onOpenDetails(row)} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14]" aria-label={`Editar ${playerName}`} title="Editar"><Pencil size={16} /></button> : null}
-                      {onRemove ? <button type="button" onClick={() => onRemove(row)} className="rounded-md p-1.5 text-(--red) hover:bg-(--red)/15" aria-label={`Quitar ${playerName} del partido`} title="Quitar"><UserMinus size={16} /></button> : null}
+                      {onMarkOut ? <button type="button" onClick={() => onMarkOut(row)} className="rounded-md p-1.5 text-(--red) hover:bg-(--red)/15" aria-label={`Marcar que ${playerName} no puede jugar`} title="Pasar a No pueden"><X size={16} /></button> : null}
                     </div>
                   </td>
                 ) : null}
@@ -1312,6 +1312,7 @@ function TeamAssignmentBoard({
   players: Player[];
   standings: Map<string, PlayerStanding>;
   onOpenDetails: (rowId: string) => void;
+  onMarkOut: (rowId: string) => void;
   onRemove: (rowId: string) => void;
   onAssociate: (rowId: string) => void;
   onAddPlayer: () => void;
@@ -1344,7 +1345,7 @@ function TeamAssignmentBoard({
         teamsAssigned={hasTeamsAssigned(rows)}
         onAssociate={(row) => onAssociate(row.id)}
         onOpenDetails={(row) => onOpenDetails(row.id)}
-        onRemove={(row) => onRemove(row.id)}
+        onMarkOut={(row) => onMarkOut(row.id)}
       />
       {outRows.length > 0 ? (
         <div className="space-y-2 rounded-md border border-white/10 bg-white/[0.03] p-3">
@@ -1699,6 +1700,14 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
     setRows((current) => current.filter((row) => row.id !== rowId));
   }
 
+  function markRowAsOut(rowId: string) {
+    setRows((current) => current.map((row) => (
+      row.id === rowId
+        ? { ...row, attendanceStatus: "out", team: "none", updatedAt: new Date().toISOString() }
+        : row
+    )));
+  }
+
   function buildMatchPlayerRow(player: Player): MatchPlayer {
     const now = new Date().toISOString();
     const monthly = player.paymentPlan === "monthly";
@@ -1884,6 +1893,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             players={data.players}
             standings={standings}
             onOpenDetails={(rowId) => setEditingIndex(rows.findIndex((row) => row.id === rowId))}
+            onMarkOut={markRowAsOut}
             onRemove={removeRow}
             onAddPlayer={() => setShowAddPlayer(true)}
             onAssociate={setAssociatingRowId}
