@@ -47,6 +47,13 @@ export function finalResultMessage(match: Match, result?: MatchResult) {
   return `SIFUP - Resultado final ${match.date}\nRojo ${result.scoreA} - ${result.scoreB} Amarillo\n${winner}${result.notes ? `\n${result.notes}` : ""}`;
 }
 
+export function standingsMessage(ranked: { rank: number; name: string; points: number; wins: number; draws: number; losses: number; winRate: number; played: number }[]) {
+  const now = new Date();
+  const monthLabel = `${monthNames[now.getMonth()]} ${now.getFullYear()}`;
+  const lines = ranked.map((p) => `${p.rank}. ${p.name} — ${p.points} pts | ${p.wins}V-${p.draws}E-${p.losses}D | ${p.winRate}%`);
+  return `SIFUP - Ranking ${monthLabel}\n\n${lines.join("\n")}`;
+}
+
 function labelPayment(status: MatchPlayer["paymentStatus"]) {
   if (status === "paid") return "pagado";
   if (status === "promised") return "prometido";
