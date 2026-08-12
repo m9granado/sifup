@@ -6,8 +6,9 @@ import { monthKey, weekLabel } from "./sifup-date";
 import { parseWhatsAppList } from "./parser";
 import { getSifupData, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment, savePlayer, mergePlayers as dbMergePlayers } from "./repository";
 import { newId, nextMatch, sortByWhatsappOrder, summarizeMatch } from "./store";
-import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, teamsMessage } from "./whatsapp";
-import type { AttendanceStatus, Match, MatchPlayer, MonthlyPayment, Player, Team } from "./types";
+import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, standingsMessage, teamsMessage } from "./whatsapp";
+import { calculatePlayerRecord } from "./standings";
+import type { AttendanceStatus, Match, MatchPlayer, MatchResult, MonthlyPayment, Player, Team, Winner } from "./types";
 
 export type ImportWhatsAppMatchInput = {
   message: string;
@@ -482,5 +483,245 @@ export async function mergePlayers({ sourcePlayerId, targetPlayerId }: { sourceP
   await dbMergePlayers(sourcePlayerId, targetPlayerId);
   revalidateSifupViews();
   return { success: true, message: "Jugadores fusionados exitosamente." };
+}
+
+export async function getMatchTeams(input: { matchId?: string; date?: string } = {}) {
+  const data = await getSifupData();
+  const match = resolveMatch(data.matches, input);
+  if (!match) throw new Error("No hay partidos registrados.");
+
+  const rows = sortByWhatsappOrder(data.matchPlayers.filter((row) => row.matchId === match.id));
+  const confirmed = rows.filter((row) => row.attendanceStatus === "confirmed");
+
+  return {
+    match,
+    teams: {
+      A: confirmed.filter((row) => row.team === "A").map(publicMatchPlayer),
+      B: confirmed.filter((row) => row.team === "B").map(publicMatchPlayer),
+      none: confirmed.filter((row) => row.team === "none").map(publicMatchPlayer),
+    },
+    messages: { teams: teamsMessage(match, rows) },
+    url: `${PUBLIC_BASE_URL}/matches/${match.id}`,
+  };
+}
+
+export type AssignPlayerTeamInput = {
+  name?: string;
+  playerId?: string;
+  team: Team;
+  matchId?: string;
+  date?: string;
+};
+
+export async function assignPlayerTeam(input: AssignPlayerTeamInput) {
+  if (!input.name && !input.playerId) throw new Error("Falta nombre o playerId del jugador.");
+
+  const data = await getSifupData();
+  const match = resolveMatch(data.matches, input);
+  if (!match) throw new Error("No hay partido para actualizar.");
+
+  const rows = data.matchPlayers.filter((row) => row.matchId === match.id);
+  let targetRow: MatchPlayer | undefined;
+  if (input.playerId) {
+    targetRow = rows.find((row) => row.playerId === input.playerId);
+  } else if (input.name) {
+    const known = findKnownPlayer(data.players, input.name);
+    targetRow = known
+      ? rows.find((row) => row.playerId === known.id)
+      : rows.find((row) => normalizeName(row.name) === normalizeName(input.name!));
+  }
+
+  if (!targetRow) throw new Error(`${input.name ?? input.playerId} no está en la lista del partido.`);
+
+  const previousTeam = targetRow.team;
+  const now = new Date().toISOString();
+  const updatedRows = rows.map((row) => (row.id === targetRow!.id ? { ...row, team: input.team, updatedAt: now } : row));
+
+  await saveMatchPlayers(match.id, updatedRows);
+  revalidateSifupViews(match.id);
+
+  const sorted = sortByWhatsappOrder(updatedRows);
+  const confirmed = sorted.filter((row) => row.attendanceStatus === "confirmed");
+  const teamName = (t: Team) => (t === "A" ? "Rojo" : t === "B" ? "Amarillo" : "Sin equipo");
+
+  return {
+    status: "updated",
+    player: targetRow.name,
+    previousTeam,
+    team: input.team,
+    note: `${targetRow.name} movido de ${teamName(previousTeam)} a ${teamName(input.team)}.`,
+    teams: {
+      A: confirmed.filter((row) => row.team === "A").map(publicMatchPlayer),
+      B: confirmed.filter((row) => row.team === "B").map(publicMatchPlayer),
+      none: confirmed.filter((row) => row.team === "none").map(publicMatchPlayer),
+    },
+    messages: { teams: teamsMessage(match, sorted) },
+  };
+}
+
+export type SetMatchResultInput = {
+  scoreA: number;
+  scoreB: number;
+  matchId?: string;
+  date?: string;
+  notes?: string;
+};
+
+export async function setMatchResult(input: SetMatchResultInput) {
+  const data = await getSifupData();
+  const match = resolveMatch(data.matches, input);
+  if (!match) throw new Error("No hay partido para actualizar.");
+
+  const winner: Winner = input.scoreA > input.scoreB ? "A" : input.scoreA < input.scoreB ? "B" : "draw";
+  const existing = data.results.find((r) => r.matchId === match.id);
+  const result: MatchResult = {
+    id: existing?.id ?? newId("result"),
+    matchId: match.id,
+    scoreA: input.scoreA,
+    scoreB: input.scoreB,
+    winner,
+    notes: input.notes ?? existing?.notes ?? "",
+  };
+
+  const rows = data.matchPlayers.filter((row) => row.matchId === match.id);
+  await saveMatchPlayers(match.id, rows, result);
+  revalidateSifupViews(match.id);
+
+  return {
+    status: "saved",
+    match: { id: match.id, date: match.date, weekLabel: match.weekLabel },
+    result: { scoreA: result.scoreA, scoreB: result.scoreB, winner: result.winner, notes: result.notes },
+    messages: { finalResult: finalResultMessage(match, result) },
+  };
+}
+
+export type GetPlayerStandingsInput = {
+  limit?: number;
+  minPlayed?: number;
+};
+
+export async function getPlayerStandings({ limit = 20, minPlayed = 1 }: GetPlayerStandingsInput = {}) {
+  const data = await getSifupData();
+
+  const ranked = data.players
+    .map((player) => {
+      const appearances = data.matchPlayers.filter(
+        (row) => row.playerId === player.id && row.attendanceStatus === "confirmed",
+      );
+      const record = calculatePlayerRecord(appearances, data.results);
+      return { id: player.id, name: player.name, isGoalkeeper: player.isGoalkeeper, ...record };
+    })
+    .filter((p) => p.played >= minPlayed)
+    .sort((a, b) => b.points - a.points || b.winRate - a.winRate || b.played - a.played)
+    .slice(0, limit)
+    .map((p, index) => ({ rank: index + 1, ...p }));
+
+  return {
+    total: ranked.length,
+    standings: ranked,
+    whatsappMessage: standingsMessage(ranked),
+  };
+}
+
+function suggestedTeamForRank(pairIndex: number, positionInPair: number): Team {
+  if (positionInPair > 1) return "none";
+  const invertedPair = pairIndex % 2 === 1;
+  if (!invertedPair) return positionInPair === 0 ? "A" : "B";
+  return positionInPair === 0 ? "B" : "A";
+}
+
+export async function generateBalancedTeams(input: { matchId?: string; date?: string } = {}) {
+  const data = await getSifupData();
+  const match = resolveMatch(data.matches, input);
+  if (!match) throw new Error("No hay partidos registrados.");
+
+  // Global standings: sort all players by points to assign ranks
+  const globalRanks = new Map<string, { rank: number; points: number }>();
+  data.players
+    .map((player) => {
+      const appearances = data.matchPlayers.filter(
+        (row) => row.playerId === player.id && row.attendanceStatus === "confirmed",
+      );
+      const record = calculatePlayerRecord(appearances, data.results);
+      return { id: player.id, points: record.points };
+    })
+    .sort((a, b) => b.points - a.points)
+    .forEach((p, index) => globalRanks.set(p.id, { rank: index + 1, points: p.points }));
+
+  const getStanding = (row: MatchPlayer) => {
+    const pid = data.players.find((p) => p.id === row.playerId)?.id;
+    return pid ? (globalRanks.get(pid) ?? { rank: Number.MAX_SAFE_INTEGER, points: 0 }) : { rank: Number.MAX_SAFE_INTEGER, points: 0 };
+  };
+
+  const rows = data.matchPlayers.filter((row) => row.matchId === match.id);
+  const confirmed = rows.filter((row) => row.attendanceStatus === "confirmed");
+
+  const isGoalkeeper = (row: MatchPlayer) => data.players.find((p) => p.id === row.playerId)?.isGoalkeeper === true;
+  const goalkeepers = confirmed.filter((row) => isGoalkeeper(row));
+  const fieldPlayers = confirmed.filter((row) => !isGoalkeeper(row));
+
+  const sortByRank = (a: MatchPlayer, b: MatchPlayer) => {
+    const sa = getStanding(a);
+    const sb = getStanding(b);
+    if (sa.rank !== sb.rank) return sa.rank - sb.rank;
+    if (sa.points !== sb.points) return sb.points - sa.points;
+    return (a.whatsappOrder || 0) - (b.whatsappOrder || 0);
+  };
+
+  const sortedField = [...fieldPlayers].sort(sortByRank);
+  const sortedGoalkeepers = [...goalkeepers].sort(sortByRank);
+
+  // Serpentine assignment for field players
+  const teamAssignment = new Map<string, Team>();
+  sortedField.forEach((row, index) => {
+    teamAssignment.set(row.id, suggestedTeamForRank(Math.floor(index / 2), index % 2));
+  });
+
+  // Determine weaker team by summing field-player global points
+  let pointsA = 0;
+  let pointsB = 0;
+  sortedField.forEach((row) => {
+    const t = teamAssignment.get(row.id);
+    const pts = getStanding(row).points;
+    if (t === "A") pointsA += pts;
+    else if (t === "B") pointsB += pts;
+  });
+
+  const weakerTeam: Team = pointsA <= pointsB ? "A" : "B";
+  const strongerTeam: Team = weakerTeam === "A" ? "B" : "A";
+
+  // Strongest goalkeeper goes to weaker team (against the #1 player's team)
+  sortedGoalkeepers.forEach((row, index) => {
+    let t: Team;
+    if (index === 0) t = weakerTeam;
+    else if (index === 1) t = strongerTeam;
+    else t = index % 2 === 0 ? weakerTeam : strongerTeam;
+    teamAssignment.set(row.id, t);
+  });
+
+  const now = new Date().toISOString();
+  const updatedRows = rows.map((row) => {
+    const newTeam = teamAssignment.get(row.id);
+    return newTeam !== undefined ? { ...row, team: newTeam, updatedAt: now } : row;
+  });
+
+  await saveMatchPlayers(match.id, updatedRows);
+  revalidateSifupViews(match.id);
+
+  const sorted = sortByWhatsappOrder(updatedRows);
+  const confirmedSorted = sorted.filter((row) => row.attendanceStatus === "confirmed");
+  const assigned = confirmedSorted.filter((row) => row.team !== "none").length;
+
+  return {
+    status: "updated",
+    match: { id: match.id, date: match.date, weekLabel: match.weekLabel },
+    note: `${assigned} jugadores asignados a equipos equilibrados desde el ranking.`,
+    teams: {
+      A: confirmedSorted.filter((row) => row.team === "A").map(publicMatchPlayer),
+      B: confirmedSorted.filter((row) => row.team === "B").map(publicMatchPlayer),
+      none: confirmedSorted.filter((row) => row.team === "none").map(publicMatchPlayer),
+    },
+    messages: { teams: teamsMessage(match, sorted) },
+  };
 }
 

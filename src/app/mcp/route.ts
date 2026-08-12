@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { addPlayerToMatch, findPlayer, getNextMatchSummary, getPendingPayments, importWhatsAppMatch, registerMatchPayment, registerMonthlyPayment, mergePlayers } from "@/lib/sifup-service";
+import { addPlayerToMatch, assignPlayerTeam, findPlayer, generateBalancedTeams, getMatchTeams, getNextMatchSummary, getPendingPayments, getPlayerStandings, importWhatsAppMatch, mergePlayers, registerMatchPayment, registerMonthlyPayment, setMatchResult } from "@/lib/sifup-service";
 import { PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "@/lib/sifup-constants";
 
 type ToolResult = {
@@ -159,6 +159,77 @@ function createServer() {
       },
     },
     (input) => runTool(() => getNextMatchSummary(input)),
+  );
+
+  server.registerTool(
+    "get_match_teams",
+    {
+      title: "Ver equipos del partido",
+      description: "Muestra la composicion actual de los equipos Rojo (A) y Amarillo (B) del partido, mas los jugadores sin equipo asignado. Incluye el mensaje WhatsApp copiable.",
+      inputSchema: {
+        matchId: z.string().optional().describe("ID del partido. Si se omite, se usa el proximo partido."),
+        date: z.string().optional().describe("Fecha YYYY-MM-DD si no se entrega matchId."),
+      },
+    },
+    (input) => runTool(() => getMatchTeams(input)),
+  );
+
+  server.registerTool(
+    "assign_player_team",
+    {
+      title: "Mover jugador de equipo",
+      description: "Cambia el equipo asignado a un jugador en el partido (Rojo=A, Amarillo=B, o sin equipo). Usa esto para ajustar manualmente la composicion de los equipos.",
+      inputSchema: {
+        name: z.string().optional().describe("Nombre o apodo del jugador (o usa playerId)."),
+        playerId: z.string().optional().describe("ID del jugador si se conoce."),
+        team: z.enum(["A", "B", "none"]).describe("Equipo destino: A (Rojo), B (Amarillo) o none (sin equipo)."),
+        matchId: z.string().optional().describe("ID del partido. Si se omite, se usa el proximo partido."),
+        date: z.string().optional().describe("Fecha YYYY-MM-DD si no se entrega matchId."),
+      },
+    },
+    (input) => runTool(() => assignPlayerTeam(input)),
+  );
+
+  server.registerTool(
+    "set_match_result",
+    {
+      title: "Registrar resultado del partido",
+      description: "Guarda el marcador final del partido. El equipo ganador se determina automaticamente segun los goles (scoreA > scoreB → gana Rojo, scoreA < scoreB → gana Amarillo, iguales → empate). Genera el mensaje de resultado para WhatsApp.",
+      inputSchema: {
+        scoreA: z.number().int().min(0).describe("Goles del equipo Rojo (A)."),
+        scoreB: z.number().int().min(0).describe("Goles del equipo Amarillo (B)."),
+        matchId: z.string().optional().describe("ID del partido. Si se omite, se usa el proximo partido."),
+        date: z.string().optional().describe("Fecha YYYY-MM-DD si no se entrega matchId."),
+        notes: z.string().optional().describe("Notas adicionales sobre el resultado (opcional)."),
+      },
+    },
+    (input) => runTool(() => setMatchResult(input)),
+  );
+
+  server.registerTool(
+    "get_player_standings",
+    {
+      title: "Ranking de jugadores",
+      description: "Devuelve el ranking actual de todos los jugadores con sus estadisticas (puntos, victorias, empates, derrotas, porcentaje) y un mensaje listo para copiar en WhatsApp.",
+      inputSchema: {
+        limit: z.number().int().positive().max(50).optional().describe("Cantidad maxima de jugadores a mostrar. Default: 20."),
+        minPlayed: z.number().int().min(0).optional().describe("Minimo de partidos jugados para aparecer en el ranking. Default: 1."),
+      },
+    },
+    (input) => runTool(() => getPlayerStandings(input)),
+  );
+
+  server.registerTool(
+    "generate_balanced_teams",
+    {
+      title: "Generar equipos equilibrados",
+      description: "Genera y guarda equipos balanceados automaticamente usando el ranking global de jugadores. Distribuye los jugadores de campo en serpentin (1→Rojo, 2→Amarillo, 3→Amarillo, 4→Rojo...) y asigna el arquero mas fuerte al equipo mas debil (en contra del jugador #1). Sobreescribe los equipos actuales.",
+      inputSchema: {
+        matchId: z.string().optional().describe("ID del partido. Si se omite, se usa el proximo partido."),
+        date: z.string().optional().describe("Fecha YYYY-MM-DD si no se entrega matchId."),
+      },
+    },
+    (input) => runTool(() => generateBalancedTeams(input)),
   );
 
   return server;
