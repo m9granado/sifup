@@ -2136,7 +2136,6 @@ function RoyalNightPanel({
   isAdmin,
   commit,
   data,
-  onAssignTeam,
 }: {
   matchId: string;
   teams: MatchTeam[];
@@ -2147,7 +2146,6 @@ function RoyalNightPanel({
   isAdmin: boolean;
   commit: (data: SifupData) => void;
   data: SifupData;
-  onAssignTeam: (rowId: string, teamId: string) => void;
 }) {
   const [error, setError] = useState("");
   const [finalRanks, setFinalRanks] = useState<Record<string, "" | 1 | 2 | 3>>(() => {
@@ -2158,15 +2156,6 @@ function RoyalNightPanel({
   const teamsById = useMemo(() => new Map(teams.map((team) => [team.id, team])), [teams]);
   const inProgress = games.find((game) => game.status === "in_progress");
   const closed = teams.length === 3 && teams.every((team) => team.finalRank);
-
-  function updateTeam(teamId: string, patch: Partial<MatchTeam>) {
-    const now = new Date().toISOString();
-    const nextTeams = data.matchTeams.map((team) => (team.id === teamId ? { ...team, ...patch, updatedAt: now } : team));
-    commit({ ...data, matchTeams: nextTeams });
-    const team = nextTeams.find((item) => item.id === teamId);
-    if (!team) return;
-    saveMatchTeamsAction(matchId, [team]).catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar el equipo."));
-  }
 
   function startGame(homeTeamId: string, awayTeamId: string, waitingTeamId?: string) {
     const now = new Date().toISOString();
@@ -2228,11 +2217,19 @@ function RoyalNightPanel({
 
   return (
     <Card className="mt-4 space-y-4">
-      <div>
-        <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Rey de la Cancha</p>
-        <h2 className="mt-1 text-xl font-black text-white">Equipos</h2>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Rey de la Cancha</p>
+          <h2 className="mt-1 text-xl font-black text-white">Equipos</h2>
+        </div>
+        {isAdmin ? (
+          <Link href={`/matches/${matchId}/teams`} className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
+            <Users size={16} />
+            Administrar equipos
+          </Link>
+        ) : null}
       </div>
-      <RoyalTeamRoster teams={teams} rows={rows} players={players} standings={standings} isAdmin={isAdmin} onRenameTeam={updateTeam} onAssignTeam={onAssignTeam} />
+      <RoyalTeamRoster teams={teams} rows={rows} players={players} standings={standings} isAdmin={false} onRenameTeam={() => {}} onAssignTeam={() => {}} />
 
       {error ? <p className="rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
@@ -2350,10 +2347,6 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const { previous, next } = adjacentMatches(data.matches, currentMatch.id);
   const matchTeams = data.matchTeams.filter((team) => team.matchId === currentMatch.id).sort((a, b) => a.seq - b.seq);
   const matchGames = data.matchGames.filter((game) => game.matchId === currentMatch.id);
-
-  function assignRoyalTeam(rowId: string, teamId: string) {
-    updateRow(rows.findIndex((row) => row.id === rowId), { teamId });
-  }
 
   function updateRow(index: number, patch: Partial<MatchPlayer>) {
     setRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch, updatedAt: new Date().toISOString() } : row)));
@@ -2531,7 +2524,6 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
           isAdmin={isAdmin}
           commit={commit}
           data={data}
-          onAssignTeam={assignRoyalTeam}
         />
       ) : null}
 
