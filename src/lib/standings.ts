@@ -1,8 +1,10 @@
 import { DRAW_POINTS, LOSS_POINTS, WIN_POINTS } from "./sifup-constants";
-import type { MatchPlayer, MatchResult } from "./types";
+import type { MatchPlayer, MatchResult, MatchTeam } from "./types";
 
 type ScoredAppearance = Pick<MatchPlayer, "matchId" | "team">;
 type MatchOutcome = Pick<MatchResult, "matchId" | "winner">;
+type RoyalAppearance = Pick<MatchPlayer, "matchId" | "teamId">;
+type RoyalTeam = Pick<MatchTeam, "id" | "finalRank">;
 
 export type PlayerRecord = {
   played: number;
@@ -45,6 +47,62 @@ export function calculatePlayerRecord(appearances: ScoredAppearance[], results: 
     draws,
     losses,
     winRate: appearances.length ? Math.round((wins / appearances.length) * 100) : 0,
+    points,
+    form: decided ? `${wins}-${draws}-${losses}` : "0-0-0",
+  };
+}
+
+/**
+ * Puntaje de Rey de la Cancha: el equipo campeon de la noche (finalRank 1) suma
+ * WIN_POINTS por jugador, los otros dos equipos (finalRank 2 o 3) suman LOSS_POINTS
+ * cada uno -- misma escala que la regla semanal clasica, sin distincion de puntos
+ * entre 2do y 3er lugar. Noches sin cerrar (finalRank aun no definido) no suman.
+ */
+export function calculateRoyalRecord(appearances: RoyalAppearance[], teams: RoyalTeam[]): PlayerRecord {
+  const teamsById = new Map(teams.map((team) => [team.id, team]));
+  let wins = 0;
+  let losses = 0;
+  let points = 0;
+
+  appearances.forEach((row) => {
+    if (!row.teamId) return;
+    const team = teamsById.get(row.teamId);
+    if (!team || !team.finalRank) return;
+
+    if (team.finalRank === 1) {
+      wins += 1;
+      points += WIN_POINTS;
+    } else {
+      losses += 1;
+      points += LOSS_POINTS;
+    }
+  });
+
+  const decided = wins + losses;
+  return {
+    played: appearances.length,
+    wins,
+    draws: 0,
+    losses,
+    winRate: appearances.length ? Math.round((wins / appearances.length) * 100) : 0,
+    points,
+    form: decided ? `${wins}-0-${losses}` : "0-0-0",
+  };
+}
+
+export function combinePlayerRecords(a: PlayerRecord, b: PlayerRecord): PlayerRecord {
+  const played = a.played + b.played;
+  const wins = a.wins + b.wins;
+  const draws = a.draws + b.draws;
+  const losses = a.losses + b.losses;
+  const points = a.points + b.points;
+  const decided = wins + draws + losses;
+  return {
+    played,
+    wins,
+    draws,
+    losses,
+    winRate: played ? Math.round((wins / played) * 100) : 0,
     points,
     form: decided ? `${wins}-${draws}-${losses}` : "0-0-0",
   };

@@ -1,25 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, MapPin, Medal, MessageCircle, Pencil, Plus, Save, Share, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
 import {
   createMatchAction,
+  finishMatchGameAction,
   markMatchPlayerPaidAction,
   saveMatchAction,
   saveMatchDetailAction,
+  saveMatchTeamsAction,
   saveMonthlyPaymentAction,
   savePlayerAction,
+  setMatchFinalStandingAction,
+  startMatchGameAction,
+  updateMatchGameScoreAction,
   mergePlayersAction,
 } from "@/app/actions";
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
 import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
-import { calculatePlayerRecord, pointsForMatchRow } from "@/lib/standings";
+import { calculatePlayerRecord, calculateRoyalRecord, combinePlayerRecords, pointsForMatchRow } from "@/lib/standings";
 import { matchSummaryMessage, teamsMessage } from "@/lib/whatsapp";
-import { COURT_COST, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, SQUAD_TARGET } from "@/lib/sifup-constants";
-import type { ClubExpense, Match, MatchPlayer, MatchResult, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
+import { COURT_COST, LOSS_POINTS, MATCH_TEAM_COLOR_CLASSES, MATCH_TEAM_COLOR_LABEL, MATCH_TEAM_DEFAULT_COLORS, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, ROYAL_GAME_TIME_LIMIT_MIN, ROYAL_GOAL_DIFF_TO_WIN, ROYAL_SQUAD_TARGET, SQUAD_TARGET, WIN_POINTS } from "@/lib/sifup-constants";
+import type { ClubExpense, GameEndReason, Match, MatchFormat, MatchGame, MatchPlayer, MatchResult, MatchTeam, MatchTeamColor, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
 
 const sampleInput = `martes 30 junio, 21 horas, agrupacion de sordos:
 
@@ -137,11 +142,25 @@ function isMonthlyMatchRow(row: MatchPlayer, players: Player[]) {
   return playerForMatchRow(row, players)?.paymentPlan === "monthly" || row.note.toLowerCase().includes("mensualidad");
 }
 
+function matchFormatById(data: SifupData) {
+  return new Map(data.matches.map((match) => [match.id, match.matchFormat]));
+}
+
+function combinedRecordForAppearances(appearances: MatchPlayer[], data: SifupData, formatById: Map<string, Match["matchFormat"]>) {
+  const classicAppearances = appearances.filter((row) => (formatById.get(row.matchId) ?? "clasico") === "clasico");
+  const royalAppearances = appearances.filter((row) => formatById.get(row.matchId) === "rey_de_la_cancha");
+  return combinePlayerRecords(
+    calculatePlayerRecord(classicAppearances, data.results),
+    calculateRoyalRecord(royalAppearances, data.matchTeams),
+  );
+}
+
 function buildPlayerStandings(data: SifupData) {
+  const formatById = matchFormatById(data);
   const ranked = data.players
     .map((player) => {
       const appearances = data.matchPlayers.filter((row) => matchRowBelongsToPlayer(row, player, data.players) && row.attendanceStatus === "confirmed");
-      const record = calculatePlayerRecord(appearances, data.results);
+      const record = combinedRecordForAppearances(appearances, data, formatById);
       return {
         id: player.id,
         name: player.name,
@@ -158,7 +177,7 @@ function buildPlayerStandings(data: SifupData) {
 
 function computePlayerStats(player: Player, data: SifupData) {
   const appearances = data.matchPlayers.filter((row) => matchRowBelongsToPlayer(row, player, data.players) && row.attendanceStatus === "confirmed");
-  const record = calculatePlayerRecord(appearances, data.results);
+  const record = combinedRecordForAppearances(appearances, data, matchFormatById(data));
   const matchDebt = appearances.reduce((sum, row) => sum + Math.max(row.amountDue - row.amountPaid, 0), 0);
   const monthlyDebt = data.monthlyPayments.filter((payment) => payment.playerId === player.id).reduce((sum, payment) => sum + Math.max(payment.expectedAmount - payment.amountPaid, 0), 0);
   return {
@@ -281,6 +300,80 @@ function applyBalancedTeams<T extends TeamAssignableRow>(rows: T[], players: Pla
   }));
 }
 
+type RoyalAssignableRow = Pick<MatchPlayer, "attendanceStatus" | "name" | "playerId" | "whatsappOrder" | "team" | "teamId">;
+type RankedRoyalTeamRow<T extends RoyalAssignableRow> = {
+  row: T;
+  index: number;
+  standing?: PlayerStanding;
+  suggestedTeamIndex: 0 | 1 | 2;
+};
+
+function suggestedRoyalTeamIndex(groupIndex: number, positionInGroup: number): 0 | 1 | 2 {
+  const order = groupIndex % 2 === 1 ? [2, 1, 0] : [0, 1, 2];
+  return order[positionInGroup] as 0 | 1 | 2;
+}
+
+function buildRankedRoyalTeamRows<T extends RoyalAssignableRow>(rows: T[], players: Player[], standings: Map<string, PlayerStanding>) {
+  const isGoalkeeper = (r: T) => playerForMatchRow(r, players)?.isGoalkeeper === true;
+
+  const mapped = rows
+    .map((row, index) => ({
+      row,
+      index,
+      standing: standingForMatchRow(row, players, standings),
+    }))
+    .filter((item) => item.row.attendanceStatus === "confirmed");
+
+  const goalkeepers = mapped.filter((item) => isGoalkeeper(item.row));
+  const fieldPlayers = mapped.filter((item) => !isGoalkeeper(item.row));
+
+  const sortByRank = (a: typeof mapped[0], b: typeof mapped[0]) => {
+    const rankA = a.standing?.rank ?? Number.MAX_SAFE_INTEGER;
+    const rankB = b.standing?.rank ?? Number.MAX_SAFE_INTEGER;
+    if (rankA !== rankB) return rankA - rankB;
+    const pointsA = a.standing?.points ?? -1;
+    const pointsB = b.standing?.points ?? -1;
+    if (pointsA !== pointsB) return pointsB - pointsA;
+    return rowOrder(a.row, a.index) - rowOrder(b.row, b.index) || a.row.name.localeCompare(b.row.name);
+  };
+
+  goalkeepers.sort(sortByRank);
+  fieldPlayers.sort(sortByRank);
+
+  // Reparto serpentina en grupos de 3: jugador 1->equipo0, 2->equipo1, 3->equipo2, 4->equipo2, 5->equipo1, 6->equipo0...
+  const rankedFieldPlayers = fieldPlayers.map((item, index): RankedRoyalTeamRow<T> => ({
+    ...item,
+    suggestedTeamIndex: suggestedRoyalTeamIndex(Math.floor(index / 3), index % 3),
+  }));
+
+  const pointsByTeam: [number, number, number] = [0, 1, 2].map((teamIndex) =>
+    rankedFieldPlayers
+      .filter((item) => item.suggestedTeamIndex === teamIndex)
+      .reduce((sum, item) => sum + (item.standing?.points ?? 0), 0),
+  ) as [number, number, number];
+
+  // Arqueros: se reparten priorizando reforzar siempre al equipo con menos puntos acumulados
+  const rankedGoalkeepers = goalkeepers.map((item): RankedRoyalTeamRow<T> => {
+    const order = ([0, 1, 2] as const).slice().sort((a, b) => pointsByTeam[a] - pointsByTeam[b]);
+    const suggestedTeamIndex = order[0];
+    pointsByTeam[suggestedTeamIndex] += item.standing?.points ?? 0;
+    return { ...item, suggestedTeamIndex };
+  });
+
+  return [...rankedGoalkeepers, ...rankedFieldPlayers];
+}
+
+function applyBalancedRoyalTeams<T extends RoyalAssignableRow>(rows: T[], players: Player[], standings: Map<string, PlayerStanding>, teamIds: [string, string, string]): T[] {
+  const assignments = new Map<number, string>();
+  buildRankedRoyalTeamRows(rows, players, standings).forEach((item) => {
+    assignments.set(item.index, teamIds[item.suggestedTeamIndex]);
+  });
+  return rows.map((row, index) => ({
+    ...row,
+    team: "none",
+    teamId: row.attendanceStatus === "confirmed" ? assignments.get(index) : undefined,
+  }));
+}
 
 function pendingForMatchRow(row: MatchPlayer) {
   return Math.max(row.amountDue - row.amountPaid, 0);
@@ -661,6 +754,7 @@ export function MatchesPage({ initialData }: InitialDataProps) {
             courtCost: latest.courtCost,
             courtPrepaid: true,
             notes: "",
+            matchFormat: "clasico",
             createdAt: now,
             updatedAt: now,
           };
@@ -844,6 +938,85 @@ function NewMatchTeamSuggestion<T extends TeamAssignableRow>({ rows, players, st
   );
 }
 
+type RoyalTeamDraft = { id: string; name: string; color: MatchTeamColor };
+
+function NewMatchRoyalTeamSuggestion<T extends RoyalAssignableRow>({
+  rows,
+  players,
+  standings,
+  teams,
+  onRenameTeam,
+  onRecolorTeam,
+}: {
+  rows: T[];
+  players: Player[];
+  standings: Map<string, PlayerStanding>;
+  teams: [RoyalTeamDraft, RoyalTeamDraft, RoyalTeamDraft];
+  onRenameTeam: (index: 0 | 1 | 2, name: string) => void;
+  onRecolorTeam: (index: 0 | 1 | 2, color: MatchTeamColor) => void;
+}) {
+  const teamIds = teams.map((team) => team.id) as [string, string, string];
+  const rankedRows = buildRankedRoyalTeamRows(rows, players, standings);
+
+  if (rankedRows.length === 0) {
+    return (
+      <div className="rounded-md border border-(--border) bg-white/[0.04] p-3">
+        <p className="text-sm font-semibold text-white">Sin jugadores confirmados para sugerir equipos.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 rounded-md border border-(--border) bg-white/[0.04] p-3">
+      <div>
+        <p className="text-sm font-black uppercase tracking-wide text-white">Sugerencia automatica · 3 equipos</p>
+        <p className="mt-1 text-xs text-(--muted)">Reparto serpentina por ranking en grupos de 3. Los arqueros refuerzan siempre al equipo con menos puntos.</p>
+      </div>
+      <div className="grid gap-2 lg:grid-cols-3">
+        {teamIds.map((teamId, teamIndex) => {
+          const teamRows = rankedRows.filter((item) => teamId === teamIds[item.suggestedTeamIndex]);
+          const points = teamRows.reduce((sum, item) => sum + (item.standing?.points ?? 0), 0);
+          const colorClasses = MATCH_TEAM_COLOR_CLASSES[teams[teamIndex].color];
+          return (
+            <div key={teamId} className={`space-y-2 rounded-md border p-2 ${colorClasses.border} ${colorClasses.bg}`}>
+              <div className="flex items-center gap-2">
+                <input
+                  value={teams[teamIndex].name}
+                  onChange={(event) => onRenameTeam(teamIndex as 0 | 1 | 2, event.target.value)}
+                  className="min-w-0 flex-1 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-xs font-black uppercase tracking-wide text-white outline-none"
+                />
+                <select
+                  value={teams[teamIndex].color}
+                  onChange={(event) => onRecolorTeam(teamIndex as 0 | 1 | 2, event.target.value as MatchTeamColor)}
+                  className="rounded-md border border-white/10 bg-black/20 px-1 py-1 text-[10px] font-bold text-white outline-none"
+                >
+                  {(Object.keys(MATCH_TEAM_COLOR_LABEL) as MatchTeamColor[]).map((color) => (
+                    <option key={color} value={color}>{MATCH_TEAM_COLOR_LABEL[color]}</option>
+                  ))}
+                </select>
+              </div>
+              <p className={`text-xs font-black uppercase ${colorClasses.text}`}>{teamRows.length} jug · {points} pts</p>
+              <div className="space-y-1">
+                {teamRows.map((item) => {
+                  const isArq = playerForMatchRow(item.row, players)?.isGoalkeeper === true;
+                  return (
+                    <div key={`${item.index}-${item.row.name}`} className="rounded border border-white/10 bg-black/10 px-2 py-1">
+                      <p className="truncate text-xs font-semibold text-white">
+                        #{item.standing?.rank ?? "SR"} {item.row.name}
+                        {isArq ? <span className="ml-1 text-[8px] font-black text-amber-500 uppercase">ARQ</span> : null}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function NewMatchPage({ initialData }: InitialDataProps) {
   const router = useRouter();
   const { data, commit } = useSifupData(initialData);
@@ -852,20 +1025,39 @@ export function NewMatchPage({ initialData }: InitialDataProps) {
   const [match, setMatch] = useState({ date: "", time: "21:00", location: "", totalCost: COURT_COST, notes: "" });
   const [rows, setRows] = useState<Omit<MatchPlayer, "id" | "matchId" | "createdAt" | "updatedAt">[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
+  const [matchFormat, setMatchFormat] = useState<MatchFormat>("clasico");
+  const [royalTeams, setRoyalTeams] = useState<[RoyalTeamDraft, RoyalTeamDraft, RoyalTeamDraft]>(
+    () => [0, 1, 2].map((index) => ({ id: newId("team"), name: `Equipo ${index + 1}`, color: MATCH_TEAM_DEFAULT_COLORS[index] })) as [RoyalTeamDraft, RoyalTeamDraft, RoyalTeamDraft],
+  );
   const standings = useMemo(() => buildPlayerStandings(data), [data]);
+  const royalTeamIds = useMemo(() => royalTeams.map((team) => team.id) as [string, string, string], [royalTeams]);
+
+  function balanceRows<T extends RoyalAssignableRow & TeamAssignableRow>(source: T[]): T[] {
+    return matchFormat === "rey_de_la_cancha"
+      ? applyBalancedRoyalTeams(source, data.players, standings, royalTeamIds)
+      : applyBalancedTeams(source, data.players, standings);
+  }
 
   function parse() {
     const parsed = parseWhatsAppList(raw, PER_MATCH_AMOUNT);
     setMatch({ ...parsed.match, totalCost: COURT_COST });
-    setRows(applyBalancedTeams(parsed.players, data.players, standings));
+    setRows(balanceRows(parsed.players));
     setErrors(parsed.errors);
   }
 
   function updateRow(index: number, patch: Partial<(typeof rows)[number]>) {
     setRows((current) => {
       const nextRows = current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row));
-      return applyBalancedTeams(nextRows, data.players, standings);
+      return balanceRows(nextRows);
     });
+  }
+
+  function renameRoyalTeam(index: 0 | 1 | 2, name: string) {
+    setRoyalTeams((current) => current.map((team, teamIndex) => (teamIndex === index ? { ...team, name } : team)) as [RoyalTeamDraft, RoyalTeamDraft, RoyalTeamDraft]);
+  }
+
+  function recolorRoyalTeam(index: 0 | 1 | 2, color: MatchTeamColor) {
+    setRoyalTeams((current) => current.map((team, teamIndex) => (teamIndex === index ? { ...team, color } : team)) as [RoyalTeamDraft, RoyalTeamDraft, RoyalTeamDraft]);
   }
 
   function save() {
@@ -887,10 +1079,11 @@ export function NewMatchPage({ initialData }: InitialDataProps) {
       courtCost: COURT_COST,
       courtPrepaid: true,
       notes: match.notes,
+      matchFormat,
       createdAt: now,
       updatedAt: now,
     };
-    const balancedRows = applyBalancedTeams(rows, data.players, standings);
+    const balancedRows = balanceRows(rows);
     const nextRows: MatchPlayer[] = balancedRows.map((row) => {
       const player = findKnownPlayer(data.players, row.name);
       const monthly = player?.paymentPlan === "monthly";
@@ -907,10 +1100,24 @@ export function NewMatchPage({ initialData }: InitialDataProps) {
         updatedAt: now,
       };
     });
+    const nextTeams: MatchTeam[] | undefined = matchFormat === "rey_de_la_cancha"
+      ? royalTeams.map((team, index) => ({
+          id: team.id,
+          matchId,
+          name: team.name,
+          color: team.color,
+          seq: index + 1,
+          createdAt: now,
+          updatedAt: now,
+        }))
+      : undefined;
     startTransition(async () => {
       try {
-        await createMatchAction(nextMatch, nextRows);
-        commit(replaceMatchPlayers(upsertMatch(data, nextMatch), matchId, nextRows));
+        await createMatchAction(nextMatch, nextRows, nextTeams);
+        commit({
+          ...replaceMatchPlayers(upsertMatch(data, nextMatch), matchId, nextRows),
+          matchTeams: nextTeams ? [...data.matchTeams, ...nextTeams] : data.matchTeams,
+        });
         router.push(`/matches/${matchId}`);
       } catch (error) {
         setErrors([error instanceof Error ? error.message : "No se pudo guardar el partido."]);
@@ -921,6 +1128,22 @@ export function NewMatchPage({ initialData }: InitialDataProps) {
   return (
     <>
       <PageTitle title="Nuevo partido" description="Pega la lista WhatsApp, revisa la tabla editable y guarda en la base." />
+      <div className="mb-4 inline-flex rounded-md border border-(--border) bg-white/[0.04] p-1 text-sm font-bold">
+        <button
+          type="button"
+          onClick={() => setMatchFormat("clasico")}
+          className={`rounded px-3 py-1.5 transition ${matchFormat === "clasico" ? "bg-(--green) text-black" : "text-(--muted) hover:text-white"}`}
+        >
+          Clasico (2 equipos)
+        </button>
+        <button
+          type="button"
+          onClick={() => setMatchFormat("rey_de_la_cancha")}
+          className={`rounded px-3 py-1.5 transition ${matchFormat === "rey_de_la_cancha" ? "bg-(--green) text-black" : "text-(--muted) hover:text-white"}`}
+        >
+          Rey de la Cancha (3 equipos)
+        </button>
+      </div>
       <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
         <Card className="space-y-3">
           <textarea
@@ -935,7 +1158,11 @@ export function NewMatchPage({ initialData }: InitialDataProps) {
           {errors.map((error) => <p key={error} className="rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p>)}
         </Card>
         <div className="space-y-4">
-          <NewMatchTeamSuggestion rows={rows} players={data.players} standings={standings} />
+          {matchFormat === "rey_de_la_cancha" ? (
+            <NewMatchRoyalTeamSuggestion rows={rows} players={data.players} standings={standings} teams={royalTeams} onRenameTeam={renameRoyalTeam} onRecolorTeam={recolorRoyalTeam} />
+          ) : (
+            <NewMatchTeamSuggestion rows={rows} players={data.players} standings={standings} />
+          )}
           <MatchEditor match={match} setMatch={setMatch} rows={rows} updateRow={updateRow} knownLocations={data.matches.map((item) => item.location)} lastLocation={data.matches[0]?.location ?? ""} />
         </div>
       </div>
@@ -1395,16 +1622,22 @@ function AddPlayerModal({
   onAddExisting: (player: Player) => void;
   onCreateAndAdd: (name: string, phone: string) => void;
 }) {
+  const [query, setQuery] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const normalizedQuery = query.trim().toLocaleLowerCase("es-CL");
+  const filteredCandidates = candidates.filter((player) => (
+    !normalizedQuery || `${player.name} ${player.nickname}`.toLocaleLowerCase("es-CL").includes(normalizedQuery)
+  ));
   return (
     <Modal title="Agregar jugador al partido" onClose={onClose}>
       <div className="space-y-4">
         <div className="space-y-2">
           <p className="text-sm font-medium text-(--muted)">Jugadores existentes</p>
+          <Input label="Buscar jugador" value={query} onChange={setQuery} />
           <div className="max-h-56 space-y-1 overflow-auto">
             {candidates.length === 0 ? <p className="text-sm text-(--muted)">Todos los jugadores activos ya estan en este partido.</p> : null}
-            {candidates.map((player) => (
+            {filteredCandidates.map((player) => (
               <button
                 key={player.id}
                 type="button"
@@ -1415,6 +1648,7 @@ function AddPlayerModal({
                 <Plus size={16} className="text-(--muted)" />
               </button>
             ))}
+            {candidates.length > 0 && filteredCandidates.length === 0 ? <p className="py-4 text-center text-sm text-(--muted)">No hay jugadores que coincidan.</p> : null}
           </div>
         </div>
         <div className="space-y-2 border-t border-(--border) pt-3">
@@ -1555,10 +1789,52 @@ function teamRankingTotal(rows: MatchPlayer[], players: Player[], standings: Map
     .reduce((sum, row) => sum + (standingForMatchRow(row, players, standings)?.points ?? 0), 0);
 }
 
+function royalTeamRankingTotal(rows: MatchPlayer[], players: Player[], standings: Map<string, PlayerStanding>, teamId: string) {
+  return rows
+    .filter((row) => row.teamId === teamId && row.attendanceStatus === "confirmed")
+    .reduce((sum, row) => sum + (standingForMatchRow(row, players, standings)?.points ?? 0), 0);
+}
+
+function RoyalHeroTeams({ teams, rows, players, standings }: { teams: MatchTeam[]; rows: MatchPlayer[]; players: Player[]; standings: Map<string, PlayerStanding> }) {
+  if (teams.length === 0) return null;
+  const sorted = [...teams].sort((a, b) => a.seq - b.seq);
+  const closed = sorted.length === 3 && sorted.every((team) => team.finalRank);
+  const ordered = closed ? [...sorted].sort((a, b) => (a.finalRank ?? 0) - (b.finalRank ?? 0)) : sorted;
+
+  return (
+    <div className="mt-5 grid gap-3 sm:grid-cols-3">
+      {ordered.map((team) => {
+        const colorClasses = MATCH_TEAM_COLOR_CLASSES[team.color];
+        const teamRows = rows.filter((row) => row.teamId === team.id && row.attendanceStatus === "confirmed");
+        const points = royalTeamRankingTotal(rows, players, standings, team.id);
+        const rankLabel = team.finalRank === 1 ? "1° · Campeon" : team.finalRank === 2 ? "2° lugar" : team.finalRank === 3 ? "3° lugar" : null;
+        const awardedPoints = team.finalRank === 1 ? WIN_POINTS : team.finalRank ? LOSS_POINTS : null;
+        return (
+          <div key={team.id} className={`rounded-lg border p-4 ${colorClasses.border} ${colorClasses.bg}`}>
+            <p className={`text-sm font-black uppercase tracking-wide ${colorClasses.text}`}>{team.name}</p>
+            {rankLabel ? (
+              <>
+                <p className="mt-2 text-xl font-black leading-none text-white">{rankLabel}</p>
+                <p className="mt-1 text-xs font-bold uppercase text-(--muted)">{awardedPoints} pts por jugador</p>
+              </>
+            ) : (
+              <>
+                <p className="mt-2 text-2xl font-black leading-none text-white">{teamRows.length}</p>
+                <p className="mt-1 text-xs font-bold uppercase text-(--muted)">jugadores · {points} pts</p>
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function MatchHero({
   match,
   rows,
   result,
+  matchTeams,
   players,
   standings,
   isAdmin,
@@ -1571,6 +1847,7 @@ function MatchHero({
   match: Match;
   rows: MatchPlayer[];
   result?: MatchResult;
+  matchTeams: MatchTeam[];
   players: Player[];
   standings: Map<string, PlayerStanding>;
   isAdmin: boolean;
@@ -1582,13 +1859,14 @@ function MatchHero({
 }) {
   const summary = summarizeMatch(rows);
   const upcoming = matchIsUpcoming(match);
+  const isRoyal = match.matchFormat === "rey_de_la_cancha";
   const showResult = Boolean(result && !upcoming);
   const teamA = rows.filter((row) => row.team === "A" && row.attendanceStatus === "confirmed");
   const teamB = rows.filter((row) => row.team === "B" && row.attendanceStatus === "confirmed");
   const pointsA = teamRankingTotal(rows, players, standings, "A");
   const pointsB = teamRankingTotal(rows, players, standings, "B");
   const confirmed = summary.confirmedCount;
-  const missing = Math.max(SQUAD_TARGET - confirmed, 0);
+  const missing = Math.max((isRoyal ? ROYAL_SQUAD_TARGET : SQUAD_TARGET) - confirmed, 0);
 
   return (
     <section className="overflow-hidden rounded-xl border border-(--border) bg-(--panel) shadow-(--shadow)">
@@ -1649,7 +1927,9 @@ function MatchHero({
             </div>
           </div>
 
-          {hasTeamsAssigned(rows) || showResult ? (
+          {isRoyal ? (
+            <RoyalHeroTeams teams={matchTeams} rows={rows} players={players} standings={standings} />
+          ) : hasTeamsAssigned(rows) || showResult ? (
           <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
             <div className="rounded-lg border border-(--red)/35 bg-(--red)/10 p-4">
               <p className="text-sm font-black uppercase tracking-wide text-(--red)">Equipo Rojo</p>
@@ -1672,6 +1952,375 @@ function MatchHero({
   );
 }
 
+function formatElapsed(ms: number) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function LiveTimer({ startedAt }: { startedAt: string }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const elapsedMs = now - new Date(startedAt).getTime();
+  const limitMs = ROYAL_GAME_TIME_LIMIT_MIN * 60_000;
+  const color = elapsedMs >= limitMs ? "text-(--red)" : elapsedMs >= limitMs - 2 * 60_000 ? "text-(--gold)" : "text-white";
+
+  return <span className={`font-black tabular-nums ${color}`}>{formatElapsed(elapsedMs)}</span>;
+}
+
+function GameWinnerHint({ game, teamsById }: { game: MatchGame; teamsById: Map<string, MatchTeam> }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const elapsedMs = now - new Date(game.startedAt).getTime();
+  const suggestedTeamId = suggestGameWinner(game, elapsedMs, game.homeTeamId, game.awayTeamId);
+  return (
+    <p className="text-center text-xs text-(--muted)">
+      Sugerido: gana {teamsById.get(suggestedTeamId)?.name} (dif. 2 goles o 10 min, empate se lo queda quien defiende la cancha)
+    </p>
+  );
+}
+
+function suggestGameWinner(game: { scoreHome: number; scoreAway: number }, elapsedMs: number, homeTeamId: string, awayTeamId: string) {
+  const diff = game.scoreHome - game.scoreAway;
+  if (Math.abs(diff) >= ROYAL_GOAL_DIFF_TO_WIN) return diff > 0 ? homeTeamId : awayTeamId;
+  if (elapsedMs >= ROYAL_GAME_TIME_LIMIT_MIN * 60_000) {
+    if (diff !== 0) return diff > 0 ? homeTeamId : awayTeamId;
+    return homeTeamId;
+  }
+  return diff >= 0 ? homeTeamId : awayTeamId;
+}
+
+function suggestEndReason(game: { scoreHome: number; scoreAway: number }): GameEndReason {
+  return Math.abs(game.scoreHome - game.scoreAway) >= ROYAL_GOAL_DIFF_TO_WIN ? "goal_diff" : "time_limit";
+}
+
+function suggestFinalOrder(teams: MatchTeam[], games: MatchGame[]): string[] {
+  const winsByTeam = new Map(teams.map((team) => [team.id, 0]));
+  games.forEach((game) => {
+    if (game.status === "finished" && game.winnerTeamId) {
+      winsByTeam.set(game.winnerTeamId, (winsByTeam.get(game.winnerTeamId) ?? 0) + 1);
+    }
+  });
+  return [...teams].sort((a, b) => (winsByTeam.get(b.id) ?? 0) - (winsByTeam.get(a.id) ?? 0)).map((team) => team.id);
+}
+
+function RoyalTeamRoster({
+  teams,
+  rows,
+  players,
+  standings,
+  isAdmin,
+  onRenameTeam,
+  onAssignTeam,
+}: {
+  teams: MatchTeam[];
+  rows: MatchPlayer[];
+  players: Player[];
+  standings: Map<string, PlayerStanding>;
+  isAdmin: boolean;
+  onRenameTeam: (teamId: string, patch: Partial<Pick<MatchTeam, "name" | "color">>) => void;
+  onAssignTeam: (rowId: string, teamId: string) => void;
+}) {
+  const confirmedRows = rows.filter((row) => row.attendanceStatus === "confirmed");
+  return (
+    <div className="grid gap-3 lg:grid-cols-3">
+      {teams.map((team) => {
+        const colorClasses = MATCH_TEAM_COLOR_CLASSES[team.color];
+        const teamRows = confirmedRows.filter((row) => row.teamId === team.id);
+        const points = royalTeamRankingTotal(rows, players, standings, team.id);
+        return (
+          <div key={team.id} className={`space-y-2 rounded-md border p-3 ${colorClasses.border} ${colorClasses.bg}`}>
+            {isAdmin ? (
+              <div className="flex items-center gap-2">
+                <input
+                  value={team.name}
+                  onChange={(event) => onRenameTeam(team.id, { name: event.target.value })}
+                  className="min-w-0 flex-1 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-xs font-black uppercase tracking-wide text-white outline-none"
+                />
+                <select
+                  value={team.color}
+                  onChange={(event) => onRenameTeam(team.id, { color: event.target.value as MatchTeamColor })}
+                  className="rounded-md border border-white/10 bg-black/20 px-1 py-1 text-[10px] font-bold text-white outline-none"
+                >
+                  {(Object.keys(MATCH_TEAM_COLOR_LABEL) as MatchTeamColor[]).map((color) => (
+                    <option key={color} value={color}>{MATCH_TEAM_COLOR_LABEL[color]}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <p className={`text-sm font-black uppercase tracking-wide ${colorClasses.text}`}>{team.name}</p>
+            )}
+            <p className={`text-xs font-black uppercase ${colorClasses.text}`}>{teamRows.length} jug · {points} pts</p>
+            <ul className="space-y-1">
+              {teamRows.map((row) => {
+                const isArq = playerForMatchRow(row, players)?.isGoalkeeper === true;
+                return (
+                  <li key={row.id} className="flex items-center justify-between gap-2 rounded border border-white/10 bg-black/10 px-2 py-1">
+                    <span className="truncate text-xs font-semibold text-white">
+                      {row.name}
+                      {isArq ? <span className="ml-1 text-[8px] font-black text-amber-500 uppercase">ARQ</span> : null}
+                    </span>
+                    {isAdmin ? (
+                      <select
+                        value={team.id}
+                        onChange={(event) => onAssignTeam(row.id, event.target.value)}
+                        className="rounded border border-white/10 bg-black/30 px-1 py-0.5 text-[10px] font-bold text-white outline-none"
+                      >
+                        {teams.map((option) => (
+                          <option key={option.id} value={option.id}>{option.name}</option>
+                        ))}
+                      </select>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RoyalGameHistory({ games, teamsById }: { games: MatchGame[]; teamsById: Map<string, MatchTeam> }) {
+  const finished = [...games].filter((game) => game.status === "finished").sort((a, b) => a.seq - b.seq);
+  if (finished.length === 0) {
+    return <p className="text-sm text-(--muted)">Todavia no hay juegos cerrados esta noche.</p>;
+  }
+  return (
+    <div className="space-y-2">
+      {finished.map((game) => {
+        const home = teamsById.get(game.homeTeamId);
+        const away = teamsById.get(game.awayTeamId);
+        const winner = teamsById.get(game.winnerTeamId ?? "");
+        const durationMs = game.endedAt ? new Date(game.endedAt).getTime() - new Date(game.startedAt).getTime() : 0;
+        return (
+          <div key={game.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-white/10 bg-black/10 px-3 py-2 text-sm">
+            <span className="font-bold text-white">
+              #{game.seq} {home?.name ?? "?"} {game.scoreHome} - {game.scoreAway} {away?.name ?? "?"}
+            </span>
+            <span className="text-xs font-bold uppercase text-(--muted)">
+              gana {winner?.name ?? "?"} · {game.endReason === "goal_diff" ? "dif. de gol" : "tiempo"} · {formatElapsed(durationMs)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RoyalNightPanel({
+  matchId,
+  teams,
+  games,
+  rows,
+  players,
+  standings,
+  isAdmin,
+  commit,
+  data,
+  onAssignTeam,
+}: {
+  matchId: string;
+  teams: MatchTeam[];
+  games: MatchGame[];
+  rows: MatchPlayer[];
+  players: Player[];
+  standings: Map<string, PlayerStanding>;
+  isAdmin: boolean;
+  commit: (data: SifupData) => void;
+  data: SifupData;
+  onAssignTeam: (rowId: string, teamId: string) => void;
+}) {
+  const [error, setError] = useState("");
+  const [finalRanks, setFinalRanks] = useState<Record<string, "" | 1 | 2 | 3>>(() => {
+    if (teams.length !== 3) return {};
+    const suggested = suggestFinalOrder(teams, games);
+    return { [suggested[0]]: 1, [suggested[1]]: 2, [suggested[2]]: 3 };
+  });
+  const teamsById = useMemo(() => new Map(teams.map((team) => [team.id, team])), [teams]);
+  const inProgress = games.find((game) => game.status === "in_progress");
+  const closed = teams.length === 3 && teams.every((team) => team.finalRank);
+
+  function updateTeam(teamId: string, patch: Partial<MatchTeam>) {
+    const now = new Date().toISOString();
+    const nextTeams = data.matchTeams.map((team) => (team.id === teamId ? { ...team, ...patch, updatedAt: now } : team));
+    commit({ ...data, matchTeams: nextTeams });
+    const team = nextTeams.find((item) => item.id === teamId);
+    if (!team) return;
+    saveMatchTeamsAction(matchId, [team]).catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar el equipo."));
+  }
+
+  function startGame(homeTeamId: string, awayTeamId: string, waitingTeamId?: string) {
+    const now = new Date().toISOString();
+    const game: MatchGame = {
+      id: newId("game"),
+      matchId,
+      seq: games.length + 1,
+      homeTeamId,
+      awayTeamId,
+      waitingTeamId,
+      scoreHome: 0,
+      scoreAway: 0,
+      status: "in_progress",
+      startedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+    commit({ ...data, matchGames: [...data.matchGames, game] });
+    startMatchGameAction(matchId, game).catch((err) => setError(err instanceof Error ? err.message : "No se pudo iniciar el juego."));
+  }
+
+  function updateScore(gameId: string, scoreHome: number, scoreAway: number) {
+    const nextGames = data.matchGames.map((game) => (game.id === gameId ? { ...game, scoreHome, scoreAway } : game));
+    commit({ ...data, matchGames: nextGames });
+    updateMatchGameScoreAction(matchId, gameId, scoreHome, scoreAway).catch((err) => setError(err instanceof Error ? err.message : "No se pudo actualizar el marcador."));
+  }
+
+  function finishGame(game: MatchGame, winnerTeamId: string) {
+    const now = new Date().toISOString();
+    const endReason = suggestEndReason(game);
+    const loserTeamId = winnerTeamId === game.homeTeamId ? game.awayTeamId : game.homeTeamId;
+    const nextGames = data.matchGames.map((item) => (item.id === game.id ? { ...item, status: "finished" as const, endedAt: now, endReason, winnerTeamId, updatedAt: now } : item));
+    commit({ ...data, matchGames: nextGames });
+    finishMatchGameAction(matchId, game.id, { scoreHome: game.scoreHome, scoreAway: game.scoreAway, endReason, winnerTeamId, endedAt: now })
+      .then(() => {
+        const waitingTeamId = game.waitingTeamId;
+        if (waitingTeamId) startGame(winnerTeamId, waitingTeamId, loserTeamId);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo cerrar el juego."));
+  }
+
+  function closeNight() {
+    const ranks = Object.entries(finalRanks).filter(([, rank]) => rank !== "") as [string, 1 | 2 | 3][];
+    const values = ranks.map(([, rank]) => rank);
+    if (ranks.length !== 3 || new Set(values).size !== 3) {
+      setError("Asigna 1°, 2° y 3° lugar sin repetir equipo.");
+      return;
+    }
+    const now = new Date().toISOString();
+    const nextTeams = data.matchTeams.map((team) => {
+      const rank = ranks.find(([teamId]) => teamId === team.id)?.[1];
+      return rank ? { ...team, finalRank: rank, updatedAt: now } : team;
+    });
+    commit({ ...data, matchTeams: nextTeams });
+    setMatchFinalStandingAction(matchId, ranks.map(([teamId, finalRank]) => ({ teamId, finalRank })))
+      .then(() => setError(""))
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo cerrar la noche."));
+  }
+
+  return (
+    <Card className="mt-4 space-y-4">
+      <div>
+        <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Rey de la Cancha</p>
+        <h2 className="mt-1 text-xl font-black text-white">Equipos</h2>
+      </div>
+      <RoyalTeamRoster teams={teams} rows={rows} players={players} standings={standings} isAdmin={isAdmin} onRenameTeam={updateTeam} onAssignTeam={onAssignTeam} />
+
+      {error ? <p className="rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
+
+      {closed ? null : isAdmin && inProgress ? (
+        <div className="space-y-3 rounded-md border border-(--green)/40 bg-(--green)/10 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-black uppercase text-white">Juego #{inProgress.seq} en curso</p>
+            <LiveTimer startedAt={inProgress.startedAt} />
+          </div>
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+            <div className="text-center">
+              <p className="text-xs font-black uppercase text-(--muted)">{teamsById.get(inProgress.homeTeamId)?.name}</p>
+              <div className="mt-1 flex items-center justify-center gap-2">
+                <Button variant="secondary" onClick={() => updateScore(inProgress.id, Math.max(0, inProgress.scoreHome - 1), inProgress.scoreAway)}>-</Button>
+                <span className="w-8 text-center text-2xl font-black text-white">{inProgress.scoreHome}</span>
+                <Button variant="secondary" onClick={() => updateScore(inProgress.id, inProgress.scoreHome + 1, inProgress.scoreAway)}>+</Button>
+              </div>
+            </div>
+            <span className="text-sm font-black text-(--muted)">VS</span>
+            <div className="text-center">
+              <p className="text-xs font-black uppercase text-(--muted)">{teamsById.get(inProgress.awayTeamId)?.name}</p>
+              <div className="mt-1 flex items-center justify-center gap-2">
+                <Button variant="secondary" onClick={() => updateScore(inProgress.id, inProgress.scoreHome, Math.max(0, inProgress.scoreAway - 1))}>-</Button>
+                <span className="w-8 text-center text-2xl font-black text-white">{inProgress.scoreAway}</span>
+                <Button variant="secondary" onClick={() => updateScore(inProgress.id, inProgress.scoreHome, inProgress.scoreAway + 1)}>+</Button>
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-center gap-2">
+            {([inProgress.homeTeamId, inProgress.awayTeamId] as const).map((teamId) => (
+              <Button
+                key={teamId}
+                onClick={() => finishGame(inProgress, teamId)}
+              >
+                <Trophy size={16} />
+                Gana {teamsById.get(teamId)?.name}
+              </Button>
+            ))}
+          </div>
+          <GameWinnerHint game={inProgress} teamsById={teamsById} />
+        </div>
+      ) : isAdmin && teams.length === 3 ? (
+        <div className="space-y-2 rounded-md border border-(--border) bg-white/[0.04] p-4">
+          <p className="text-sm font-black uppercase text-white">Iniciar juego</p>
+          <div className="flex flex-wrap gap-2">
+            {teams.map((waiting) => {
+              const [home, away] = teams.filter((team) => team.id !== waiting.id);
+              return (
+                <Button key={waiting.id} variant="secondary" onClick={() => startGame(home.id, away.id, waiting.id)}>
+                  {home.name} vs {away.name} · espera {waiting.name}
+                </Button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      <div>
+        <p className="mb-2 text-xs font-black uppercase tracking-wide text-(--muted)">Historial de juegos</p>
+        <RoyalGameHistory games={games} teamsById={teamsById} />
+      </div>
+
+      {closed ? (
+        <div className="rounded-md border border-(--green)/40 bg-(--green)/10 p-4">
+          <p className="text-sm font-black uppercase text-white">Noche cerrada</p>
+          <p className="mt-1 text-xs text-(--muted)">Los puntos ya se sumaron al ranking historico.</p>
+        </div>
+      ) : isAdmin && !inProgress && teams.length === 3 ? (
+        <div className="space-y-2 rounded-md border border-(--border) bg-white/[0.04] p-4">
+          <p className="text-sm font-black uppercase text-white">Cerrar la noche</p>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {teams.map((team) => (
+              <label key={team.id} className="space-y-1 text-xs font-bold text-(--muted)">
+                <span>{team.name}</span>
+                <select
+                  value={finalRanks[team.id] ?? ""}
+                  onChange={(event) => setFinalRanks((current) => ({ ...current, [team.id]: event.target.value ? (Number(event.target.value) as 1 | 2 | 3) : "" }))}
+                  className="h-9 w-full rounded-md border border-(--border) bg-(--panel-strong) px-2 text-sm text-white outline-none"
+                >
+                  <option value="">Sin definir</option>
+                  <option value={1}>1° · Campeon</option>
+                  <option value={2}>2° lugar</option>
+                  <option value={3}>3° lugar</option>
+                </select>
+              </label>
+            ))}
+          </div>
+          <Button onClick={closeNight}><Trophy size={16} />Cerrar noche y otorgar puntos</Button>
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
 export function MatchDetailPage({ id, initialData }: { id: string } & InitialDataProps) {
   const isAdmin = useIsAdmin();
   const { data, commit } = useSifupData(initialData);
@@ -1691,7 +2340,14 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
 
   if (!match) return <PageTitle title="Partido no encontrado" description="No existe en la base de datos." />;
   const currentMatch = match;
+  const isRoyal = currentMatch.matchFormat === "rey_de_la_cancha";
   const { previous, next } = adjacentMatches(data.matches, currentMatch.id);
+  const matchTeams = data.matchTeams.filter((team) => team.matchId === currentMatch.id).sort((a, b) => a.seq - b.seq);
+  const matchGames = data.matchGames.filter((game) => game.matchId === currentMatch.id);
+
+  function assignRoyalTeam(rowId: string, teamId: string) {
+    updateRow(rows.findIndex((row) => row.id === rowId), { teamId });
+  }
 
   function updateRow(index: number, patch: Partial<MatchPlayer>) {
     setRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch, updatedAt: new Date().toISOString() } : row)));
@@ -1825,6 +2481,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         match={currentMatch}
         rows={rows}
         result={result}
+        matchTeams={matchTeams}
         players={data.players}
         standings={standings}
         isAdmin={isAdmin}
@@ -1836,6 +2493,21 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       />
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: equipos y resultado son solo lectura." /> : null}
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
+
+      {isRoyal ? (
+        <RoyalNightPanel
+          matchId={currentMatch.id}
+          teams={matchTeams}
+          games={matchGames}
+          rows={rows}
+          players={data.players}
+          standings={standings}
+          isAdmin={isAdmin}
+          commit={commit}
+          data={data}
+          onAssignTeam={assignRoyalTeam}
+        />
+      ) : null}
 
       {editingMatch ? (
         <Modal title="Editar partido" onClose={() => setEditingMatch(null)}>
@@ -1855,7 +2527,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       ) : null}
 
       {/* Resultado */}
-      {!matchIsUpcoming(currentMatch) ? (
+      {!isRoyal && !matchIsUpcoming(currentMatch) ? (
         <div className="mt-4">
           {result ? (
             <Card className="flex items-center justify-between gap-3">
@@ -1905,12 +2577,12 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       </Card>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <CopyBlock title="Resumen de equipos" text={teamsMessage(currentMatch, rows)} />
+        {!isRoyal ? <CopyBlock title="Resumen de equipos" text={teamsMessage(currentMatch, rows)} /> : null}
         <CopyBlock title="Resumen del partido" text={matchSummaryMessage(currentMatch, rows)} />
       </div>
 
       {/* Equipos informativos al final */}
-      {hasTeamsAssigned(rows) ? (
+      {!isRoyal && hasTeamsAssigned(rows) ? (
         <Card className="mt-4 space-y-3">
           <h2 className="font-bold text-white text-lg">Equipos Definidos</h2>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -3595,6 +4267,57 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
   const currentMatch = match;
 
   const standings = buildPlayerStandings(data);
+
+  if (currentMatch.matchFormat === "rey_de_la_cancha") {
+    const matchTeams = data.matchTeams.filter((team) => team.matchId === currentMatch.id).sort((a, b) => a.seq - b.seq);
+
+    function renameRoyalTeam(teamId: string, patch: Partial<Pick<MatchTeam, "name" | "color">>) {
+      const now = new Date().toISOString();
+      const nextTeams = data.matchTeams.map((team) => (team.id === teamId ? { ...team, ...patch, updatedAt: now } : team));
+      commit({ ...data, matchTeams: nextTeams });
+      const team = nextTeams.find((item) => item.id === teamId);
+      if (team) saveMatchTeamsAction(currentMatch.id, [team]).catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar el equipo."));
+    }
+
+    function assignRoyalTeam(rowId: string, teamId: string) {
+      setRows((current) => current.map((row) => (row.id === rowId ? { ...row, teamId, updatedAt: new Date().toISOString() } : row)));
+    }
+
+    function saveRoyalRoster() {
+      setError("");
+      startTransition(async () => {
+        try {
+          await saveMatchDetailAction(currentMatch.id, rows);
+          commit({ ...data, matchPlayers: data.matchPlayers.map((item) => rows.find((r) => r.id === item.id) ?? item) });
+          router.push(`/matches/${currentMatch.id}`);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Error al guardar equipos.");
+        }
+      });
+    }
+
+    return (
+      <>
+        <PageTitle
+          title={`Equipos - ${currentMatch.weekLabel || currentMatch.date}`}
+          description={`${currentMatch.date} - ${currentMatch.location} - Rey de la Cancha`}
+          action={
+            <div className="flex gap-2">
+              <Link href={`/matches/${currentMatch.id}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
+                Volver al partido
+              </Link>
+              <Button onClick={saveRoyalRoster} disabled={isPending}>
+                <Save size={16} />
+                Guardar equipos
+              </Button>
+            </div>
+          }
+        />
+        {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
+        <RoyalTeamRoster teams={matchTeams} rows={rows} players={data.players} standings={standings} isAdmin onRenameTeam={renameRoyalTeam} onAssignTeam={assignRoyalTeam} />
+      </>
+    );
+  }
 
   const confirmedRows = rows.filter((r) => r.attendanceStatus === "confirmed");
   const teamA = confirmedRows.filter((row) => row.team === "A");

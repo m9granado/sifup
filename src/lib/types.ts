@@ -4,6 +4,10 @@ export type PaymentStatus = "paid" | "unpaid" | "promised";
 export type PaymentPlan = "monthly" | "perMatch";
 export type Team = "A" | "B" | "none";
 export type Winner = "A" | "B" | "draw";
+export type MatchFormat = "clasico" | "rey_de_la_cancha";
+export type MatchTeamColor = "red" | "gold" | "green" | "cyan";
+export type GameStatus = "in_progress" | "finished";
+export type GameEndReason = "goal_diff" | "time_limit";
 
 export type Match = {
   id: string;
@@ -17,6 +21,36 @@ export type Match = {
   courtCost: number;
   courtPrepaid: boolean;
   notes: string;
+  matchFormat: MatchFormat;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MatchTeam = {
+  id: string;
+  matchId: string;
+  name: string;
+  color: MatchTeamColor;
+  seq: number;
+  finalRank?: 1 | 2 | 3;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MatchGame = {
+  id: string;
+  matchId: string;
+  seq: number;
+  homeTeamId: string;
+  awayTeamId: string;
+  waitingTeamId?: string;
+  scoreHome: number;
+  scoreAway: number;
+  status: GameStatus;
+  startedAt: string;
+  endedAt?: string;
+  endReason?: GameEndReason;
+  winnerTeamId?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -47,6 +81,7 @@ export type MatchPlayer = {
   amountPaid: number;
   note: string;
   team: Team;
+  teamId?: string;
   whatsappOrder: number;
   goals?: number;
   createdAt: string;
@@ -105,6 +140,8 @@ export type SifupData = {
   players: Player[];
   matchPlayers: MatchPlayer[];
   results: MatchResult[];
+  matchTeams: MatchTeam[];
+  matchGames: MatchGame[];
   monthlyPayments: MonthlyPayment[];
   clubExpenses: ClubExpense[];
   clubFinance: ClubFinance;

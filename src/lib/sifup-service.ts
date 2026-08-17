@@ -39,6 +39,7 @@ export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MA
     courtCost: existing?.courtCost ?? COURT_COST,
     courtPrepaid: existing?.courtPrepaid ?? true,
     notes: existing?.notes || "Importado desde WhatsApp por MCP.",
+    matchFormat: existing?.matchFormat ?? "clasico",
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };

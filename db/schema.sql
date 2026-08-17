@@ -70,6 +70,41 @@ create table if not exists match_results (
   notes text not null default ''
 );
 
+alter table matches add column if not exists match_format text not null default 'clasico' check (match_format in ('clasico', 'rey_de_la_cancha'));
+
+create table if not exists match_teams (
+  id text primary key,
+  match_id text not null references matches(id) on delete cascade,
+  name text not null,
+  color text not null default 'red' check (color in ('red', 'gold', 'green', 'cyan')),
+  seq integer not null default 1,
+  final_rank integer check (final_rank between 1 and 3),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (match_id, seq)
+);
+
+alter table match_players add column if not exists team_id text references match_teams(id) on delete set null;
+
+create table if not exists match_games (
+  id text primary key,
+  match_id text not null references matches(id) on delete cascade,
+  seq integer not null,
+  home_team_id text not null references match_teams(id) on delete cascade,
+  away_team_id text not null references match_teams(id) on delete cascade,
+  waiting_team_id text references match_teams(id) on delete cascade,
+  score_home integer not null default 0,
+  score_away integer not null default 0,
+  status text not null default 'in_progress' check (status in ('in_progress', 'finished')),
+  started_at timestamptz not null default now(),
+  ended_at timestamptz,
+  end_reason text check (end_reason in ('goal_diff', 'time_limit')),
+  winner_team_id text references match_teams(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (match_id, seq)
+);
+
 create table if not exists monthly_payments (
   id text primary key,
   player_id text not null references players(id) on delete cascade,
@@ -114,6 +149,9 @@ create table if not exists club_expenses (
 create index if not exists idx_match_players_match_id on match_players(match_id);
 create index if not exists idx_match_players_player_id on match_players(player_id);
 create index if not exists idx_match_players_whatsapp_order on match_players(match_id, whatsapp_order);
+create index if not exists idx_match_players_team_id on match_players(team_id);
+create index if not exists idx_match_teams_match_id on match_teams(match_id);
+create index if not exists idx_match_games_match_id on match_games(match_id);
 create index if not exists idx_matches_month_key on matches(month_key);
 create index if not exists idx_monthly_payments_month_key on monthly_payments(month_key);
 create index if not exists idx_club_expenses_expense_date on club_expenses(expense_date);

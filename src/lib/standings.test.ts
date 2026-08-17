@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { calculatePlayerRecord, pointsForMatchRow } from "./standings";
+import { calculatePlayerRecord, calculateRoyalRecord, pointsForMatchRow } from "./standings";
 
 test("calculatePlayerRecord applies 4/2/1 to wins, draws and losses", () => {
   const appearances = [
@@ -37,4 +37,34 @@ test("six completed losses award six points", () => {
   const results = appearances.map(({ matchId }) => ({ matchId, winner: "B" as const }));
 
   assert.equal(calculatePlayerRecord(appearances, results).points, 6);
+});
+
+test("calculateRoyalRecord awards 4 pts to the champion team and 1 pt to the other two", () => {
+  const teams = [
+    { id: "team-1", finalRank: 1 as const },
+    { id: "team-2", finalRank: 2 as const },
+    { id: "team-3", finalRank: 3 as const },
+  ];
+
+  assert.deepEqual(calculateRoyalRecord([{ matchId: "night-1", teamId: "team-1" }], teams), {
+    played: 1,
+    wins: 1,
+    draws: 0,
+    losses: 0,
+    winRate: 100,
+    points: 4,
+    form: "1-0-0",
+  });
+  assert.deepEqual(calculateRoyalRecord([{ matchId: "night-1", teamId: "team-2" }], teams).points, 1);
+  assert.deepEqual(calculateRoyalRecord([{ matchId: "night-1", teamId: "team-3" }], teams).points, 1);
+});
+
+test("calculateRoyalRecord ignores nights that have not been closed yet", () => {
+  const teams = [{ id: "team-1", finalRank: undefined }];
+  assert.equal(calculateRoyalRecord([{ matchId: "night-1", teamId: "team-1" }], teams).points, 0);
+});
+
+test("calculateRoyalRecord ignores appearances without a team assigned", () => {
+  const teams = [{ id: "team-1", finalRank: 1 as const }];
+  assert.equal(calculateRoyalRecord([{ matchId: "night-1", teamId: undefined }], teams).points, 0);
 });

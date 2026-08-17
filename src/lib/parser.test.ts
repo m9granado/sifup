@@ -50,6 +50,7 @@ test("matchSummaryMessage renders ordered call-up with 12 minimum slots", () => 
       courtCost: 35000,
       courtPrepaid: true,
       notes: "",
+      matchFormat: "clasico",
       createdAt: "2026-07-03T00:00:00.000Z",
       updatedAt: "2026-07-03T00:00:00.000Z",
     },

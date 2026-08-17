@@ -2,7 +2,7 @@ import "server-only";
 
 import { seedData } from "./mock-data";
 import { getSql, hasDatabaseUrl } from "./db";
-import type { ClubExpense, Match, MatchPlayer, MatchResult, MonthlyPayment, Player, SifupData } from "./types";
+import type { ClubExpense, Match, MatchGame, MatchPlayer, MatchResult, MatchTeam, MonthlyPayment, Player, SifupData } from "./types";
 
 function iso(value: Date | string) {
   if (value instanceof Date) return value.toISOString();
@@ -40,6 +40,7 @@ type MatchRow = {
   court_cost: number;
   court_prepaid: boolean;
   notes: string;
+  match_format: Match["matchFormat"];
   created_at: Date | string;
   updated_at: Date | string;
 };
@@ -56,6 +57,7 @@ type MatchPlayerRow = {
   amount_paid: number;
   note: string;
   team: MatchPlayer["team"];
+  team_id: string | null;
   whatsapp_order: number | null;
   goals: number | null;
   created_at: Date | string;
@@ -69,6 +71,35 @@ type MatchResultRow = {
   score_b: number;
   winner: MatchResult["winner"];
   notes: string;
+};
+
+type MatchTeamRow = {
+  id: string;
+  match_id: string;
+  name: string;
+  color: MatchTeam["color"];
+  seq: number;
+  final_rank: 1 | 2 | 3 | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+};
+
+type MatchGameRow = {
+  id: string;
+  match_id: string;
+  seq: number;
+  home_team_id: string;
+  away_team_id: string;
+  waiting_team_id: string | null;
+  score_home: number;
+  score_away: number;
+  status: MatchGame["status"];
+  started_at: Date | string;
+  ended_at: Date | string | null;
+  end_reason: MatchGame["endReason"] | null;
+  winner_team_id: string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
 };
 
 type MonthlyPaymentRow = {
@@ -113,11 +144,13 @@ export async function getSifupData(): Promise<SifupData> {
   if (!hasDatabaseUrl()) return seedData;
 
   const sql = getSql();
-  const [matches, players, matchPlayers, results, monthlyPayments, finances, clubExpenses] = await Promise.all([
+  const [matches, players, matchPlayers, results, matchTeams, matchGames, monthlyPayments, finances, clubExpenses] = await Promise.all([
     sql<MatchRow[]>`select * from matches order by match_date desc, match_time desc`,
     sql<PlayerRow[]>`select * from players order by name asc`,
     sql<MatchPlayerRow[]>`select * from match_players order by match_id desc, whatsapp_order asc nulls last, created_at asc, id asc`,
     sql<MatchResultRow[]>`select * from match_results`,
+    sql<MatchTeamRow[]>`select * from match_teams order by match_id desc, seq asc`,
+    sql<MatchGameRow[]>`select * from match_games order by match_id desc, seq asc`,
     sql<MonthlyPaymentRow[]>`select * from monthly_payments order by month_key desc, player_id asc`,
     sql<ClubFinanceRow[]>`select * from club_finances order by created_at asc limit 1`,
     sql<ClubExpenseRow[]>`select * from club_expenses order by expense_date desc, created_at desc`,
@@ -136,6 +169,7 @@ export async function getSifupData(): Promise<SifupData> {
       courtCost: row.court_cost,
       courtPrepaid: row.court_prepaid,
       notes: row.notes,
+      matchFormat: row.match_format,
       createdAt: iso(row.created_at),
       updatedAt: iso(row.updated_at),
     })),
@@ -164,6 +198,7 @@ export async function getSifupData(): Promise<SifupData> {
       amountPaid: row.amount_paid,
       note: row.note,
       team: row.team,
+      teamId: row.team_id ?? undefined,
       whatsappOrder: row.whatsapp_order ?? 0,
       goals: row.goals ?? undefined,
       createdAt: iso(row.created_at),
@@ -176,6 +211,33 @@ export async function getSifupData(): Promise<SifupData> {
       scoreB: row.score_b,
       winner: row.winner,
       notes: row.notes,
+    })),
+    matchTeams: matchTeams.map((row) => ({
+      id: row.id,
+      matchId: row.match_id,
+      name: row.name,
+      color: row.color,
+      seq: row.seq,
+      finalRank: row.final_rank ?? undefined,
+      createdAt: iso(row.created_at),
+      updatedAt: iso(row.updated_at),
+    })),
+    matchGames: matchGames.map((row) => ({
+      id: row.id,
+      matchId: row.match_id,
+      seq: row.seq,
+      homeTeamId: row.home_team_id,
+      awayTeamId: row.away_team_id,
+      waitingTeamId: row.waiting_team_id ?? undefined,
+      scoreHome: row.score_home,
+      scoreAway: row.score_away,
+      status: row.status,
+      startedAt: iso(row.started_at),
+      endedAt: row.ended_at ? iso(row.ended_at) : undefined,
+      endReason: row.end_reason ?? undefined,
+      winnerTeamId: row.winner_team_id ?? undefined,
+      createdAt: iso(row.created_at),
+      updatedAt: iso(row.updated_at),
     })),
     monthlyPayments: monthlyPayments.map((row) => ({
       id: row.id,
@@ -222,12 +284,12 @@ function requireDatabase() {
   return getSql();
 }
 
-export async function saveMatchWithPlayers(match: Match, players: MatchPlayer[]) {
+export async function saveMatchWithPlayers(match: Match, players: MatchPlayer[], teams?: MatchTeam[]) {
   const sql = requireDatabase();
   await sql.begin(async (tx) => {
     await tx`
-      insert into matches (id, match_date, match_time, location, status, total_cost, week_label, month_key, court_cost, court_prepaid, notes, created_at, updated_at)
-      values (${match.id}, ${match.date}, ${match.time}, ${match.location}, ${match.status}, ${match.totalCost}, ${match.weekLabel}, ${match.monthKey}, ${match.courtCost}, ${match.courtPrepaid}, ${match.notes}, ${match.createdAt}, ${match.updatedAt})
+      insert into matches (id, match_date, match_time, location, status, total_cost, week_label, month_key, court_cost, court_prepaid, notes, match_format, created_at, updated_at)
+      values (${match.id}, ${match.date}, ${match.time}, ${match.location}, ${match.status}, ${match.totalCost}, ${match.weekLabel}, ${match.monthKey}, ${match.courtCost}, ${match.courtPrepaid}, ${match.notes}, ${match.matchFormat}, ${match.createdAt}, ${match.updatedAt})
       on conflict (id) do update set
         match_date = excluded.match_date,
         match_time = excluded.match_time,
@@ -239,13 +301,27 @@ export async function saveMatchWithPlayers(match: Match, players: MatchPlayer[])
         court_cost = excluded.court_cost,
         court_prepaid = excluded.court_prepaid,
         notes = excluded.notes,
+        match_format = excluded.match_format,
         updated_at = excluded.updated_at
     `;
+    if (teams && teams.length > 0) {
+      for (const team of teams) {
+        await tx`
+          insert into match_teams (id, match_id, name, color, seq, created_at, updated_at)
+          values (${team.id}, ${team.matchId}, ${team.name}, ${team.color}, ${team.seq}, ${team.createdAt}, ${team.updatedAt})
+          on conflict (id) do update set
+            name = excluded.name,
+            color = excluded.color,
+            seq = excluded.seq,
+            updated_at = excluded.updated_at
+        `;
+      }
+    }
     await tx`delete from match_players where match_id = ${match.id}`;
     for (const row of players) {
       await tx`
-        insert into match_players (id, match_id, player_id, name, phone, attendance_status, payment_status, amount_due, amount_paid, note, team, whatsapp_order, goals, created_at, updated_at)
-        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.phone}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue}, ${row.amountPaid}, ${row.note}, ${row.team}, ${row.whatsappOrder}, ${row.goals ?? null}, ${row.createdAt}, ${row.updatedAt})
+        insert into match_players (id, match_id, player_id, name, phone, attendance_status, payment_status, amount_due, amount_paid, note, team, team_id, whatsapp_order, goals, created_at, updated_at)
+        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.phone}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue}, ${row.amountPaid}, ${row.note}, ${row.team}, ${row.teamId ?? null}, ${row.whatsappOrder}, ${row.goals ?? null}, ${row.createdAt}, ${row.updatedAt})
       `;
     }
   });
@@ -258,8 +334,8 @@ export async function saveMatchPlayers(matchId: string, players: MatchPlayer[], 
     await tx`delete from match_players where match_id = ${matchId}`;
     for (const row of players) {
       await tx`
-        insert into match_players (id, match_id, player_id, name, phone, attendance_status, payment_status, amount_due, amount_paid, note, team, whatsapp_order, goals, created_at, updated_at)
-        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.phone}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue}, ${row.amountPaid}, ${row.note}, ${row.team}, ${row.whatsappOrder}, ${row.goals ?? null}, ${row.createdAt}, ${row.updatedAt})
+        insert into match_players (id, match_id, player_id, name, phone, attendance_status, payment_status, amount_due, amount_paid, note, team, team_id, whatsapp_order, goals, created_at, updated_at)
+        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.phone}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue}, ${row.amountPaid}, ${row.note}, ${row.team}, ${row.teamId ?? null}, ${row.whatsappOrder}, ${row.goals ?? null}, ${row.createdAt}, ${row.updatedAt})
       `;
     }
     await tx`update matches set updated_at = ${now} where id = ${matchId}`;
@@ -273,6 +349,64 @@ export async function saveMatchPlayers(matchId: string, players: MatchPlayer[], 
           winner = excluded.winner,
           notes = excluded.notes
       `;
+    }
+  });
+}
+
+export async function saveMatchTeams(teams: MatchTeam[]) {
+  const sql = requireDatabase();
+  await sql.begin(async (tx) => {
+    for (const team of teams) {
+      await tx`
+        insert into match_teams (id, match_id, name, color, seq, final_rank, created_at, updated_at)
+        values (${team.id}, ${team.matchId}, ${team.name}, ${team.color}, ${team.seq}, ${team.finalRank ?? null}, ${team.createdAt}, ${team.updatedAt})
+        on conflict (id) do update set
+          name = excluded.name,
+          color = excluded.color,
+          seq = excluded.seq,
+          updated_at = excluded.updated_at
+      `;
+    }
+  });
+}
+
+export async function startMatchGame(game: Pick<MatchGame, "id" | "matchId" | "seq" | "homeTeamId" | "awayTeamId" | "waitingTeamId" | "startedAt" | "createdAt" | "updatedAt">) {
+  const sql = requireDatabase();
+  await sql`
+    insert into match_games (id, match_id, seq, home_team_id, away_team_id, waiting_team_id, status, started_at, created_at, updated_at)
+    values (${game.id}, ${game.matchId}, ${game.seq}, ${game.homeTeamId}, ${game.awayTeamId}, ${game.waitingTeamId ?? null}, 'in_progress', ${game.startedAt}, ${game.createdAt}, ${game.updatedAt})
+  `;
+}
+
+export async function updateMatchGameScore(gameId: string, scoreHome: number, scoreAway: number) {
+  const sql = requireDatabase();
+  await sql`
+    update match_games
+    set score_home = ${scoreHome}, score_away = ${scoreAway}, updated_at = now()
+    where id = ${gameId}
+  `;
+}
+
+export async function finishMatchGame(gameId: string, payload: { scoreHome: number; scoreAway: number; endReason: MatchGame["endReason"]; winnerTeamId: string; endedAt: string }) {
+  const sql = requireDatabase();
+  await sql`
+    update match_games
+    set score_home = ${payload.scoreHome},
+        score_away = ${payload.scoreAway},
+        end_reason = ${payload.endReason ?? null},
+        winner_team_id = ${payload.winnerTeamId},
+        status = 'finished',
+        ended_at = ${payload.endedAt},
+        updated_at = now()
+    where id = ${gameId}
+  `;
+}
+
+export async function setMatchFinalStanding(ranks: { teamId: string; finalRank: 1 | 2 | 3 }[]) {
+  const sql = requireDatabase();
+  await sql.begin(async (tx) => {
+    for (const rank of ranks) {
+      await tx`update match_teams set final_rank = ${rank.finalRank}, updated_at = now() where id = ${rank.teamId}`;
     }
   });
 }
