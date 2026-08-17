@@ -2336,7 +2336,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const [rows, setRows] = useState(() => data.matchPlayers.filter((row) => row.matchId === id));
   const [winner, setWinner] = useState<MatchResult["winner"]>(result?.winner ?? "draw");
   const [resultNotes, setResultNotes] = useState(result?.notes ?? "");
-  const [editingMatch, setEditingMatch] = useState<Pick<Match, "date" | "time" | "location"> | null>(null);
+  const [editingMatch, setEditingMatch] = useState<Pick<Match, "date" | "time" | "location" | "matchFormat"> | null>(null);
   const [error, setError] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [showAddPlayer, setShowAddPlayer] = useState(false);
@@ -2469,10 +2469,30 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       monthKey: monthKey(editingMatch.date),
       updatedAt: new Date().toISOString(),
     };
+    const switchingToRoyal = editingMatch.matchFormat === "rey_de_la_cancha" && matchTeams.length === 0;
+    const now = nextMatch.updatedAt;
+    const newTeams: MatchTeam[] = switchingToRoyal
+      ? [0, 1, 2].map((index) => ({
+          id: newId("team"),
+          matchId: currentMatch.id,
+          name: `Equipo ${index + 1}`,
+          color: MATCH_TEAM_DEFAULT_COLORS[index],
+          seq: index + 1,
+          createdAt: now,
+          updatedAt: now,
+        }))
+      : [];
+    const nextRows = switchingToRoyal
+      ? applyBalancedRoyalTeams(rows, data.players, standings, newTeams.map((team) => team.id) as [string, string, string])
+      : rows;
     startTransition(async () => {
       try {
-        await saveMatchAction(nextMatch, rows);
-        commit(replaceMatchPlayers(upsertMatch(data, nextMatch), currentMatch.id, rows));
+        await saveMatchAction(nextMatch, nextRows, switchingToRoyal ? newTeams : undefined);
+        commit({
+          ...replaceMatchPlayers(upsertMatch(data, nextMatch), currentMatch.id, nextRows),
+          matchTeams: switchingToRoyal ? [...data.matchTeams, ...newTeams] : data.matchTeams,
+        });
+        if (switchingToRoyal) setRows(nextRows);
         setEditingMatch(null);
         setError("");
       } catch (err) {
@@ -2492,7 +2512,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         standings={standings}
         isAdmin={isAdmin}
         onSave={save}
-        onEdit={() => setEditingMatch({ date: currentMatch.date, time: currentMatch.time, location: currentMatch.location })}
+        onEdit={() => setEditingMatch({ date: currentMatch.date, time: currentMatch.time, location: currentMatch.location, matchFormat: currentMatch.matchFormat })}
         isPending={isPending}
         previous={previous}
         next={next}
@@ -2518,12 +2538,37 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       {editingMatch ? (
         <Modal title="Editar partido" onClose={() => setEditingMatch(null)}>
           <div className="space-y-4">
-            <p className="text-sm text-(--muted)">Actualiza la fecha, hora o ubicacion del partido.</p>
+            <p className="text-sm text-(--muted)">Actualiza la fecha, hora, ubicacion o formato del partido.</p>
             <div className="grid gap-3 sm:grid-cols-2">
               <Input label="Fecha" type="date" value={editingMatch.date} onChange={(date) => setEditingMatch({ ...editingMatch, date })} />
               <Input label="Hora" type="time" value={editingMatch.time} onChange={(time) => setEditingMatch({ ...editingMatch, time })} />
             </div>
             <Input label="Ubicacion" value={editingMatch.location} onChange={(location) => setEditingMatch({ ...editingMatch, location })} />
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-(--muted)">Formato</p>
+              <div className="inline-flex rounded-md border border-(--border) bg-white/[0.04] p-1 text-sm font-bold">
+                <button
+                  type="button"
+                  onClick={() => setEditingMatch({ ...editingMatch, matchFormat: "clasico" })}
+                  className={`rounded px-3 py-1.5 transition ${editingMatch.matchFormat === "clasico" ? "bg-(--green) text-black" : "text-(--muted) hover:text-white"}`}
+                >
+                  Clasico (2 equipos)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingMatch({ ...editingMatch, matchFormat: "rey_de_la_cancha" })}
+                  className={`rounded px-3 py-1.5 transition ${editingMatch.matchFormat === "rey_de_la_cancha" ? "bg-(--green) text-black" : "text-(--muted) hover:text-white"}`}
+                >
+                  Rey de la Cancha (3 equipos)
+                </button>
+              </div>
+              {editingMatch.matchFormat === "rey_de_la_cancha" && currentMatch.matchFormat !== "rey_de_la_cancha" ? (
+                <p className="text-xs text-(--gold)">Se van a crear 3 equipos nuevos y se va a repartir a los jugadores confirmados por ranking. Podras renombrar los equipos y mover jugadores despues de guardar.</p>
+              ) : null}
+              {editingMatch.matchFormat === "clasico" && currentMatch.matchFormat === "rey_de_la_cancha" ? (
+                <p className="text-xs text-(--gold)">Los equipos y juegos de Rey de la Cancha ya registrados quedan guardados pero dejan de mostrarse; el partido vuelve a usar equipos Rojo/Amarillo.</p>
+              ) : null}
+            </div>
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setEditingMatch(null)}>Cancelar</Button>
               <Button onClick={saveMatchInfo} disabled={isPending}><Save size={16} />Guardar cambios</Button>
