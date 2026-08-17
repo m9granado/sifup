@@ -1163,7 +1163,7 @@ export function NewMatchPage({ initialData }: InitialDataProps) {
           ) : (
             <NewMatchTeamSuggestion rows={rows} players={data.players} standings={standings} />
           )}
-          <MatchEditor match={match} setMatch={setMatch} rows={rows} updateRow={updateRow} knownLocations={data.matches.map((item) => item.location)} lastLocation={data.matches[0]?.location ?? ""} />
+          <MatchEditor match={match} setMatch={setMatch} rows={rows} updateRow={updateRow} knownLocations={data.matches.map((item) => item.location)} lastLocation={data.matches[0]?.location ?? ""} showTeamColumn={matchFormat === "clasico"} />
         </div>
       </div>
     </>
@@ -1191,6 +1191,7 @@ function MatchEditor({
   updateRow,
   knownLocations,
   lastLocation,
+  showTeamColumn = true,
 }: {
   match: { date: string; time: string; location: string; totalCost: number; notes: string };
   setMatch: (value: { date: string; time: string; location: string; totalCost: number; notes: string }) => void;
@@ -1198,6 +1199,7 @@ function MatchEditor({
   updateRow: (index: number, patch: Partial<Omit<MatchPlayer, "id" | "matchId" | "createdAt" | "updatedAt">>) => void;
   knownLocations: string[];
   lastLocation: string;
+  showTeamColumn?: boolean;
 }) {
   const locations = Array.from(new Set(knownLocations.filter(Boolean)));
   return (
@@ -1228,7 +1230,7 @@ function MatchEditor({
         </div>
         <Input label="Costo total" type="number" value={String(match.totalCost)} onChange={(totalCost) => setMatch({ ...match, totalCost: Number(totalCost) })} />
       </div>
-      <EditableRows rows={rows} updateRow={updateRow} />
+      <EditableRows rows={rows} updateRow={updateRow} showTeamColumn={showTeamColumn} />
     </Card>
   );
 }
@@ -1236,9 +1238,11 @@ function MatchEditor({
 function EditableRows({
   rows,
   updateRow,
+  showTeamColumn = true,
 }: {
   rows: Array<Omit<MatchPlayer, "id" | "matchId" | "createdAt" | "updatedAt"> | MatchPlayer>;
   updateRow: (index: number, patch: Partial<MatchPlayer>) => void;
+  showTeamColumn?: boolean;
 }) {
   return (
     <>
@@ -1258,12 +1262,14 @@ function EditableRows({
                 <Input label="Debe" type="number" value={String(row.amountDue)} onChange={(value) => updateRow(index, { amountDue: Number(value) })} />
                 <Input label="Pagado" type="number" value={String(row.amountPaid)} onChange={(value) => updateRow(index, { amountPaid: Number(value) })} />
               </div>
-              <label className="space-y-1 text-sm font-medium text-(--muted)">
-                <span>Equipo</span>
-                <select className="h-10 w-full rounded-md border border-(--border) bg-(--panel-strong) px-3 text-sm text-white" value={row.team} onChange={(event) => updateRow(index, { team: event.target.value as Team })}>
-                  <option value="none">Sin equipo</option><option value="A">Rojo</option><option value="B">Amarillo</option>
-                </select>
-              </label>
+              {showTeamColumn ? (
+                <label className="space-y-1 text-sm font-medium text-(--muted)">
+                  <span>Equipo</span>
+                  <select className="h-10 w-full rounded-md border border-(--border) bg-(--panel-strong) px-3 text-sm text-white" value={row.team} onChange={(event) => updateRow(index, { team: event.target.value as Team })}>
+                    <option value="none">Sin equipo</option><option value="A">Rojo</option><option value="B">Amarillo</option>
+                  </select>
+                </label>
+              ) : null}
               <Input label="Nota" value={row.note} onChange={(value) => updateRow(index, { note: value })} />
             </div>
           </div>
@@ -1272,7 +1278,7 @@ function EditableRows({
       <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[780px] text-left text-sm">
           <thead className="border-b border-(--border) text-xs uppercase text-(--muted)">
-            <tr><th className="py-2 pr-2">#</th><th className="py-2 pr-2">Jugador</th><th className="py-2 pr-2">Pago</th><th className="py-2 pr-2">Debe</th><th className="py-2 pr-2">Pagado</th><th className="py-2 pr-2">Equipo</th><th className="py-2 pr-2">Nota</th></tr>
+            <tr><th className="py-2 pr-2">#</th><th className="py-2 pr-2">Jugador</th><th className="py-2 pr-2">Pago</th><th className="py-2 pr-2">Debe</th><th className="py-2 pr-2">Pagado</th>{showTeamColumn ? <th className="py-2 pr-2">Equipo</th> : null}<th className="py-2 pr-2">Nota</th></tr>
           </thead>
           <tbody className="divide-y divide-white/10">
             {rows.map((row, index) => (
@@ -1282,7 +1288,7 @@ function EditableRows({
                 <td className="py-2 pr-2"><select className="h-9 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" value={row.paymentStatus} onChange={(event) => updateRow(index, { paymentStatus: event.target.value as PaymentStatus })}><option value="paid">Pagado</option><option value="unpaid">No pagado</option><option value="promised">Prometido</option></select></td>
                 <td className="py-2 pr-2"><input className="h-9 w-24 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" type="number" value={row.amountDue} onChange={(event) => updateRow(index, { amountDue: Number(event.target.value) })} /></td>
                 <td className="py-2 pr-2"><input className="h-9 w-24 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" type="number" value={row.amountPaid} onChange={(event) => updateRow(index, { amountPaid: Number(event.target.value) })} /></td>
-                <td className="py-2 pr-2"><select className="h-9 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" value={row.team} onChange={(event) => updateRow(index, { team: event.target.value as Team })}><option value="none">Sin equipo</option><option value="A">Rojo</option><option value="B">Amarillo</option></select></td>
+                {showTeamColumn ? <td className="py-2 pr-2"><select className="h-9 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" value={row.team} onChange={(event) => updateRow(index, { team: event.target.value as Team })}><option value="none">Sin equipo</option><option value="A">Rojo</option><option value="B">Amarillo</option></select></td> : null}
                 <td className="py-2 pr-2"><input className="h-9 w-44 rounded-md border border-(--border) bg-(--panel-strong) px-2 text-white" value={row.note} onChange={(event) => updateRow(index, { note: event.target.value })} /></td>
               </tr>
             ))}
