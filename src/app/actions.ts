@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createSession, destroySession, hasAdminPassword, validPassword } from "@/lib/auth";
 import { requireAdmin } from "@/lib/auth";
 import {
+  clearMatchFinalStanding,
   finishMatchGame,
   markMatchPlayerPaid,
   saveMatchPlayers,
@@ -87,6 +88,12 @@ export async function finishMatchGameAction(matchId: string, gameId: string, pay
 export async function setMatchFinalStandingAction(matchId: string, ranks: { teamId: string; finalRank: 1 | 2 | 3 }[]) {
   await requireAdmin();
   await setMatchFinalStanding(ranks);
+  revalidateAdminViews(matchId);
+}
+
+export async function clearMatchFinalStandingAction(matchId: string) {
+  await requireAdmin();
+  await clearMatchFinalStanding(matchId);
   revalidateAdminViews(matchId);
 }
 

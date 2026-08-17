@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, MapPin, Medal, MessageCircle, Pencil, Plus, Save, Share, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
 import {
+  clearMatchFinalStandingAction,
   createMatchAction,
   finishMatchGameAction,
   markMatchPlayerPaidAction,
@@ -2197,6 +2198,17 @@ function RoyalNightPanel({
       .catch((err) => setError(err instanceof Error ? err.message : "No se pudo cerrar el juego."));
   }
 
+  function reopenNight() {
+    if (!confirm("¿Eliminar el resultado de la noche? Los puntos otorgados a los 3 equipos se quitan del ranking historico.")) return;
+    const now = new Date().toISOString();
+    const nextTeams = data.matchTeams.map((team) => (team.matchId === matchId ? { ...team, finalRank: undefined, updatedAt: now } : team));
+    commit({ ...data, matchTeams: nextTeams });
+    setFinalRanks({});
+    clearMatchFinalStandingAction(matchId)
+      .then(() => setError(""))
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo eliminar el resultado."));
+  }
+
   function closeNight() {
     const ranks = Object.entries(finalRanks).filter(([, rank]) => rank !== "") as [string, 1 | 2 | 3][];
     const values = ranks.map(([, rank]) => rank);
@@ -2293,9 +2305,17 @@ function RoyalNightPanel({
       </div>
 
       {closed ? (
-        <div className="rounded-md border border-(--green)/40 bg-(--green)/10 p-4">
-          <p className="text-sm font-black uppercase text-white">Noche cerrada</p>
-          <p className="mt-1 text-xs text-(--muted)">Los puntos ya se sumaron al ranking historico.</p>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-(--green)/40 bg-(--green)/10 p-4">
+          <div>
+            <p className="text-sm font-black uppercase text-white">Noche cerrada</p>
+            <p className="mt-1 text-xs text-(--muted)">Los puntos ya se sumaron al ranking historico.</p>
+          </div>
+          {isAdmin ? (
+            <Button variant="secondary" onClick={reopenNight}>
+              <X size={16} />
+              Eliminar resultado
+            </Button>
+          ) : null}
         </div>
       ) : isAdmin && !inProgress && teams.length === 3 ? (
         <div className="space-y-2 rounded-md border border-(--border) bg-white/[0.04] p-4">

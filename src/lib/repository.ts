@@ -411,6 +411,11 @@ export async function setMatchFinalStanding(ranks: { teamId: string; finalRank: 
   });
 }
 
+export async function clearMatchFinalStanding(matchId: string) {
+  const sql = requireDatabase();
+  await sql`update match_teams set final_rank = null, updated_at = now() where match_id = ${matchId}`;
+}
+
 export async function markMatchPlayerPaid(rowId: string) {
   const sql = requireDatabase();
   await sql`
