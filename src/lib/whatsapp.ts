@@ -1,4 +1,4 @@
-import type { Match, MatchPlayer, MatchResult } from "./types";
+import type { Match, MatchPlayer, MatchResult, MatchTeam } from "./types";
 import { formatCurrency, sortByWhatsappOrder, whatsappOrderFor } from "./store";
 import { PUBLIC_BASE_URL } from "./sifup-constants";
 
@@ -39,6 +39,15 @@ export function teamsMessage(match: Match, players: MatchPlayer[]) {
   const teamA = sortByWhatsappOrder(players.filter((player) => player.team === "A"));
   const teamB = sortByWhatsappOrder(players.filter((player) => player.team === "B"));
   return `SIFUP - Equipos ${match.date}\n\nEquipo Rojo:\n${teamA.map((player) => `- #${whatsappOrderFor(player)} ${player.name}`).join("\n") || "- Por asignar"}\n\nEquipo Amarillo:\n${teamB.map((player) => `- #${whatsappOrderFor(player)} ${player.name}`).join("\n") || "- Por asignar"}`;
+}
+
+export function royalTeamsMessage(match: Match, teams: MatchTeam[], players: MatchPlayer[]) {
+  const sortedTeams = [...teams].sort((a, b) => a.seq - b.seq);
+  const blocks = sortedTeams.map((team) => {
+    const teamPlayers = sortByWhatsappOrder(players.filter((player) => player.teamId === team.id));
+    return `${team.name}:\n${teamPlayers.map((player) => `- #${whatsappOrderFor(player)} ${player.name}`).join("\n") || "- Por asignar"}`;
+  });
+  return `SIFUP - Rey de la Cancha ${match.date}\n\n${blocks.join("\n\n")}`;
 }
 
 export function finalResultMessage(match: Match, result?: MatchResult) {

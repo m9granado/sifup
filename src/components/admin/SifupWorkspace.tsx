@@ -23,7 +23,7 @@ import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
 import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
 import { calculatePlayerRecord, calculateRoyalRecord, combinePlayerRecords, pointsForMatchRow } from "@/lib/standings";
-import { matchSummaryMessage, teamsMessage } from "@/lib/whatsapp";
+import { matchSummaryMessage, royalTeamsMessage, teamsMessage } from "@/lib/whatsapp";
 import { COURT_COST, LOSS_POINTS, MATCH_TEAM_COLOR_CLASSES, MATCH_TEAM_COLOR_LABEL, MATCH_TEAM_DEFAULT_COLORS, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, ROYAL_GAME_TIME_LIMIT_MIN, ROYAL_GOAL_DIFF_TO_WIN, ROYAL_SQUAD_TARGET, SQUAD_TARGET, WIN_POINTS } from "@/lib/sifup-constants";
 import type { ClubExpense, GameEndReason, Match, MatchFormat, MatchGame, MatchPlayer, MatchResult, MatchTeam, MatchTeamColor, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
 
@@ -2640,7 +2640,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       </Card>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        {!isRoyal ? <CopyBlock title="Resumen de equipos" text={teamsMessage(currentMatch, rows)} /> : null}
+        <CopyBlock title="Resumen de equipos" text={isRoyal ? royalTeamsMessage(currentMatch, matchTeams, rows) : teamsMessage(currentMatch, rows)} />
         <CopyBlock title="Resumen del partido" text={matchSummaryMessage(currentMatch, rows)} />
       </div>
 
@@ -4346,6 +4346,14 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
       setRows((current) => current.map((row) => (row.id === rowId ? { ...row, teamId, updatedAt: new Date().toISOString() } : row)));
     }
 
+    function rebalanceRoyalTeams() {
+      if (matchTeams.length !== 3) return;
+      const teamIds = matchTeams.map((team) => team.id) as [string, string, string];
+      setRows((current) => applyBalancedRoyalTeams(current, data.players, standings, teamIds));
+    }
+
+    const unassignedRows = rows.filter((row) => row.attendanceStatus === "confirmed" && !matchTeams.some((team) => team.id === row.teamId));
+
     function saveRoyalRoster() {
       setError("");
       startTransition(async () => {
@@ -4377,6 +4385,41 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
           }
         />
         {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-(--border) bg-white/[0.04] px-3 py-2">
+          <p className="text-xs font-bold text-(--muted)">{unassignedRows.length > 0 ? `${unassignedRows.length} jugador(es) sin equipo` : "Todos los confirmados tienen equipo"}</p>
+          <Button variant="secondary" onClick={rebalanceRoyalTeams} disabled={isPending} className="h-8 px-2.5 text-xs">
+            <Sparkles size={14} />
+            Autoasignar por Ranking
+          </Button>
+        </div>
+        {unassignedRows.length > 0 ? (
+          <Card className="mb-4 space-y-2">
+            <h2 className="text-sm font-bold text-white">Sin equipo ({unassignedRows.length})</h2>
+            <ul className="space-y-1.5">
+              {unassignedRows.map((row) => {
+                const isArq = playerForMatchRow(row, data.players)?.isGoalkeeper === true;
+                return (
+                  <li key={row.id} className="flex items-center justify-between gap-2 rounded border border-white/10 bg-black/10 px-2 py-1.5">
+                    <span className="truncate text-sm font-semibold text-white">
+                      {row.name}
+                      {isArq ? <span className="ml-1 text-[8px] font-black text-amber-500 uppercase">ARQ</span> : null}
+                    </span>
+                    <select
+                      value=""
+                      onChange={(event) => assignRoyalTeam(row.id, event.target.value)}
+                      className="rounded border border-white/10 bg-black/30 px-1 py-0.5 text-xs font-bold text-white outline-none"
+                    >
+                      <option value="" disabled>Asignar a...</option>
+                      {matchTeams.map((team) => (
+                        <option key={team.id} value={team.id}>{team.name}</option>
+                      ))}
+                    </select>
+                  </li>
+                );
+              })}
+            </ul>
+          </Card>
+        ) : null}
         <RoyalTeamRoster teams={matchTeams} rows={rows} players={data.players} standings={standings} isAdmin onRenameTeam={renameRoyalTeam} onAssignTeam={assignRoyalTeam} />
       </>
     );
