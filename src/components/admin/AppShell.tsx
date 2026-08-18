@@ -9,11 +9,9 @@ import { MainNav } from "./MainNav";
 export function AppShell({
   children,
   isAdmin,
-  nextMatchId,
 }: {
   children: React.ReactNode;
   isAdmin: boolean;
-  nextMatchId?: string;
 }) {
   return (
     <AuthModeProvider isAdmin={isAdmin}>
@@ -40,7 +38,7 @@ export function AppShell({
             <Image src="/brand/sifup-logo-preferred.png" alt="SIFUP" width={1015} height={600} />
           </Link>
 
-          <MainNav isAdmin={isAdmin} nextMatchId={nextMatchId} />
+          <MainNav isAdmin={isAdmin} />
 
           <div className="sidebar-auth">
             {isAdmin ? (
