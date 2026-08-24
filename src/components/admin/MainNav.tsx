@@ -9,14 +9,14 @@ type NavItem = {
   icon: string;
 };
 
-export function MainNav({ isAdmin }: { isAdmin: boolean }) {
+export function MainNav({ isAdmin, canPayments }: { isAdmin: boolean; canPayments: boolean }) {
   const pathname = usePathname();
 
   const items: NavItem[] = [
     { href: "/dashboard", label: "Inicio", icon: "icon-home" },
     { href: "/matches", label: "Partidos", icon: "icon-calendar" },
     ...(isAdmin ? [{ href: "/players", label: "Jugadores", icon: "icon-users" }] : []),
-    ...(isAdmin ? [{ href: "/payments", label: "Pagos", icon: "icon-wallet" }] : []),
+    ...(canPayments ? [{ href: "/payments", label: "Pagos", icon: "icon-wallet" }] : []),
     { href: "/standings", label: "Rankings", icon: "icon-trophy" },
   ];
 

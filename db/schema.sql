@@ -1,3 +1,19 @@
+create table if not exists app_users (
+  id text primary key,
+  email text not null unique,
+  password_hash text not null,
+  role text not null default 'member' check (role in ('admin', 'member')),
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists user_permissions (
+  user_id text not null references app_users(id) on delete cascade,
+  permission text not null check (permission in ('dashboard', 'matches', 'players', 'payments', 'standings', 'users')),
+  primary key (user_id, permission)
+);
+
 create table if not exists players (
   id text primary key,
   name text not null,

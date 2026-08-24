@@ -10,16 +10,21 @@ export function LoginForm() {
   return (
     <form action={action} className="space-y-4">
       <div className="space-y-2">
-        <label className="text-sm font-medium text-gray-800" htmlFor="password">
-          Admin password
+        <label className="text-sm font-medium text-gray-800" htmlFor="email">
+          Correo
         </label>
+        <input id="email" name="email" type="email" required autoComplete="email" className="h-12 w-full rounded-md border border-gray-300 bg-white px-3 text-base outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100" placeholder="tu@correo.com" />
+      </div>
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-gray-800" htmlFor="password">
+          Contraseña
         <input
           id="password"
           name="password"
           type="password"
           required
           className="h-12 w-full rounded-md border border-gray-300 bg-white px-3 text-base outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100"
-          placeholder="SIFUP_ADMIN_PASSWORD"
+          autoComplete="current-password"
         />
       </div>
       {state.error ? (

@@ -2,8 +2,10 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { createSession, destroySession, hasAdminPassword, validPassword } from "@/lib/auth";
-import { requireAdmin } from "@/lib/auth";
+import { createSession, destroySession, validPassword, requirePermission } from "@/lib/auth";
+import { getSql } from "@/lib/db";
+import { hashPassword } from "@/lib/auth";
+import { randomUUID } from "crypto";
 import {
   clearMatchFinalStanding,
   finishMatchGame,
@@ -24,14 +26,19 @@ import type { Match, MatchGame, MatchPlayer, MatchResult, MatchTeam, MonthlyPaym
 export type LoginState = { error: string };
 
 export async function loginAction(_state: LoginState, formData: FormData): Promise<LoginState> {
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
-  if (!hasAdminPassword()) {
-    return { error: "SIFUP_ADMIN_PASSWORD no esta configurado en Vercel." };
+  if (!process.env.DATABASE_URL) return { error: "DATABASE_URL no esta configurado." };
+  const sql = getSql();
+  let users = await sql<Array<{ id: string; password_hash: string }>>`select id, password_hash from app_users where email = ${email} and active = true`;
+  // Bootstrap the first administrator once, then all access is database-driven.
+  if (!users[0] && email === process.env.SIFUP_ADMIN_EMAIL && password === process.env.SIFUP_ADMIN_PASSWORD) {
+    const id = randomUUID();
+    await sql`insert into app_users (id, email, password_hash, role) values (${id}, ${email}, ${hashPassword(password)}, 'admin') on conflict (email) do nothing`;
+    users = await sql<Array<{ id: string; password_hash: string }>>`select id, password_hash from app_users where email = ${email} and active = true`;
   }
-  if (!validPassword(password)) {
-    return { error: "Password incorrecto." };
-  }
-  await createSession();
+  if (!users[0] || !validPassword(password, users[0].password_hash)) return { error: "Correo o contraseña incorrectos." };
+  await createSession(users[0].id);
   redirect("/dashboard");
 }
 
@@ -50,85 +57,85 @@ function revalidateAdminViews(matchId?: string) {
 }
 
 export async function createMatchAction(match: Match, rows: MatchPlayer[], teams?: MatchTeam[]) {
-  await requireAdmin();
+  await requirePermission("matches");
   await saveMatchWithPlayers(match, rows, teams);
   revalidateAdminViews(match.id);
 }
 
 export async function saveMatchAction(match: Match, rows: MatchPlayer[], teams?: MatchTeam[]) {
-  await requireAdmin();
+  await requirePermission("matches");
   await saveMatchWithPlayers(match, rows, teams);
   revalidateAdminViews(match.id);
 }
 
 export async function saveMatchTeamsAction(matchId: string, teams: MatchTeam[]) {
-  await requireAdmin();
+  await requirePermission("matches");
   await saveMatchTeams(teams);
   revalidateAdminViews(matchId);
 }
 
 export async function startMatchGameAction(matchId: string, game: Pick<MatchGame, "id" | "seq" | "homeTeamId" | "awayTeamId" | "waitingTeamId" | "startedAt" | "createdAt" | "updatedAt">) {
-  await requireAdmin();
+  await requirePermission("matches");
   await startMatchGame({ ...game, matchId });
   revalidateAdminViews(matchId);
 }
 
 export async function updateMatchGameScoreAction(matchId: string, gameId: string, scoreHome: number, scoreAway: number) {
-  await requireAdmin();
+  await requirePermission("matches");
   await updateMatchGameScore(gameId, scoreHome, scoreAway);
   revalidateAdminViews(matchId);
 }
 
 export async function finishMatchGameAction(matchId: string, gameId: string, payload: { scoreHome: number; scoreAway: number; endReason: MatchGame["endReason"]; winnerTeamId: string; endedAt: string }) {
-  await requireAdmin();
+  await requirePermission("matches");
   await finishMatchGame(gameId, payload);
   revalidateAdminViews(matchId);
 }
 
 export async function setMatchFinalStandingAction(matchId: string, ranks: { teamId: string; finalRank: 1 | 2 | 3 }[]) {
-  await requireAdmin();
+  await requirePermission("matches");
   await setMatchFinalStanding(ranks);
   revalidateAdminViews(matchId);
 }
 
 export async function clearMatchFinalStandingAction(matchId: string) {
-  await requireAdmin();
+  await requirePermission("matches");
   await clearMatchFinalStanding(matchId);
   revalidateAdminViews(matchId);
 }
 
 export async function saveMatchDetailAction(matchId: string, rows: MatchPlayer[], result?: MatchResult) {
-  await requireAdmin();
+  await requirePermission("matches");
   await saveMatchPlayers(matchId, rows, result);
   revalidateAdminViews(matchId);
 }
 
 export async function markMatchPlayerPaidAction(rowId: string) {
-  await requireAdmin();
+  await requirePermission("payments");
   await markMatchPlayerPaid(rowId);
   revalidateAdminViews();
 }
 
 export async function setMatchPlayerPaymentStatusAction(rowId: string, status: "paid" | "unpaid") {
-  await requireAdmin();
+  await requirePermission("payments");
   await setMatchPlayerPaymentStatus(rowId, status);
   revalidateAdminViews();
 }
 
 export async function savePlayerAction(player: Player, guestName?: string) {
-  await requireAdmin();
+  await requirePermission("players");
   await savePlayer(player, guestName);
   revalidateAdminViews();
 }
 
 export async function saveMonthlyPaymentAction(payment: MonthlyPayment) {
-  await requireAdmin();
+  await requirePermission("payments");
   await saveMonthlyPayment(payment);
   revalidateAdminViews();
 }
 
 export async function mergePlayersAction(sourceId: string, targetId: string) {
-  await requireAdmin();
+  await requirePermission("users");
   await repositoryMergePlayers(sourceId, targetId);
   revalidateAdminViews();
 }

@@ -1,10 +1,12 @@
 import { AppShell } from "@/components/admin/AppShell";
-import { isAuthenticated } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const isAdmin = await isAuthenticated();
+  const user = await getCurrentUser();
+  const isAdmin = Boolean(user);
+  const canPayments = Boolean(user && (user.role === "admin" || user.permissions.includes("payments")));
   return (
-    <AppShell isAdmin={isAdmin}>
+    <AppShell isAdmin={isAdmin} canPayments={canPayments}>
       {children}
     </AppShell>
   );

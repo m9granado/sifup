@@ -13,10 +13,10 @@ export default async function LoginPage() {
             SIFUP
           </p>
           <h1 className="mt-2 text-2xl font-semibold text-gray-950">
-            Admin interno
+            Acceso SIFUP
           </h1>
           <p className="mt-2 text-sm leading-6 text-gray-600">
-            Acceso privado para gestionar lista WhatsApp, pagos, equipos y resultados.
+            Ingresa con tu correo y contraseña. Tus permisos determinan las secciones disponibles.
           </p>
         </div>
         <LoginForm />

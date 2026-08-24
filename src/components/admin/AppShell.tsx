@@ -9,9 +9,11 @@ import { MainNav } from "./MainNav";
 export function AppShell({
   children,
   isAdmin,
+  canPayments,
 }: {
   children: React.ReactNode;
   isAdmin: boolean;
+  canPayments: boolean;
 }) {
   return (
     <AuthModeProvider isAdmin={isAdmin}>
@@ -38,7 +40,7 @@ export function AppShell({
             <Image src="/brand/sifup-logo-preferred.png" alt="SIFUP" width={1015} height={600} />
           </Link>
 
-          <MainNav isAdmin={isAdmin} />
+          <MainNav isAdmin={isAdmin} canPayments={canPayments} />
 
           <div className="sidebar-auth">
             {isAdmin ? (

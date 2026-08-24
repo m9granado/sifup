@@ -6,6 +6,15 @@ delete from players;
 delete from club_expenses;
 delete from club_finances;
 
+insert into app_users (id, email, password_hash, role, active)
+values ('user-mgranado', 'mgranado@gmail.com', 'be3ac0a87fc2a1b84874e1111648e759:e07ae0e31e719e898f184bcff265dc4892c73538e38f97353de4e3529c88f30dc5b937bfc2f33eb0b0f0d0d69d2d370e4a062da74304540ec0450ded64bcbc62', 'admin', true)
+on conflict (email) do update set password_hash = excluded.password_hash, role = excluded.role, active = true;
+
+insert into user_permissions (user_id, permission)
+select 'user-mgranado', permission
+from unnest(array['dashboard', 'matches', 'players', 'payments', 'standings', 'users']::text[]) as permission
+on conflict do nothing;
+
 insert into players (id, name, nickname, phone, payment_plan, skill_level, active)
 values
   ('player-victor', 'Victor', 'Victor', '', 'monthly', 1, true),
