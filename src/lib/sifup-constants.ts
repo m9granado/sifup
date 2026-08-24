@@ -3,9 +3,10 @@ import type { MatchTeamColor, PaymentStatus, Team } from "./types";
 export const PER_MATCH_AMOUNT = 3500;
 export const MONTHLY_AMOUNT = 20000;
 export const COURT_COST = 35000;
-export const WIN_POINTS = 4;
-export const DRAW_POINTS = 2;
-export const LOSS_POINTS = 1;
+export const WIN_POINTS = 3;
+export const DRAW_POINTS = 1;
+export const LOSS_POINTS = 0;
+export const STANDINGS_WINDOW = 5;
 export const SQUAD_TARGET = 12;
 
 export const ROYAL_GOAL_DIFF_TO_WIN = 2;

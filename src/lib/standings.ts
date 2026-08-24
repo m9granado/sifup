@@ -1,4 +1,4 @@
-import { DRAW_POINTS, LOSS_POINTS, WIN_POINTS } from "./sifup-constants";
+import { DRAW_POINTS, LOSS_POINTS, STANDINGS_WINDOW, WIN_POINTS } from "./sifup-constants";
 import type { MatchPlayer, MatchResult, MatchTeam } from "./types";
 
 type ScoredAppearance = Pick<MatchPlayer, "matchId" | "team">;
@@ -15,6 +15,13 @@ export type PlayerRecord = {
   points: number;
   form: string;
 };
+
+export function recentAppearances<T extends { matchId: string }>(appearances: T[], matchDates: Map<string, string>) {
+  return appearances
+    .slice()
+    .sort((a, b) => (matchDates.get(b.matchId) ?? "").localeCompare(matchDates.get(a.matchId) ?? ""))
+    .slice(0, STANDINGS_WINDOW);
+}
 
 export function pointsForMatchRow(row: ScoredAppearance, result?: MatchOutcome) {
   if (!result || row.team === "none") return 0;

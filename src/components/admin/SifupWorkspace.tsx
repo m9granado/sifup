@@ -22,7 +22,7 @@ import {
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
 import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
-import { calculatePlayerRecord, calculateRoyalRecord, combinePlayerRecords, pointsForMatchRow } from "@/lib/standings";
+import { calculatePlayerRecord, calculateRoyalRecord, combinePlayerRecords, pointsForMatchRow, recentAppearances } from "@/lib/standings";
 import { matchSummaryMessage, royalTeamsMessage, teamsMessage } from "@/lib/whatsapp";
 import { COURT_COST, LOSS_POINTS, MATCH_TEAM_COLOR_CLASSES, MATCH_TEAM_COLOR_LABEL, MATCH_TEAM_DEFAULT_COLORS, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, ROYAL_GAME_TIME_LIMIT_MIN, ROYAL_GOAL_DIFF_TO_WIN, ROYAL_SQUAD_TARGET, SQUAD_TARGET, WIN_POINTS } from "@/lib/sifup-constants";
 import type { ClubExpense, GameEndReason, Match, MatchFormat, MatchGame, MatchPlayer, MatchResult, MatchTeam, MatchTeamColor, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
@@ -147,8 +147,10 @@ function matchFormatById(data: SifupData) {
 }
 
 function combinedRecordForAppearances(appearances: MatchPlayer[], data: SifupData, formatById: Map<string, Match["matchFormat"]>) {
-  const classicAppearances = appearances.filter((row) => (formatById.get(row.matchId) ?? "clasico") === "clasico");
-  const royalAppearances = appearances.filter((row) => formatById.get(row.matchId) === "rey_de_la_cancha");
+  const matchDates = new Map(data.matches.map((match) => [match.id, match.date]));
+  const recent = recentAppearances(appearances, matchDates);
+  const classicAppearances = recent.filter((row) => (formatById.get(row.matchId) ?? "clasico") === "clasico");
+  const royalAppearances = recent.filter((row) => formatById.get(row.matchId) === "rey_de_la_cancha");
   return combinePlayerRecords(
     calculatePlayerRecord(classicAppearances, data.results),
     calculateRoyalRecord(royalAppearances, data.matchTeams),

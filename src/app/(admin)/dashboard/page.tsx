@@ -2,7 +2,7 @@ import Link from "next/link";
 import { CalendarDays, CircleDollarSign, MapPin, Medal, Trophy } from "lucide-react";
 import { getSifupData } from "@/lib/repository";
 import { SQUAD_TARGET } from "@/lib/sifup-constants";
-import { calculatePlayerRecord, pointsForMatchRow } from "@/lib/standings";
+import { calculatePlayerRecord, pointsForMatchRow, recentAppearances } from "@/lib/standings";
 import { formatCurrency, sortByWhatsappOrder, summarizeMatch, whatsappOrderFor } from "@/lib/store";
 import type { Match, MatchPlayer, MatchResult, Player, Team, Winner } from "@/lib/types";
 
@@ -66,11 +66,12 @@ function playerInitials(player: string, nickname?: string) {
   return (nickname || player).slice(0, 2).toUpperCase();
 }
 
-function buildStandings(players: Player[], matchPlayers: MatchPlayer[], results: MatchResult[]): PlayerStanding[] {
+function buildStandings(players: Player[], matchPlayers: MatchPlayer[], results: MatchResult[], matches: Match[]): PlayerStanding[] {
+  const matchDates = new Map(matches.map((match) => [match.id, match.date]));
   return players
     .map((player) => {
       const appearances = matchPlayers.filter((row) => (row.name === player.name || row.playerId === player.id) && row.attendanceStatus === "confirmed");
-      const record = calculatePlayerRecord(appearances, results);
+      const record = calculatePlayerRecord(recentAppearances(appearances, matchDates), results);
 
       return {
         id: player.id,
@@ -132,7 +133,7 @@ export default async function Page() {
   const lastResult = resultItems.sort((a, b) => matchTime(b.match).localeCompare(matchTime(a.match)))[0];
   const lastResultRows = lastResult ? sortByWhatsappOrder(data.matchPlayers.filter((row) => row.matchId === lastResult.match.id && row.attendanceStatus === "confirmed")) : [];
   const winner = lastResult?.result.winner;
-  const fullStandings = buildStandings(data.players, data.matchPlayers, data.results);
+  const fullStandings = buildStandings(data.players, data.matchPlayers, data.results, data.matches);
   const standingMap = standingsLookup(fullStandings);
   const standings = fullStandings.slice(0, 5);
   const nextTopRows = topConfirmedRows(nextMatchRows, data.players, standingMap);
