@@ -18,6 +18,7 @@ export function LoginForm() {
       <div className="space-y-2">
         <label className="text-sm font-medium text-gray-800" htmlFor="password">
           Contraseña
+        </label>
         <input
           id="password"
           name="password"
