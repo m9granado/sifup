@@ -16,11 +16,8 @@ export type PlayerRecord = {
   form: string;
 };
 
-export function recentAppearances<T extends { matchId: string }>(appearances: T[], matchDates: Map<string, string>) {
-  return appearances
-    .slice()
-    .sort((a, b) => (matchDates.get(b.matchId) ?? "").localeCompare(matchDates.get(a.matchId) ?? ""))
-    .slice(0, STANDINGS_WINDOW);
+export function recentMatchIds(matches: { id: string; date: string }[]) {
+  return new Set(matches.slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, STANDINGS_WINDOW).map((match) => match.id));
 }
 
 export function pointsForMatchRow(row: ScoredAppearance, result?: MatchOutcome) {
