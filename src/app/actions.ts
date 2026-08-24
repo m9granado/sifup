@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createSession, destroySession, validPassword, requirePermission } from "@/lib/auth";
-import { getSql } from "@/lib/db";
+import { getSql, hasDatabaseUrl } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
 import { randomUUID } from "crypto";
 import {
@@ -28,8 +28,20 @@ export type LoginState = { error: string };
 export async function loginAction(_state: LoginState, formData: FormData): Promise<LoginState> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
-  if (!process.env.DATABASE_URL) return { error: "DATABASE_URL no esta configurado." };
+  if (!hasDatabaseUrl()) return { error: "No hay una conexión de base de datos configurada." };
   const sql = getSql();
+  await sql.unsafe(`
+    create table if not exists app_users (
+      id text primary key, email text not null unique, password_hash text not null,
+      role text not null default 'member' check (role in ('admin', 'member')),
+      active boolean not null default true, created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+    );
+    create table if not exists user_permissions (
+      user_id text not null references app_users(id) on delete cascade,
+      permission text not null check (permission in ('dashboard', 'matches', 'players', 'payments', 'standings', 'users')),
+      primary key (user_id, permission)
+    );
+  `);
   let users = await sql<Array<{ id: string; password_hash: string }>>`select id, password_hash from app_users where email = ${email} and active = true`;
   // Bootstrap the first administrator once, then all access is database-driven.
   if (!users[0] && email === process.env.SIFUP_ADMIN_EMAIL && password === process.env.SIFUP_ADMIN_PASSWORD) {

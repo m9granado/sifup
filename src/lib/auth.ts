@@ -35,8 +35,8 @@ function verifySession(token?: string): string | null {
 }
 
 async function findUser(id: string): Promise<SessionUser | null> {
-  const { getSql } = await import("@/lib/db");
-  if (!process.env.DATABASE_URL) return null;
+  const { getSql, hasDatabaseUrl } = await import("@/lib/db");
+  if (!hasDatabaseUrl()) return null;
   const sql = getSql();
   const rows = await sql<SessionUser[]>`
     select u.id, u.email, u.role,
