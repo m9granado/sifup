@@ -22,7 +22,7 @@ import {
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
 import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
-import { calculatePlayerRecord, calculateRoyalRecord, combinePlayerRecords, pointsForMatchRow, recentMatchIds } from "@/lib/standings";
+import { calculateRankingRecord, pointsForMatchRow, rankingMatches } from "@/lib/standings";
 import { matchSummaryMessage, royalTeamsMessage, teamsMessage } from "@/lib/whatsapp";
 import { COURT_COST, LOSS_POINTS, MATCH_TEAM_COLOR_CLASSES, MATCH_TEAM_COLOR_LABEL, MATCH_TEAM_DEFAULT_COLORS, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, ROYAL_GAME_TIME_LIMIT_MIN, ROYAL_GOAL_DIFF_TO_WIN, ROYAL_SQUAD_TARGET, SQUAD_TARGET, WIN_POINTS } from "@/lib/sifup-constants";
 import type { ClubExpense, GameEndReason, Match, MatchFormat, MatchGame, MatchPlayer, MatchResult, MatchTeam, MatchTeamColor, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
@@ -142,27 +142,11 @@ function isMonthlyMatchRow(row: MatchPlayer, players: Player[]) {
   return playerForMatchRow(row, players)?.paymentPlan === "monthly" || row.note.toLowerCase().includes("mensualidad");
 }
 
-function matchFormatById(data: SifupData) {
-  return new Map(data.matches.map((match) => [match.id, match.matchFormat]));
-}
-
-function combinedRecordForAppearances(appearances: MatchPlayer[], data: SifupData, formatById: Map<string, Match["matchFormat"]>) {
-  const recentIds = recentMatchIds(data.matches);
-  const recent = appearances.filter((row) => recentIds.has(row.matchId));
-  const classicAppearances = recent.filter((row) => (formatById.get(row.matchId) ?? "clasico") === "clasico");
-  const royalAppearances = recent.filter((row) => formatById.get(row.matchId) === "rey_de_la_cancha");
-  return combinePlayerRecords(
-    calculatePlayerRecord(classicAppearances, data.results),
-    calculateRoyalRecord(royalAppearances, data.matchTeams),
-  );
-}
-
 function buildPlayerStandings(data: SifupData) {
-  const formatById = matchFormatById(data);
   const ranked = data.players
     .map((player) => {
       const appearances = data.matchPlayers.filter((row) => matchRowBelongsToPlayer(row, player, data.players) && row.attendanceStatus === "confirmed");
-      const record = combinedRecordForAppearances(appearances, data, formatById);
+      const record = calculateRankingRecord(appearances, data.matches, data.results, data.matchTeams);
       return {
         id: player.id,
         name: player.name,
@@ -179,7 +163,7 @@ function buildPlayerStandings(data: SifupData) {
 
 function computePlayerStats(player: Player, data: SifupData) {
   const appearances = data.matchPlayers.filter((row) => matchRowBelongsToPlayer(row, player, data.players) && row.attendanceStatus === "confirmed");
-  const record = combinedRecordForAppearances(appearances, data, matchFormatById(data));
+  const record = calculateRankingRecord(appearances, data.matches, data.results, data.matchTeams);
   const matchDebt = appearances.reduce((sum, row) => sum + Math.max(row.amountDue - row.amountPaid, 0), 0);
   const monthlyDebt = data.monthlyPayments.filter((payment) => payment.playerId === player.id).reduce((sum, payment) => sum + Math.max(payment.expectedAmount - payment.amountPaid, 0), 0);
   return {
@@ -3660,12 +3644,7 @@ export function StandingsPage({ initialData }: InitialDataProps) {
     );
   }, [upcomingMatch, data.matchPlayers]);
 
-  const last5Matches = useMemo(() => {
-    return [...data.matches]
-      .filter((match) => data.results.some((r) => r.matchId === match.id))
-      .sort((a, b) => b.date.localeCompare(a.date))
-      .slice(0, 5);
-  }, [data]);
+  const last5Matches = useMemo(() => rankingMatches(data.matches, data.results, data.matchTeams), [data]);
 
   const topThree = filteredStandings.slice(0, 3);
   const totalPlayed = data.results.length;

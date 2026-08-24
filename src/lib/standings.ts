@@ -1,5 +1,5 @@
 import { DRAW_POINTS, LOSS_POINTS, STANDINGS_WINDOW, WIN_POINTS } from "./sifup-constants";
-import type { MatchPlayer, MatchResult, MatchTeam } from "./types";
+import type { Match, MatchPlayer, MatchResult, MatchTeam } from "./types";
 
 type ScoredAppearance = Pick<MatchPlayer, "matchId" | "team">;
 type MatchOutcome = Pick<MatchResult, "matchId" | "winner">;
@@ -16,8 +16,31 @@ export type PlayerRecord = {
   form: string;
 };
 
-export function recentMatchIds(matches: { id: string; date: string }[]) {
-  return new Set(matches.slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, STANDINGS_WINDOW).map((match) => match.id));
+export function rankingMatches(matches: Pick<Match, "id" | "date" | "time" | "weekLabel" | "matchFormat">[], results: Pick<MatchResult, "matchId">[], teams: Pick<MatchTeam, "matchId" | "finalRank">[]) {
+  const resultMatchIds = new Set(results.map((result) => result.matchId));
+  const teamsByMatch = new Map<string, Pick<MatchTeam, "matchId" | "finalRank">[]>();
+  teams.forEach((team) => teamsByMatch.set(team.matchId, [...(teamsByMatch.get(team.matchId) ?? []), team]));
+
+  return matches
+    .filter((match) => {
+      if (match.matchFormat !== "rey_de_la_cancha") return resultMatchIds.has(match.id);
+      const matchTeams = teamsByMatch.get(match.id) ?? [];
+      return matchTeams.length > 0 && matchTeams.every((team) => team.finalRank !== undefined);
+    })
+    .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
+    .slice(0, STANDINGS_WINDOW);
+}
+
+export function calculateRankingRecord(appearances: MatchPlayer[], matches: Match[], results: MatchResult[], teams: MatchTeam[]) {
+  const rankingMatchIds = new Set(rankingMatches(matches, results, teams).map((match) => match.id));
+  const eligible = appearances.filter((row) => rankingMatchIds.has(row.matchId));
+  const formatByMatchId = new Map(matches.map((match) => [match.id, match.matchFormat]));
+  const classicAppearances = eligible.filter((row) => (formatByMatchId.get(row.matchId) ?? "clasico") === "clasico");
+  const royalAppearances = eligible.filter((row) => formatByMatchId.get(row.matchId) === "rey_de_la_cancha");
+  return combinePlayerRecords(
+    calculatePlayerRecord(classicAppearances, results),
+    calculateRoyalRecord(royalAppearances, teams),
+  );
 }
 
 export function pointsForMatchRow(row: ScoredAppearance, result?: MatchOutcome) {
@@ -32,10 +55,12 @@ export function calculatePlayerRecord(appearances: ScoredAppearance[], results: 
   let draws = 0;
   let losses = 0;
   let points = 0;
+  let played = 0;
 
   appearances.forEach((row) => {
     const result = resultsByMatch.get(row.matchId);
     if (!result || row.team === "none") return;
+    played += 1;
 
     if (result.winner === "draw") draws += 1;
     else if (result.winner === row.team) wins += 1;
@@ -44,15 +69,14 @@ export function calculatePlayerRecord(appearances: ScoredAppearance[], results: 
     points += pointsForMatchRow(row, result);
   });
 
-  const decided = wins + losses + draws;
   return {
-    played: appearances.length,
+    played,
     wins,
     draws,
     losses,
-    winRate: appearances.length ? Math.round((wins / appearances.length) * 100) : 0,
+    winRate: played ? Math.round((wins / played) * 100) : 0,
     points,
-    form: decided ? `${wins}-${draws}-${losses}` : "0-0-0",
+    form: played ? `${wins}-${draws}-${losses}` : "0-0-0",
   };
 }
 
@@ -67,11 +91,13 @@ export function calculateRoyalRecord(appearances: RoyalAppearance[], teams: Roya
   let wins = 0;
   let losses = 0;
   let points = 0;
+  let played = 0;
 
   appearances.forEach((row) => {
     if (!row.teamId) return;
     const team = teamsById.get(row.teamId);
     if (!team || !team.finalRank) return;
+    played += 1;
 
     if (team.finalRank === 1) {
       wins += 1;
@@ -82,15 +108,14 @@ export function calculateRoyalRecord(appearances: RoyalAppearance[], teams: Roya
     }
   });
 
-  const decided = wins + losses;
   return {
-    played: appearances.length,
+    played,
     wins,
     draws: 0,
     losses,
-    winRate: appearances.length ? Math.round((wins / appearances.length) * 100) : 0,
+    winRate: played ? Math.round((wins / played) * 100) : 0,
     points,
-    form: decided ? `${wins}-0-${losses}` : "0-0-0",
+    form: played ? `${wins}-0-${losses}` : "0-0-0",
   };
 }
 

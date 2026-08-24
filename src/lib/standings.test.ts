@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { calculatePlayerRecord, calculateRoyalRecord, pointsForMatchRow } from "./standings";
+import { calculatePlayerRecord, calculateRoyalRecord, pointsForMatchRow, rankingMatches } from "./standings";
 
 test("calculatePlayerRecord applies 4/2/1 to wins, draws and losses", () => {
   const appearances = [
@@ -18,14 +18,29 @@ test("calculatePlayerRecord applies 4/2/1 to wins, draws and losses", () => {
   ];
 
   assert.deepEqual(calculatePlayerRecord(appearances, results), {
-    played: 5,
+    played: 3,
     wins: 1,
     draws: 1,
     losses: 1,
-    winRate: 20,
+    winRate: 33,
     points: 7,
     form: "1-1-1",
   });
+});
+
+test("rankingMatches uses only the five most recent completed matches", () => {
+  const matches = [
+    { id: "future", date: "2026-09-01", time: "21:00", weekLabel: "future", matchFormat: "clasico" as const },
+    { id: "six", date: "2026-08-06", time: "21:00", weekLabel: "six", matchFormat: "clasico" as const },
+    { id: "five", date: "2026-08-05", time: "21:00", weekLabel: "five", matchFormat: "clasico" as const },
+    { id: "four", date: "2026-08-04", time: "21:00", weekLabel: "four", matchFormat: "clasico" as const },
+    { id: "three", date: "2026-08-03", time: "21:00", weekLabel: "three", matchFormat: "clasico" as const },
+    { id: "two", date: "2026-08-02", time: "21:00", weekLabel: "two", matchFormat: "clasico" as const },
+    { id: "one", date: "2026-08-01", time: "21:00", weekLabel: "one", matchFormat: "clasico" as const },
+  ];
+  const results = ["six", "five", "four", "three", "two", "one"].map((matchId) => ({ matchId, winner: "A" as const }));
+
+  assert.deepEqual(rankingMatches(matches, results, []).map((match) => match.id), ["six", "five", "four", "three", "two"]);
 });
 
 test("pointsForMatchRow awards one point for a completed loss", () => {

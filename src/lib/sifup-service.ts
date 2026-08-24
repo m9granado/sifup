@@ -7,7 +7,7 @@ import { parseWhatsAppList } from "./parser";
 import { getSifupData, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment, savePlayer, mergePlayers as dbMergePlayers } from "./repository";
 import { newId, nextMatch, sortByWhatsappOrder, summarizeMatch } from "./store";
 import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, standingsMessage, teamsMessage } from "./whatsapp";
-import { calculatePlayerRecord, recentMatchIds } from "./standings";
+import { calculateRankingRecord } from "./standings";
 import type { AttendanceStatus, Match, MatchPlayer, MatchResult, MonthlyPayment, Player, Team, Winner } from "./types";
 
 export type ImportWhatsAppMatchInput = {
@@ -603,14 +603,13 @@ export type GetPlayerStandingsInput = {
 
 export async function getPlayerStandings({ limit = 20, minPlayed = 1 }: GetPlayerStandingsInput = {}) {
   const data = await getSifupData();
-  const recentIds = recentMatchIds(data.matches);
 
   const ranked = data.players
     .map((player) => {
       const appearances = data.matchPlayers.filter(
-        (row) => row.playerId === player.id && row.attendanceStatus === "confirmed",
+        (row) => (row.playerId === player.id || row.name.toLowerCase() === player.name.toLowerCase()) && row.attendanceStatus === "confirmed",
       );
-      const record = calculatePlayerRecord(appearances.filter((row) => recentIds.has(row.matchId)), data.results);
+      const record = calculateRankingRecord(appearances, data.matches, data.results, data.matchTeams);
       return { id: player.id, name: player.name, isGoalkeeper: player.isGoalkeeper, ...record };
     })
     .filter((p) => p.played >= minPlayed)
@@ -634,7 +633,6 @@ function suggestedTeamForRank(pairIndex: number, positionInPair: number): Team {
 
 export async function generateBalancedTeams(input: { matchId?: string; date?: string } = {}) {
   const data = await getSifupData();
-  const recentIds = recentMatchIds(data.matches);
   const match = resolveMatch(data.matches, input);
   if (!match) throw new Error("No hay partidos registrados.");
 
@@ -643,9 +641,9 @@ export async function generateBalancedTeams(input: { matchId?: string; date?: st
   data.players
     .map((player) => {
       const appearances = data.matchPlayers.filter(
-        (row) => row.playerId === player.id && row.attendanceStatus === "confirmed",
+        (row) => (row.playerId === player.id || row.name.toLowerCase() === player.name.toLowerCase()) && row.attendanceStatus === "confirmed",
       );
-      const record = calculatePlayerRecord(appearances.filter((row) => recentIds.has(row.matchId)), data.results);
+      const record = calculateRankingRecord(appearances, data.matches, data.results, data.matchTeams);
       return { id: player.id, points: record.points };
     })
     .sort((a, b) => b.points - a.points)
