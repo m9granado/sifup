@@ -1471,7 +1471,7 @@ function UnifiedMatchRoster({
   const showUnanswered = tab === "all" || tab === "unanswered";
   const showOut = tab === "all" || tab === "out";
 
-  const totalCols = columns.length + (teamsAssigned ? 1 : 0) + 1;
+  const totalCols = columns.length + (teamsAssigned ? 1 : 0) + (isAdmin ? 1 : 0);
 
   return (
     <div className="space-y-4">
@@ -1558,7 +1558,7 @@ function UnifiedMatchRoster({
                   </button>
                 </th>
               ) : null}
-              <th className="px-3 py-2 text-center">Acciones</th>
+              {isAdmin ? <th className="px-3 py-2 text-center">Acciones</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -1645,30 +1645,32 @@ function UnifiedMatchRoster({
                             {row.team === "A" ? "Rojo" : row.team === "B" ? "Amarillo" : "Sin asignar"}
                           </td>
                         ) : null}
-                        <td className="px-3 py-2.5 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            {whatsapp ? (
-                              <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15 transition" title={`WhatsApp ${playerName}`}>
-                                <MessageCircle size={15} />
-                              </a>
-                            ) : null}
-                            {isAdmin && onOpenDetails ? (
-                              <button type="button" onClick={() => onOpenDetails(row.id)} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14] transition" title={`Editar ${playerName}`}>
-                                <Pencil size={15} />
-                              </button>
-                            ) : null}
-                            {isAdmin && onMarkOut ? (
-                              <button type="button" onClick={() => onMarkOut(row.id)} className="rounded-md p-1.5 text-(--red) hover:bg-(--red)/15 transition" title={`Marcar que ${playerName} no puede jugar`}>
-                                <X size={15} />
-                              </button>
-                            ) : null}
-                            {isAdmin && !player && onAssociate ? (
-                              <button type="button" onClick={() => onAssociate(row.id)} className="rounded-md p-1.5 text-(--cyan) hover:bg-(--cyan)/15 transition" title="Asociar a jugador existente">
-                                <UserPlus size={15} />
-                              </button>
-                            ) : null}
-                          </div>
-                        </td>
+                        {isAdmin ? (
+                          <td className="px-3 py-2.5 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              {whatsapp ? (
+                                <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15 transition" title={`WhatsApp ${playerName}`}>
+                                  <MessageCircle size={15} />
+                                </a>
+                              ) : null}
+                              {onOpenDetails ? (
+                                <button type="button" onClick={() => onOpenDetails(row.id)} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14] transition" title={`Editar ${playerName}`}>
+                                  <Pencil size={15} />
+                                </button>
+                              ) : null}
+                              {onMarkOut ? (
+                                <button type="button" onClick={() => onMarkOut(row.id)} className="rounded-md p-1.5 text-(--red) hover:bg-(--red)/15 transition" title={`Marcar que ${playerName} no puede jugar`}>
+                                  <X size={15} />
+                                </button>
+                              ) : null}
+                              {!player && onAssociate ? (
+                                <button type="button" onClick={() => onAssociate(row.id)} className="rounded-md p-1.5 text-(--cyan) hover:bg-(--cyan)/15 transition" title="Asociar a jugador existente">
+                                  <UserPlus size={15} />
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
+                        ) : null}
                       </tr>
                     );
                   })
@@ -1754,37 +1756,39 @@ function UnifiedMatchRoster({
                             —
                           </td>
                         ) : null}
-                        <td className="px-3 py-2.5 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
-                            {whatsapp ? (
-                              <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15 transition" title={`Consultar a ${item.player.name} por WhatsApp`}>
-                                <MessageCircle size={15} />
-                              </a>
-                            ) : null}
-                            {isAdmin && onQuickConfirmPlayer ? (
-                              <button
-                                type="button"
-                                onClick={() => onQuickConfirmPlayer(item.player)}
-                                className="inline-flex items-center gap-1 rounded bg-(--green)/15 px-2 py-1 text-xs font-bold text-(--green) hover:bg-(--green)/25 transition"
-                                title={`Confirmar a ${item.player.name}`}
-                              >
-                                <Check size={14} />
-                                <span className="hidden xl:inline">Voy</span>
-                              </button>
-                            ) : null}
-                            {isAdmin && onQuickMarkPlayerOut ? (
-                              <button
-                                type="button"
-                                onClick={() => onQuickMarkPlayerOut(item.player)}
-                                className="inline-flex items-center gap-1 rounded bg-(--red)/15 px-2 py-1 text-xs font-bold text-(--red) hover:bg-(--red)/25 transition"
-                                title={`Marcar que ${item.player.name} no va`}
-                              >
-                                <X size={14} />
-                                <span className="hidden xl:inline">No va</span>
-                              </button>
-                            ) : null}
-                          </div>
-                        </td>
+                        {isAdmin ? (
+                          <td className="px-3 py-2.5 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              {whatsapp ? (
+                                <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15 transition" title={`Consultar a ${item.player.name} por WhatsApp`}>
+                                  <MessageCircle size={15} />
+                                </a>
+                              ) : null}
+                              {onQuickConfirmPlayer ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onQuickConfirmPlayer(item.player)}
+                                  className="inline-flex items-center gap-1 rounded bg-(--green)/15 px-2 py-1 text-xs font-bold text-(--green) hover:bg-(--green)/25 transition"
+                                  title={`Confirmar a ${item.player.name}`}
+                                >
+                                  <Check size={14} />
+                                  <span className="hidden xl:inline">Voy</span>
+                                </button>
+                              ) : null}
+                              {onQuickMarkPlayerOut ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onQuickMarkPlayerOut(item.player)}
+                                  className="inline-flex items-center gap-1 rounded bg-(--red)/15 px-2 py-1 text-xs font-bold text-(--red) hover:bg-(--red)/25 transition"
+                                  title={`Marcar que ${item.player.name} no va`}
+                                >
+                                  <X size={14} />
+                                  <span className="hidden xl:inline">No va</span>
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
+                        ) : null}
                       </tr>
                     );
                   })
@@ -1899,36 +1903,38 @@ function UnifiedMatchRoster({
                             —
                           </td>
                         ) : null}
-                        <td className="px-3 py-2.5 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            {whatsapp ? (
-                              <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15 transition" title={`WhatsApp ${playerName}`}>
-                                <MessageCircle size={15} />
-                              </a>
-                            ) : null}
-                            {isAdmin && onRejoin ? (
-                              <button
-                                type="button"
-                                onClick={() => onRejoin(row.id)}
-                                className="inline-flex items-center gap-1 rounded bg-(--green)/15 px-2 py-1 text-xs font-bold text-(--green) hover:bg-(--green)/25 transition"
-                                title={`Reincorporar a ${playerName} como confirmado`}
-                              >
-                                <RotateCcw size={14} />
-                                <span className="hidden xl:inline">Reincorporar</span>
-                              </button>
-                            ) : null}
-                            {isAdmin && onRemove ? (
-                              <button
-                                type="button"
-                                onClick={() => onRemove(row.id)}
-                                className="rounded-md p-1.5 text-(--red) hover:bg-(--red)/15 transition"
-                                title={`Quitar a ${playerName} del partido`}
-                              >
-                                <UserMinus size={15} />
-                              </button>
-                            ) : null}
-                          </div>
-                        </td>
+                        {isAdmin ? (
+                          <td className="px-3 py-2.5 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              {whatsapp ? (
+                                <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15 transition" title={`WhatsApp ${playerName}`}>
+                                  <MessageCircle size={15} />
+                                </a>
+                              ) : null}
+                              {onRejoin ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onRejoin(row.id)}
+                                  className="inline-flex items-center gap-1 rounded bg-(--green)/15 px-2 py-1 text-xs font-bold text-(--green) hover:bg-(--green)/25 transition"
+                                  title={`Reincorporar a ${playerName} como confirmado`}
+                                >
+                                  <RotateCcw size={14} />
+                                  <span className="hidden xl:inline">Reincorporar</span>
+                                </button>
+                              ) : null}
+                              {onRemove ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onRemove(row.id)}
+                                  className="rounded-md p-1.5 text-(--red) hover:bg-(--red)/15 transition"
+                                  title={`Quitar a ${playerName} del partido`}
+                                >
+                                  <UserMinus size={15} />
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
+                        ) : null}
                       </tr>
                     );
                   })
