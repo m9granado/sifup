@@ -1238,7 +1238,7 @@ function EditableRows({
   );
 }
 
-type MatchPlayerSortKey = "order" | "name" | "status" | "rank" | "points" | "played" | "wins" | "draws" | "losses" | "team";
+type MatchPlayerSortKey = "order" | "name" | "rank" | "points" | "played" | "wins" | "draws" | "losses" | "team";
 type FilterTab = "all" | "confirmed" | "unanswered" | "out";
 
 type UnansweredPlayerItem = {
@@ -1351,7 +1351,6 @@ function UnifiedMatchRoster({
         if (sort.key === "name") return player?.name ?? row.name;
         if (sort.key === "team") return row.team;
         if (sort.key === "rank") return standing?.rank ?? Number.POSITIVE_INFINITY;
-        if (sort.key === "status") return 0;
         return standing?.[sort.key as "points" | "played" | "wins" | "draws" | "losses"] ?? -1;
       };
 
@@ -1382,7 +1381,6 @@ function UnifiedMatchRoster({
         if (sort.key === "name") return item.player.name;
         if (sort.key === "team") return "";
         if (sort.key === "rank") return item.standing?.rank ?? Number.POSITIVE_INFINITY;
-        if (sort.key === "status") return 1;
         if (sort.key === "played") return item.totalPlayed;
         return item.standing?.[sort.key as "points" | "wins" | "draws" | "losses"] ?? -1;
       };
@@ -1430,7 +1428,6 @@ function UnifiedMatchRoster({
         if (sort.key === "name") return player?.name ?? row.name;
         if (sort.key === "team") return "";
         if (sort.key === "rank") return standing?.rank ?? Number.POSITIVE_INFINITY;
-        if (sort.key === "status") return 2;
         return standing?.[sort.key as "points" | "played" | "wins" | "draws" | "losses"] ?? -1;
       };
 
@@ -1462,7 +1459,6 @@ function UnifiedMatchRoster({
   const columns: { key: MatchPlayerSortKey; label: string; className?: string; hideOnMobile?: boolean }[] = [
     { key: "order", label: "#", className: "w-12 text-center" },
     { key: "name", label: "Jugador", className: "text-left" },
-    { key: "status", label: "Estado", className: "text-center" },
     { key: "rank", label: "Ranking", className: "text-center" },
     { key: "points", label: "Pts", className: "text-center text-(--gold)" },
     { key: "played", label: "PJ", className: "text-center" },
@@ -1626,11 +1622,6 @@ function UnifiedMatchRoster({
                             ) : null}
                           </div>
                         </td>
-                        <td className="px-3 py-2.5 text-center">
-                          <span className="inline-flex items-center rounded-full border border-(--green)/40 bg-(--green)/15 px-2 py-0.5 text-[11px] font-black text-(--green)">
-                            ✓ Confirmado
-                          </span>
-                        </td>
                         <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">
                           {standing ? `#${standing.rank} · ${standing.played} PJ` : "Sin ranking"}
                         </td>
@@ -1739,11 +1730,6 @@ function UnifiedMatchRoster({
                               </span>
                             ) : null}
                           </div>
-                        </td>
-                        <td className="px-3 py-2.5 text-center">
-                          <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/15 px-2 py-0.5 text-[11px] font-black text-amber-300">
-                            ⏳ Sin respuesta
-                          </span>
                         </td>
                         <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">
                           {standing ? `#${standing.rank} · ${standing.played} PJ` : "Sin ranking"}
@@ -1889,11 +1875,6 @@ function UnifiedMatchRoster({
                               <span className="text-[10px] italic text-(--muted)">({row.note})</span>
                             ) : null}
                           </div>
-                        </td>
-                        <td className="px-3 py-2.5 text-center">
-                          <span className="inline-flex items-center rounded-full border border-(--red)/30 bg-(--red)/15 px-2 py-0.5 text-[11px] font-black text-(--red)">
-                            ✗ No va
-                          </span>
                         </td>
                         <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">
                           {standing ? `#${standing.rank} · ${standing.played} PJ` : "Sin ranking"}
