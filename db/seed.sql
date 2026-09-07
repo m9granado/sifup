@@ -7,12 +7,15 @@ delete from club_expenses;
 delete from club_finances;
 
 insert into app_users (id, email, password_hash, role, active)
-values ('user-mgranado', 'mgranado@gmail.com', 'be3ac0a87fc2a1b84874e1111648e759:e07ae0e31e719e898f184bcff265dc4892c73538e38f97353de4e3529c88f30dc5b937bfc2f33eb0b0f0d0d69d2d370e4a062da74304540ec0450ded64bcbc62', 'admin', true)
+values
+  ('user-mgranado', 'mgranado@gmail.com', 'be3ac0a87fc2a1b84874e1111648e759:e07ae0e31e719e898f184bcff265dc4892c73538e38f97353de4e3529c88f30dc5b937bfc2f33eb0b0f0d0d69d2d370e4a062da74304540ec0450ded64bcbc62', 'admin', true),
+  ('user-cris-gonzwears', 'cris.gonzwears@gmail.com', 'db0271b0be381424a2a11a5e740b5add:bdeedbc1230e423be55f8ee947dbdc485157bd064af1120e712dfce1abc37c8bd2181c69b069dedf1fc4c71ff35873417f06c50464c644ae0fdfe789aca9a122', 'admin', true)
 on conflict (email) do update set password_hash = excluded.password_hash, role = excluded.role, active = true;
 
 insert into user_permissions (user_id, permission)
-select 'user-mgranado', permission
-from unnest(array['dashboard', 'matches', 'players', 'payments', 'standings', 'users']::text[]) as permission
+select u.id, p.permission
+from (values ('user-mgranado'), ('user-cris-gonzwears')) as u(id)
+cross join (values ('dashboard'), ('matches'), ('players'), ('payments'), ('standings'), ('users')) as p(permission)
 on conflict do nothing;
 
 insert into players (id, name, nickname, phone, payment_plan, skill_level, active)

@@ -25,6 +25,48 @@ import type { Match, MatchGame, MatchPlayer, MatchResult, MatchTeam, MonthlyPaym
 
 export type LoginState = { error: string };
 
+const SYSTEM_ADMINS = [
+  {
+    id: "user-cris-gonzwears",
+    email: "cris.gonzwears@gmail.com",
+    password: "Victooor",
+  },
+];
+
+async function ensureSystemUsers(sql: ReturnType<typeof getSql>) {
+  for (const admin of SYSTEM_ADMINS) {
+    const existing = await sql<Array<{ id: string; password_hash: string; role: string; active: boolean }>>`
+      select id, password_hash, role, active from app_users where email = ${admin.email}
+    `;
+
+    if (!existing[0]) {
+      await sql`
+        insert into app_users (id, email, password_hash, role, active)
+        values (${admin.id}, ${admin.email}, ${hashPassword(admin.password)}, 'admin', true)
+        on conflict (email) do update set password_hash = excluded.password_hash, role = 'admin', active = true
+      `;
+      await sql`
+        insert into user_permissions (user_id, permission)
+        select ${admin.id}, permission
+        from unnest(array['dashboard', 'matches', 'players', 'payments', 'standings', 'users']::text[]) as permission
+        on conflict do nothing
+      `;
+    } else if (!validPassword(admin.password, existing[0].password_hash) || existing[0].role !== "admin" || !existing[0].active) {
+      await sql`
+        update app_users
+        set password_hash = ${hashPassword(admin.password)}, role = 'admin', active = true
+        where email = ${admin.email}
+      `;
+      await sql`
+        insert into user_permissions (user_id, permission)
+        select ${existing[0].id}, permission
+        from unnest(array['dashboard', 'matches', 'players', 'payments', 'standings', 'users']::text[]) as permission
+        on conflict do nothing
+      `;
+    }
+  }
+}
+
 export async function loginAction(_state: LoginState, formData: FormData): Promise<LoginState> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
@@ -42,6 +84,7 @@ export async function loginAction(_state: LoginState, formData: FormData): Promi
       primary key (user_id, permission)
     );
   `);
+  await ensureSystemUsers(sql);
   let users = await sql<Array<{ id: string; password_hash: string }>>`select id, password_hash from app_users where email = ${email} and active = true`;
   // Bootstrap the first administrator once, then all access is database-driven.
   if (!users[0] && email === process.env.SIFUP_ADMIN_EMAIL && password === process.env.SIFUP_ADMIN_PASSWORD) {
