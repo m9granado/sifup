@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, MapPin, Medal, MessageCircle, Pencil, Plus, Save, Share, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
+import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, MapPin, Medal, MessageCircle, Pencil, Plus, RotateCcw, Save, Search, Share, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
 import {
   clearMatchFinalStandingAction,
   createMatchAction,
@@ -25,7 +25,7 @@ import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers,
 import { calculateRankingRecord, pointsForMatchRow, rankingMatches } from "@/lib/standings";
 import { matchSummaryMessage, royalTeamsMessage, teamsMessage } from "@/lib/whatsapp";
 import { COURT_COST, LOSS_POINTS, MATCH_TEAM_COLOR_CLASSES, MATCH_TEAM_COLOR_LABEL, MATCH_TEAM_DEFAULT_COLORS, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, ROYAL_GAME_TIME_LIMIT_MIN, ROYAL_GOAL_DIFF_TO_WIN, ROYAL_SQUAD_TARGET, SQUAD_TARGET, WIN_POINTS } from "@/lib/sifup-constants";
-import type { ClubExpense, GameEndReason, Match, MatchFormat, MatchGame, MatchPlayer, MatchResult, MatchTeam, MatchTeamColor, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
+import type { AttendanceStatus, ClubExpense, GameEndReason, Match, MatchFormat, MatchGame, MatchPlayer, MatchResult, MatchTeam, MatchTeamColor, MonthlyPayment, PaymentPlan, PaymentStatus, Player, SifupData, Team } from "@/lib/types";
 
 const sampleInput = `martes 30 junio, 21 horas, agrupacion de sordos:
 
@@ -108,11 +108,11 @@ function normalizePhone(phone: string) {
   return phone.replace(/[^\d]/g, "");
 }
 
-function whatsappHref(phone: string) {
+function whatsappHref(phone: string, text?: string) {
   const normalized = normalizePhone(phone);
   if (!normalized) return "";
   const withCountry = normalized.startsWith("56") ? normalized : `56${normalized}`;
-  return `https://wa.me/${withCountry}`;
+  return text ? `https://wa.me/${withCountry}?text=${encodeURIComponent(text)}` : `https://wa.me/${withCountry}`;
 }
 
 function googleMapsHref(location: string) {
@@ -1238,136 +1238,725 @@ function EditableRows({
   );
 }
 
-function PublicMatchRows({ rows, players, standings }: { rows: MatchPlayer[]; players: Player[]; standings: Map<string, PlayerStanding> }) {
-  const confirmedRows = rankedConfirmedRows(rows, players, standings);
-  const outRows = rows.filter((row) => row.attendanceStatus === "out");
-  const teamsAssigned = hasTeamsAssigned(rows);
+type MatchPlayerSortKey = "order" | "name" | "status" | "rank" | "points" | "played" | "wins" | "draws" | "losses" | "team";
+type FilterTab = "all" | "confirmed" | "unanswered" | "out";
 
-  return (
-    <div className="space-y-4">
-      <MatchPlayersTable rows={confirmedRows} players={players} standings={standings} teamsAssigned={teamsAssigned} />
-      {outRows.length > 0 ? (
-        <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">No pueden ({outRows.length})</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {outRows.map((row) => (
-              <span key={row.id} className="rounded-md border border-white/10 bg-black/15 px-2 py-1 text-xs font-bold text-(--muted)">{row.name}</span>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
+type UnansweredPlayerItem = {
+  player: Player;
+  existingRow?: MatchPlayer;
+  totalPlayed: number;
+  standing?: PlayerStanding;
+  isMonthly: boolean;
+  priorityScore: number;
+};
 
-type MatchPlayerSortKey = "name" | "rank" | "points" | "played" | "wins" | "draws" | "losses" | "team";
-
-function MatchPlayersTable({
+function UnifiedMatchRoster({
   rows,
   players,
+  allMatchPlayers,
   standings,
-  teamsAssigned,
+  match,
+  isAdmin,
   onOpenDetails,
   onMarkOut,
+  onRejoin,
+  onRemove,
   onAssociate,
+  onAddPlayer,
+  onQuickConfirmPlayer,
+  onQuickMarkPlayerOut,
 }: {
   rows: MatchPlayer[];
   players: Player[];
+  allMatchPlayers: MatchPlayer[];
   standings: Map<string, PlayerStanding>;
-  teamsAssigned: boolean;
-  onOpenDetails?: (row: MatchPlayer) => void;
-  onMarkOut?: (row: MatchPlayer) => void;
-  onAssociate?: (row: MatchPlayer) => void;
+  match: Match;
+  isAdmin: boolean;
+  onOpenDetails?: (rowId: string) => void;
+  onMarkOut?: (rowId: string) => void;
+  onRejoin?: (rowId: string) => void;
+  onRemove?: (rowId: string) => void;
+  onAssociate?: (rowId: string) => void;
+  onAddPlayer?: () => void;
+  onQuickConfirmPlayer?: (player: Player) => void;
+  onQuickMarkPlayerOut?: (player: Player) => void;
 }) {
-  const [sort, setSort] = useState<{ key: MatchPlayerSortKey; direction: "asc" | "desc" }>({ key: "points", direction: "desc" });
-  const columns: { key: MatchPlayerSortKey; label: string; className?: string }[] = [
-    { key: "name", label: "Jugador", className: "text-left" },
-    { key: "rank", label: "Ranking" },
-    { key: "points", label: "Pts", className: "text-(--gold)" },
-    { key: "played", label: "PJ" },
-    { key: "wins", label: "G", className: "text-(--green)" },
-    { key: "draws", label: "E" },
-    { key: "losses", label: "P", className: "text-(--red)" },
+  const [tab, setTab] = useState<FilterTab>("all");
+  const [search, setSearch] = useState("");
+  const [showAllUnanswered, setShowAllUnanswered] = useState(false);
+  const [sort, setSort] = useState<{ key: MatchPlayerSortKey; direction: "asc" | "desc" }>({ key: "order", direction: "asc" });
+
+  const isRoyal = match.matchFormat === "rey_de_la_cancha";
+  const squadTarget = isRoyal ? ROYAL_SQUAD_TARGET : SQUAD_TARGET;
+  const teamsAssigned = hasTeamsAssigned(rows);
+
+  const confirmedRows = useMemo(() => {
+    return rows.filter((row) => row.attendanceStatus === "confirmed");
+  }, [rows]);
+
+  const outRows = useMemo(() => {
+    return sortRowsWithMonthlyLast(rows.filter((row) => row.attendanceStatus === "out"), players);
+  }, [rows, players]);
+
+  const unansweredItems = useMemo(() => {
+    return players
+      .filter((player) => {
+        if (!player.active) return false;
+        const row = rows.find((r) => matchRowBelongsToPlayer(r, player, players));
+        if (row && (row.attendanceStatus === "confirmed" || row.attendanceStatus === "out")) {
+          return false;
+        }
+        return true;
+      })
+      .map((player): UnansweredPlayerItem => {
+        const existingRow = rows.find((r) => matchRowBelongsToPlayer(r, player, players));
+        const totalPlayed = allMatchPlayers.filter((r) => matchRowBelongsToPlayer(r, player, players) && r.attendanceStatus === "confirmed").length;
+        const standing = standingForMatchRow({ playerId: player.id, name: player.name }, players, standings);
+        const isMonthly = player.paymentPlan === "monthly";
+        const priorityScore = (isMonthly ? 100 : 0) + (totalPlayed * 10) + (standing?.points ?? 0);
+        return {
+          player,
+          existingRow,
+          totalPlayed,
+          standing,
+          isMonthly,
+          priorityScore,
+        };
+      })
+      .sort((a, b) => b.priorityScore - a.priorityScore || b.totalPlayed - a.totalPlayed || a.player.name.localeCompare(b.player.name));
+  }, [players, rows, allMatchPlayers, standings]);
+
+  const confirmedCount = confirmedRows.length;
+  const missing = Math.max(squadTarget - confirmedCount, 0);
+
+  const sortedConfirmed = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const list = confirmedRows.filter((r) => {
+      if (!query) return true;
+      const p = playerForMatchRow(r, players);
+      return r.name.toLowerCase().includes(query) || (p?.nickname?.toLowerCase().includes(query) ?? false);
+    });
+
+    if (sort.key === "order") {
+      return [...list].sort((a, b) => (sort.direction === "asc" ? 1 : -1) * (whatsappOrderFor(a) - whatsappOrderFor(b) || a.name.localeCompare(b.name)));
+    }
+
+    return [...list].sort((left, right) => {
+      const leftPlayer = playerForMatchRow(left, players);
+      const rightPlayer = playerForMatchRow(right, players);
+      const leftStanding = standingForMatchRow(left, players, standings);
+      const rightStanding = standingForMatchRow(right, players, standings);
+
+      const value = (row: MatchPlayer, player: Player | undefined, standing: PlayerStanding | undefined) => {
+        if (sort.key === "name") return player?.name ?? row.name;
+        if (sort.key === "team") return row.team;
+        if (sort.key === "rank") return standing?.rank ?? Number.POSITIVE_INFINITY;
+        if (sort.key === "status") return 0;
+        return standing?.[sort.key as "points" | "played" | "wins" | "draws" | "losses"] ?? -1;
+      };
+
+      const leftVal = value(left, leftPlayer, leftStanding);
+      const rightVal = value(right, rightPlayer, rightStanding);
+      const comparison = typeof leftVal === "string" && typeof rightVal === "string"
+        ? leftVal.localeCompare(rightVal, "es")
+        : Number(leftVal) - Number(rightVal);
+
+      if (comparison !== 0) return sort.direction === "asc" ? comparison : -comparison;
+      return (leftStanding?.rank ?? Number.POSITIVE_INFINITY) - (rightStanding?.rank ?? Number.POSITIVE_INFINITY);
+    });
+  }, [confirmedRows, players, standings, sort, search]);
+
+  const sortedUnanswered = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const list = unansweredItems.filter((item) => {
+      if (!query) return true;
+      return item.player.name.toLowerCase().includes(query) || (item.player.nickname?.toLowerCase().includes(query) ?? false);
+    });
+
+    if (sort.key === "order") {
+      return [...list].sort((a, b) => (sort.direction === "asc" ? 1 : -1) * (b.priorityScore - a.priorityScore || b.totalPlayed - a.totalPlayed));
+    }
+
+    return [...list].sort((left, right) => {
+      const value = (item: UnansweredPlayerItem) => {
+        if (sort.key === "name") return item.player.name;
+        if (sort.key === "team") return "";
+        if (sort.key === "rank") return item.standing?.rank ?? Number.POSITIVE_INFINITY;
+        if (sort.key === "status") return 1;
+        if (sort.key === "played") return item.totalPlayed;
+        return item.standing?.[sort.key as "points" | "wins" | "draws" | "losses"] ?? -1;
+      };
+
+      const leftVal = value(left);
+      const rightVal = value(right);
+      const comparison = typeof leftVal === "string" && typeof rightVal === "string"
+        ? leftVal.localeCompare(rightVal, "es")
+        : Number(leftVal) - Number(rightVal);
+
+      if (comparison !== 0) return sort.direction === "asc" ? comparison : -comparison;
+      return right.priorityScore - left.priorityScore;
+    });
+  }, [unansweredItems, sort, search]);
+
+  const visibleUnanswered = useMemo(() => {
+    const hasQuery = Boolean(search.trim());
+    if (tab === "unanswered" || showAllUnanswered || hasQuery) {
+      return sortedUnanswered;
+    }
+    return sortedUnanswered.filter((item) => item.isMonthly || item.totalPlayed > 0);
+  }, [sortedUnanswered, tab, showAllUnanswered, search]);
+
+  const occasionalCount = sortedUnanswered.filter((item) => !item.isMonthly && item.totalPlayed === 0).length;
+
+  const sortedOut = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const list = outRows.filter((r) => {
+      if (!query) return true;
+      const p = playerForMatchRow(r, players);
+      return r.name.toLowerCase().includes(query) || (p?.nickname?.toLowerCase().includes(query) ?? false);
+    });
+
+    if (sort.key === "order") {
+      return [...list].sort((a, b) => (sort.direction === "asc" ? 1 : -1) * (whatsappOrderFor(a) - whatsappOrderFor(b) || a.name.localeCompare(b.name)));
+    }
+
+    return [...list].sort((left, right) => {
+      const leftPlayer = playerForMatchRow(left, players);
+      const rightPlayer = playerForMatchRow(right, players);
+      const leftStanding = standingForMatchRow(left, players, standings);
+      const rightStanding = standingForMatchRow(right, players, standings);
+
+      const value = (row: MatchPlayer, player: Player | undefined, standing: PlayerStanding | undefined) => {
+        if (sort.key === "name") return player?.name ?? row.name;
+        if (sort.key === "team") return "";
+        if (sort.key === "rank") return standing?.rank ?? Number.POSITIVE_INFINITY;
+        if (sort.key === "status") return 2;
+        return standing?.[sort.key as "points" | "played" | "wins" | "draws" | "losses"] ?? -1;
+      };
+
+      const leftVal = value(left, leftPlayer, leftStanding);
+      const rightVal = value(right, rightPlayer, rightStanding);
+      const comparison = typeof leftVal === "string" && typeof rightVal === "string"
+        ? leftVal.localeCompare(rightVal, "es")
+        : Number(leftVal) - Number(rightVal);
+
+      if (comparison !== 0) return sort.direction === "asc" ? comparison : -comparison;
+      return (leftStanding?.rank ?? Number.POSITIVE_INFINITY) - (rightStanding?.rank ?? Number.POSITIVE_INFINITY);
+    });
+  }, [outRows, players, standings, sort, search]);
+
+  const toggleSort = (key: MatchPlayerSortKey) => {
+    setSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }));
+  };
+
+  const tabs: { key: FilterTab; label: string; count: number; colorClass: string }[] = [
+    { key: "all", label: "Todos", count: confirmedCount + unansweredItems.length + outRows.length, colorClass: "bg-white/10 text-white" },
+    { key: "confirmed", label: "Confirmados", count: confirmedCount, colorClass: "bg-(--green)/20 text-(--green)" },
+    { key: "unanswered", label: "Sin respuesta", count: unansweredItems.length, colorClass: "bg-amber-500/20 text-amber-300" },
+    { key: "out", label: "No van", count: outRows.length, colorClass: "bg-(--red)/20 text-(--red)" },
   ];
-  const sortedRows = [...rows].sort((left, right) => {
-    const leftPlayer = playerForMatchRow(left, players);
-    const rightPlayer = playerForMatchRow(right, players);
-    const leftStanding = standingForMatchRow(left, players, standings);
-    const rightStanding = standingForMatchRow(right, players, standings);
-    const value = (row: MatchPlayer, player: Player | undefined, standing: PlayerStanding | undefined) => {
-      if (sort.key === "name") return player?.name ?? row.name;
-      if (sort.key === "team") return row.team;
-      if (sort.key === "rank") return standing?.rank ?? Number.POSITIVE_INFINITY;
-      return standing?.[sort.key] ?? -1;
-    };
-    const leftValue = value(left, leftPlayer, leftStanding);
-    const rightValue = value(right, rightPlayer, rightStanding);
-    const comparison = typeof leftValue === "string" && typeof rightValue === "string"
-      ? leftValue.localeCompare(rightValue, "es")
-      : Number(leftValue) - Number(rightValue);
-    if (comparison !== 0) return sort.direction === "asc" ? comparison : -comparison;
-    return (leftStanding?.rank ?? Number.POSITIVE_INFINITY) - (rightStanding?.rank ?? Number.POSITIVE_INFINITY);
-  });
-  const toggleSort = (key: MatchPlayerSortKey) => setSort((current) => ({ key, direction: current.key === key && current.direction === "desc" ? "asc" : "desc" }));
-  const hasActions = Boolean(onOpenDetails || onMarkOut || onAssociate);
+
+  const columns: { key: MatchPlayerSortKey; label: string; className?: string; hideOnMobile?: boolean }[] = [
+    { key: "order", label: "#", className: "w-12 text-center" },
+    { key: "name", label: "Jugador", className: "text-left" },
+    { key: "status", label: "Estado", className: "text-center" },
+    { key: "rank", label: "Ranking", className: "text-center" },
+    { key: "points", label: "Pts", className: "text-center text-(--gold)" },
+    { key: "played", label: "PJ", className: "text-center" },
+    { key: "wins", label: "G", className: "text-center text-(--green)", hideOnMobile: true },
+    { key: "draws", label: "E", className: "text-center text-(--muted)", hideOnMobile: true },
+    { key: "losses", label: "P", className: "text-center text-(--red)", hideOnMobile: true },
+  ];
+
+  const showConfirmed = tab === "all" || tab === "confirmed";
+  const showUnanswered = tab === "all" || tab === "unanswered";
+  const showOut = tab === "all" || tab === "out";
+
+  const totalCols = columns.length + (teamsAssigned ? 1 : 0) + 1;
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-(--border)">
-      <table className="w-full min-w-[680px] text-sm">
-        <thead className="border-b border-(--border) bg-white/[0.04] text-[10px] font-black uppercase tracking-wide text-(--muted)">
-          <tr>
-            {columns.map((column) => {
-              const active = sort.key === column.key;
+    <div className="space-y-4">
+      {/* Barra superior de filtros, busqueda y contador */}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className={`rounded-md border px-3 py-1.5 ${missing > 0 ? "border-(--gold)/40 bg-(--gold)/10" : "border-(--green)/40 bg-(--green)/10"}`}>
+            <p className="text-[10px] font-black uppercase tracking-wide text-(--muted)">Plantel</p>
+            <p className={`text-lg font-black leading-none ${missing > 0 ? "text-(--gold)" : "text-(--green)"}`}>
+              {confirmedCount}/{squadTarget} · {missing > 0 ? `faltan ${missing}` : "completo"}
+            </p>
+          </div>
+          <div className="inline-flex rounded-lg border border-(--border) bg-white/[0.03] p-1 text-xs font-bold">
+            {tabs.map((t) => {
+              const active = tab === t.key;
               return (
-                <th key={column.key} aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"} className={`px-3 py-2 text-center ${column.className ?? ""}`}>
-                  <button type="button" onClick={() => toggleSort(column.key)} className="inline-flex items-center gap-1 hover:text-white">
-                    {column.label}<span aria-hidden="true" className={active ? "text-white" : "text-(--muted)/60"}>{active ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span>
-                  </button>
-                </th>
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setTab(t.key)}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 transition ${
+                    active ? "bg-white/[0.14] text-white shadow-sm" : "text-(--muted) hover:text-white hover:bg-white/[0.05]"
+                  }`}
+                >
+                  <span>{t.label}</span>
+                  <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-black ${t.colorClass}`}>
+                    {t.count}
+                  </span>
+                </button>
               );
             })}
-            {teamsAssigned ? (() => {
-              const active = sort.key === "team";
-              return (
-                <th aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"} className="px-3 py-2 text-center">
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="relative min-w-[180px]">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-(--muted)" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar jugador..."
+              className="w-full rounded-md border border-(--border) bg-black/20 py-1.5 pl-8 pr-2.5 text-xs text-white placeholder-(--muted) focus:border-(--green) focus:outline-none"
+            />
+          </div>
+          {isAdmin && onAddPlayer ? (
+            <Button variant="secondary" onClick={onAddPlayer}>
+              <UserPlus size={16} />
+              Agregar jugador
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Tabla Unificada */}
+      <div className="overflow-x-auto rounded-lg border border-(--border)">
+        <table className="w-full min-w-[720px] text-sm">
+          <thead className="border-b border-(--border) bg-white/[0.04] text-[10px] font-black uppercase tracking-wide text-(--muted)">
+            <tr>
+              {columns.map((column) => {
+                const active = sort.key === column.key;
+                return (
+                  <th
+                    key={column.key}
+                    aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
+                    className={`px-3 py-2 ${column.className ?? ""} ${column.hideOnMobile ? "hidden md:table-cell" : ""}`}
+                  >
+                    <button type="button" onClick={() => toggleSort(column.key)} className="inline-flex items-center gap-1 hover:text-white">
+                      {column.label}
+                      <span aria-hidden="true" className={active ? "text-white" : "text-(--muted)/60"}>
+                        {active ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}
+                      </span>
+                    </button>
+                  </th>
+                );
+              })}
+              {teamsAssigned ? (
+                <th className="px-3 py-2 text-center">
                   <button type="button" onClick={() => toggleSort("team")} className="inline-flex items-center gap-1 hover:text-white">
-                    Equipo<span aria-hidden="true" className={active ? "text-white" : "text-(--muted)/60"}>{active ? (sort.direction === "asc" ? "â†‘" : "â†“") : "â†•"}</span>
+                    Equipo
+                    <span aria-hidden="true" className={sort.key === "team" ? "text-white" : "text-(--muted)/60"}>
+                      {sort.key === "team" ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}
+                    </span>
                   </button>
                 </th>
-              );
-            })() : null}
-            {hasActions ? <th className="px-3 py-2 text-center">Acciones</th> : null}
-          </tr>
-        </thead>
-        <tbody>
-          {sortedRows.map((row) => {
-            const player = playerForMatchRow(row, players);
-            const standing = standingForMatchRow(row, players, standings);
-            const playerName = player?.name ?? row.name;
-            return (
-              <tr key={row.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04]">
-                <td className="px-3 py-3 font-bold text-white">{player ? <Link href={`/players/${player.id}`} className="hover:underline">{playerName}</Link> : playerName}</td>
-                <td className="px-3 py-3 text-center text-xs font-bold text-(--muted)">{standing ? `#${standing.rank} · ${standing.played} PJ` : "Sin ranking"}</td>
-                <td className="px-3 py-3 text-center font-black text-(--gold)">{standing?.points ?? "—"}</td>
-                <td className="px-3 py-3 text-center font-bold text-white">{standing?.played ?? "—"}</td>
-                <td className="px-3 py-3 text-center font-bold text-(--green)">{standing?.wins ?? "—"}</td>
-                <td className="px-3 py-3 text-center font-bold text-(--muted)">{standing?.draws ?? "—"}</td>
-                <td className="px-3 py-3 text-center font-bold text-(--red)">{standing?.losses ?? "—"}</td>
-                {teamsAssigned ? <td className={`px-3 py-3 text-center text-xs font-bold ${row.team === "A" ? "text-(--red)" : row.team === "B" ? "text-(--gold)" : "text-(--muted)"}`}>{row.team === "A" ? "Rojo" : row.team === "B" ? "Amarillo" : "Sin asignar"}</td> : null}
-                {hasActions ? (
-                  <td className="px-3 py-2">
-                    <div className="flex justify-center gap-1">
-                      {onAssociate ? <button type="button" onClick={() => onAssociate(row)} className="rounded-md p-1.5 text-(--cyan) hover:bg-(--cyan)/15" aria-label={`Asociar ${playerName}`} title="Asociar jugador"><UserPlus size={16} /></button> : null}
-                      {onOpenDetails ? <button type="button" onClick={() => onOpenDetails(row)} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14]" aria-label={`Editar ${playerName}`} title="Editar"><Pencil size={16} /></button> : null}
-                      {onMarkOut ? <button type="button" onClick={() => onMarkOut(row)} className="rounded-md p-1.5 text-(--red) hover:bg-(--red)/15" aria-label={`Marcar que ${playerName} no puede jugar`} title="Pasar a No pueden"><X size={16} /></button> : null}
-                    </div>
-                  </td>
+              ) : null}
+              <th className="px-3 py-2 text-center">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {/* 1. SECCION: CONFIRMADOS */}
+            {showConfirmed ? (
+              <>
+                {tab === "all" ? (
+                  <tr className="border-b border-(--border) bg-(--green)/10">
+                    <td colSpan={totalCols} className="px-3 py-1.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-(--green)">
+                          <span>🟢 Confirmados ({sortedConfirmed.length} / {squadTarget})</span>
+                          {missing > 0 ? (
+                            <span className="text-[11px] font-semibold text-(--muted)">· faltan {missing} para completar cupo</span>
+                          ) : (
+                            <span className="text-[11px] font-semibold text-(--green)">· plantel completo</span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
                 ) : null}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                {sortedConfirmed.length === 0 ? (
+                  <tr className="border-b border-(--border)">
+                    <td colSpan={totalCols} className="py-4 text-center text-xs text-(--muted)">
+                      No hay jugadores confirmados {search ? "que coincidan con la busqueda" : "aun"}.
+                    </td>
+                  </tr>
+                ) : (
+                  sortedConfirmed.map((row, index) => {
+                    const player = playerForMatchRow(row, players);
+                    const standing = standingForMatchRow(row, players, standings);
+                    const playerName = player?.name ?? row.name;
+                    const isMonthly = player?.paymentPlan === "monthly" || row.note.toLowerCase().includes("mensualidad");
+                    const isArq = player?.isGoalkeeper === true;
+                    const whatsapp = whatsappHref(row.phone || player?.phone || "");
+
+                    return (
+                      <tr key={row.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04] transition">
+                        <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">
+                          #{row.whatsappOrder || index + 1}
+                        </td>
+                        <td className="px-3 py-2.5 font-bold text-white">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {player ? (
+                              <Link href={`/players/${player.id}`} className="hover:underline">
+                                {playerName}
+                              </Link>
+                            ) : (
+                              <span>{playerName}</span>
+                            )}
+                            {isArq ? (
+                              <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-400 uppercase tracking-wider">
+                                🧤 ARQ
+                              </span>
+                            ) : null}
+                            {isMonthly ? (
+                              <span className="inline-flex items-center rounded bg-(--cyan)/15 px-1 py-0.5 text-[8px] font-black text-(--cyan) uppercase tracking-wider">
+                                Mensual
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 text-center">
+                          <span className="inline-flex items-center rounded-full border border-(--green)/40 bg-(--green)/15 px-2 py-0.5 text-[11px] font-black text-(--green)">
+                            ✓ Confirmado
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">
+                          {standing ? `#${standing.rank} · ${standing.played} PJ` : "Sin ranking"}
+                        </td>
+                        <td className="px-3 py-2.5 text-center font-black text-(--gold)">
+                          {standing?.points ?? "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-center font-bold text-white">
+                          {standing?.played ?? "—"}
+                        </td>
+                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--green)">
+                          {standing?.wins ?? "—"}
+                        </td>
+                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--muted)">
+                          {standing?.draws ?? "—"}
+                        </td>
+                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--red)">
+                          {standing?.losses ?? "—"}
+                        </td>
+                        {teamsAssigned ? (
+                          <td className={`px-3 py-2.5 text-center text-xs font-bold ${row.team === "A" ? "text-(--red)" : row.team === "B" ? "text-(--gold)" : "text-(--muted)"}`}>
+                            {row.team === "A" ? "Rojo" : row.team === "B" ? "Amarillo" : "Sin asignar"}
+                          </td>
+                        ) : null}
+                        <td className="px-3 py-2.5 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            {whatsapp ? (
+                              <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15 transition" title={`WhatsApp ${playerName}`}>
+                                <MessageCircle size={15} />
+                              </a>
+                            ) : null}
+                            {isAdmin && onOpenDetails ? (
+                              <button type="button" onClick={() => onOpenDetails(row.id)} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14] transition" title={`Editar ${playerName}`}>
+                                <Pencil size={15} />
+                              </button>
+                            ) : null}
+                            {isAdmin && onMarkOut ? (
+                              <button type="button" onClick={() => onMarkOut(row.id)} className="rounded-md p-1.5 text-(--red) hover:bg-(--red)/15 transition" title={`Marcar que ${playerName} no puede jugar`}>
+                                <X size={15} />
+                              </button>
+                            ) : null}
+                            {isAdmin && !player && onAssociate ? (
+                              <button type="button" onClick={() => onAssociate(row.id)} className="rounded-md p-1.5 text-(--cyan) hover:bg-(--cyan)/15 transition" title="Asociar a jugador existente">
+                                <UserPlus size={15} />
+                              </button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </>
+            ) : null}
+
+            {/* 2. SECCION: SIN RESPUESTA TODAVIA */}
+            {showUnanswered ? (
+              <>
+                {tab === "all" ? (
+                  <tr className="border-b border-(--border) bg-amber-500/10">
+                    <td colSpan={totalCols} className="px-3 py-1.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-amber-400">
+                          <span>⏳ Sin respuesta ({sortedUnanswered.length})</span>
+                          <span className="text-[11px] font-semibold text-(--muted)">· habituales priorizados por frecuencia de asistencia</span>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                ) : null}
+                {visibleUnanswered.length === 0 ? (
+                  <tr className="border-b border-(--border)">
+                    <td colSpan={totalCols} className="py-4 text-center text-xs text-(--muted)">
+                      No hay jugadores pendientes {search ? "que coincidan con la busqueda" : ""}.
+                    </td>
+                  </tr>
+                ) : (
+                  visibleUnanswered.map((item) => {
+                    const standing = item.standing;
+                    const isArq = item.player.isGoalkeeper;
+                    const pingText = `Hola ${item.player.nickname || item.player.name.split(" ")[0]}! ¿Juegas este martes en el SIFUP? Avisame para anotarte en la lista.`;
+                    const whatsapp = whatsappHref(item.player.phone, pingText);
+
+                    return (
+                      <tr key={item.player.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04] transition">
+                        <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)/60">
+                          —
+                        </td>
+                        <td className="px-3 py-2.5 font-bold text-white">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <Link href={`/players/${item.player.id}`} className="hover:underline">
+                              {item.player.name}
+                            </Link>
+                            {isArq ? (
+                              <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-400 uppercase tracking-wider">
+                                🧤 ARQ
+                              </span>
+                            ) : null}
+                            {item.isMonthly ? (
+                              <span className="inline-flex items-center rounded bg-(--cyan)/15 px-1 py-0.5 text-[8px] font-black text-(--cyan) uppercase tracking-wider">
+                                Mensual
+                              </span>
+                            ) : null}
+                            {item.totalPlayed >= 2 ? (
+                              <span className="inline-flex items-center rounded bg-white/[0.08] px-1 py-0.5 text-[9px] font-semibold text-(--muted)">
+                                {item.totalPlayed} PJ hist.
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 text-center">
+                          <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/15 px-2 py-0.5 text-[11px] font-black text-amber-300">
+                            ⏳ Sin respuesta
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">
+                          {standing ? `#${standing.rank} · ${standing.played} PJ` : "Sin ranking"}
+                        </td>
+                        <td className="px-3 py-2.5 text-center font-black text-(--gold)">
+                          {standing?.points ?? "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-center font-bold text-white">
+                          {item.totalPlayed}
+                        </td>
+                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--green)">
+                          {standing?.wins ?? "—"}
+                        </td>
+                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--muted)">
+                          {standing?.draws ?? "—"}
+                        </td>
+                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--red)">
+                          {standing?.losses ?? "—"}
+                        </td>
+                        {teamsAssigned ? (
+                          <td className="px-3 py-2.5 text-center text-xs text-(--muted)">
+                            —
+                          </td>
+                        ) : null}
+                        <td className="px-3 py-2.5 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            {whatsapp ? (
+                              <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15 transition" title={`Consultar a ${item.player.name} por WhatsApp`}>
+                                <MessageCircle size={15} />
+                              </a>
+                            ) : null}
+                            {isAdmin && onQuickConfirmPlayer ? (
+                              <button
+                                type="button"
+                                onClick={() => onQuickConfirmPlayer(item.player)}
+                                className="inline-flex items-center gap-1 rounded bg-(--green)/15 px-2 py-1 text-xs font-bold text-(--green) hover:bg-(--green)/25 transition"
+                                title={`Confirmar a ${item.player.name}`}
+                              >
+                                <Check size={14} />
+                                <span className="hidden xl:inline">Voy</span>
+                              </button>
+                            ) : null}
+                            {isAdmin && onQuickMarkPlayerOut ? (
+                              <button
+                                type="button"
+                                onClick={() => onQuickMarkPlayerOut(item.player)}
+                                className="inline-flex items-center gap-1 rounded bg-(--red)/15 px-2 py-1 text-xs font-bold text-(--red) hover:bg-(--red)/25 transition"
+                                title={`Marcar que ${item.player.name} no va`}
+                              >
+                                <X size={14} />
+                                <span className="hidden xl:inline">No va</span>
+                              </button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+                {tab === "all" && !showAllUnanswered && occasionalCount > 0 && !search.trim() ? (
+                  <tr className="border-b border-(--border) bg-white/[0.02]">
+                    <td colSpan={totalCols} className="py-2.5 text-center">
+                      <button
+                        type="button"
+                        onClick={() => setShowAllUnanswered(true)}
+                        className="text-xs font-bold text-(--muted) hover:text-white transition inline-flex items-center gap-1"
+                      >
+                        + Mostrar {occasionalCount} jugadores ocasionales sin asistencia previa...
+                      </button>
+                    </td>
+                  </tr>
+                ) : tab === "all" && showAllUnanswered && occasionalCount > 0 && !search.trim() ? (
+                  <tr className="border-b border-(--border) bg-white/[0.02]">
+                    <td colSpan={totalCols} className="py-2.5 text-center">
+                      <button
+                        type="button"
+                        onClick={() => setShowAllUnanswered(false)}
+                        className="text-xs font-bold text-(--muted) hover:text-white transition inline-flex items-center gap-1"
+                      >
+                        - Ocultar jugadores ocasionales
+                      </button>
+                    </td>
+                  </tr>
+                ) : null}
+              </>
+            ) : null}
+
+            {/* 3. SECCION: NO VAN */}
+            {showOut ? (
+              <>
+                {tab === "all" ? (
+                  <tr className="border-b border-(--border) bg-(--red)/10">
+                    <td colSpan={totalCols} className="px-3 py-1.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-(--red)">
+                          <span>🔴 No van ({sortedOut.length})</span>
+                          <span className="text-[11px] font-semibold text-(--muted)">· bajas confirmadas para este partido</span>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                ) : null}
+                {sortedOut.length === 0 ? (
+                  <tr className="border-b border-(--border)">
+                    <td colSpan={totalCols} className="py-4 text-center text-xs text-(--muted)">
+                      No hay bajas registradas {search ? "que coincidan con la busqueda" : ""}.
+                    </td>
+                  </tr>
+                ) : (
+                  sortedOut.map((row) => {
+                    const player = playerForMatchRow(row, players);
+                    const standing = standingForMatchRow(row, players, standings);
+                    const playerName = player?.name ?? row.name;
+                    const isMonthly = player?.paymentPlan === "monthly" || row.note.toLowerCase().includes("mensualidad");
+                    const isArq = player?.isGoalkeeper === true;
+                    const whatsapp = whatsappHref(row.phone || player?.phone || "");
+
+                    return (
+                      <tr key={row.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04] transition opacity-75">
+                        <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)/60">
+                          —
+                        </td>
+                        <td className="px-3 py-2.5 font-bold text-white">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {player ? (
+                              <Link href={`/players/${player.id}`} className="hover:underline line-through text-(--muted)">
+                                {playerName}
+                              </Link>
+                            ) : (
+                              <span className="line-through text-(--muted)">{playerName}</span>
+                            )}
+                            {isArq ? (
+                              <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-400 uppercase tracking-wider">
+                                🧤 ARQ
+                              </span>
+                            ) : null}
+                            {isMonthly ? (
+                              <span className="inline-flex items-center rounded bg-(--cyan)/15 px-1 py-0.5 text-[8px] font-black text-(--cyan) uppercase tracking-wider">
+                                Mensual
+                              </span>
+                            ) : null}
+                            {row.note ? (
+                              <span className="text-[10px] italic text-(--muted)">({row.note})</span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 text-center">
+                          <span className="inline-flex items-center rounded-full border border-(--red)/30 bg-(--red)/15 px-2 py-0.5 text-[11px] font-black text-(--red)">
+                            ✗ No va
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">
+                          {standing ? `#${standing.rank} · ${standing.played} PJ` : "Sin ranking"}
+                        </td>
+                        <td className="px-3 py-2.5 text-center font-black text-(--muted)">
+                          {standing?.points ?? "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-center font-bold text-(--muted)">
+                          {standing?.played ?? "—"}
+                        </td>
+                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--muted)">
+                          {standing?.wins ?? "—"}
+                        </td>
+                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--muted)">
+                          {standing?.draws ?? "—"}
+                        </td>
+                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--muted)">
+                          {standing?.losses ?? "—"}
+                        </td>
+                        {teamsAssigned ? (
+                          <td className="px-3 py-2.5 text-center text-xs text-(--muted)">
+                            —
+                          </td>
+                        ) : null}
+                        <td className="px-3 py-2.5 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            {whatsapp ? (
+                              <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15 transition" title={`WhatsApp ${playerName}`}>
+                                <MessageCircle size={15} />
+                              </a>
+                            ) : null}
+                            {isAdmin && onRejoin ? (
+                              <button
+                                type="button"
+                                onClick={() => onRejoin(row.id)}
+                                className="inline-flex items-center gap-1 rounded bg-(--green)/15 px-2 py-1 text-xs font-bold text-(--green) hover:bg-(--green)/25 transition"
+                                title={`Reincorporar a ${playerName} como confirmado`}
+                              >
+                                <RotateCcw size={14} />
+                                <span className="hidden xl:inline">Reincorporar</span>
+                              </button>
+                            ) : null}
+                            {isAdmin && onRemove ? (
+                              <button
+                                type="button"
+                                onClick={() => onRemove(row.id)}
+                                className="rounded-md p-1.5 text-(--red) hover:bg-(--red)/15 transition"
+                                title={`Quitar a ${playerName} del partido`}
+                              >
+                                <UserMinus size={15} />
+                              </button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -1375,85 +1964,74 @@ function MatchPlayersTable({
 function TeamAssignmentBoard({
   rows,
   players,
+  allMatchPlayers,
   standings,
+  match,
   onOpenDetails,
   onMarkOut,
+  onRejoin,
   onRemove,
   onAssociate,
   onAddPlayer,
+  onQuickConfirmPlayer,
+  onQuickMarkPlayerOut,
 }: {
   rows: MatchPlayer[];
   players: Player[];
+  allMatchPlayers: MatchPlayer[];
   standings: Map<string, PlayerStanding>;
+  match: Match;
   onOpenDetails: (rowId: string) => void;
   onMarkOut: (rowId: string) => void;
+  onRejoin: (rowId: string) => void;
   onRemove: (rowId: string) => void;
   onAssociate: (rowId: string) => void;
   onAddPlayer: () => void;
+  onQuickConfirmPlayer: (player: Player) => void;
+  onQuickMarkPlayerOut: (player: Player) => void;
 }) {
-  const confirmedRanked = rows
-    .filter((row) => row.attendanceStatus === "confirmed")
-    .sort((a, b) => whatsappOrderFor(a) - whatsappOrderFor(b) || a.name.localeCompare(b.name));
-  const outRows = sortRowsWithMonthlyLast(rows.filter((row) => row.attendanceStatus === "out"), players);
-  const confirmedCount = confirmedRanked.length;
-  const missing = Math.max(SQUAD_TARGET - confirmedCount, 0);
-
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className={`rounded-md border px-3 py-2 ${missing > 0 ? "border-(--gold)/40 bg-(--gold)/10" : "border-(--green)/40 bg-(--green)/10"}`}>
-          <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Plantel</p>
-          <p className={`text-xl font-black ${missing > 0 ? "text-(--gold)" : "text-(--green)"}`}>{confirmedCount}/{SQUAD_TARGET} · faltan {missing}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={onAddPlayer}>
-            <UserPlus size={16} />
-            Agregar jugador
-          </Button>
-        </div>
-      </div>
-      <MatchPlayersTable
-        rows={confirmedRanked}
-        players={players}
-        standings={standings}
-        teamsAssigned={hasTeamsAssigned(rows)}
-        onAssociate={(row) => onAssociate(row.id)}
-        onOpenDetails={(row) => onOpenDetails(row.id)}
-        onMarkOut={(row) => onMarkOut(row.id)}
-      />
-      {outRows.length > 0 ? (
-        <div className="space-y-2 rounded-md border border-white/10 bg-white/[0.03] p-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">No pueden ({outRows.length})</p>
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {outRows.map((row) => (
-              <OutPlayerRow key={row.id} row={row} onOpenDetails={() => onOpenDetails(row.id)} onRemove={() => onRemove(row.id)} />
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </div>
+    <UnifiedMatchRoster
+      rows={rows}
+      players={players}
+      allMatchPlayers={allMatchPlayers}
+      standings={standings}
+      match={match}
+      isAdmin={true}
+      onOpenDetails={onOpenDetails}
+      onMarkOut={onMarkOut}
+      onRejoin={onRejoin}
+      onRemove={onRemove}
+      onAssociate={onAssociate}
+      onAddPlayer={onAddPlayer}
+      onQuickConfirmPlayer={onQuickConfirmPlayer}
+      onQuickMarkPlayerOut={onQuickMarkPlayerOut}
+    />
   );
 }
 
-function OutPlayerRow({ row, onOpenDetails, onRemove }: { row: MatchPlayer; onOpenDetails: () => void; onRemove: () => void }) {
-  const whatsapp = whatsappHref(row.phone);
+function PublicMatchRows({
+  rows,
+  players,
+  allMatchPlayers,
+  standings,
+  match,
+}: {
+  rows: MatchPlayer[];
+  players: Player[];
+  allMatchPlayers: MatchPlayer[];
+  standings: Map<string, PlayerStanding>;
+  match: Match;
+}) {
   return (
-    <div className="flex items-center justify-between gap-2 rounded-md border border-white/10 bg-black/15 px-3 py-2">
-      <p className="min-w-0 truncate text-sm font-semibold text-(--muted)"><span className="mr-2 text-xs">#{row.whatsappOrder || "-"}</span>{row.name}</p>
-      <div className="flex items-center gap-1">
-        {whatsapp ? (
-          <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15" aria-label={`WhatsApp ${row.name}`}>
-            <MessageCircle size={16} />
-          </a>
-        ) : null}
-        <button type="button" onClick={onOpenDetails} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14]" aria-label={`Editar ${row.name}`}>
-          <Pencil size={16} />
-        </button>
-        <button type="button" onClick={onRemove} className="rounded-md p-1.5 text-(--red) hover:bg-(--red)/15" aria-label={`Quitar ${row.name} del partido`}>
-          <UserMinus size={16} />
-        </button>
-      </div>
-    </div>
+    <UnifiedMatchRoster
+      rows={rows}
+      players={players}
+      allMatchPlayers={allMatchPlayers}
+      standings={standings}
+      match={match}
+      isAdmin={false}
+    />
   );
 }
 
@@ -1618,16 +2196,6 @@ function hasTeamsAssigned(rows: MatchPlayer[]) {
   return rows.some((row) => row.team === "A" || row.team === "B");
 }
 
-function rankedConfirmedRows(rows: MatchPlayer[], players: Player[], standings: Map<string, PlayerStanding>) {
-  return rows
-    .filter((row) => row.attendanceStatus === "confirmed")
-    .sort((a, b) => {
-      const rankA = standingForMatchRow(a, players, standings)?.rank ?? Number.MAX_SAFE_INTEGER;
-      const rankB = standingForMatchRow(b, players, standings)?.rank ?? Number.MAX_SAFE_INTEGER;
-      if (rankA !== rankB) return rankA - rankB;
-      return whatsappOrderFor(a) - whatsappOrderFor(b) || a.name.localeCompare(b.name);
-    });
-}
 
 function teamRankingTotal(rows: MatchPlayer[], players: Player[], standings: Map<string, PlayerStanding>, team: "A" | "B") {
   return rows
@@ -2199,6 +2767,21 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const [associatingRowId, setAssociatingRowId] = useState<string | null>(null);
   const [showResultModal, setShowResultModal] = useState(false);
   const standings = useMemo(() => buildPlayerStandings(data), [data]);
+  const topUnansweredNames = useMemo(() => {
+    return data.players
+      .filter((p) => p.active && !rows.some((r) => matchRowBelongsToPlayer(r, p, data.players) && (r.attendanceStatus === "confirmed" || r.attendanceStatus === "out")))
+      .map((p) => {
+        const totalPlayed = data.matchPlayers.filter((r) => matchRowBelongsToPlayer(r, p, data.players) && r.attendanceStatus === "confirmed").length;
+        const standing = standings.get(p.id) ?? standings.get(p.name.toLowerCase());
+        const isMonthly = p.paymentPlan === "monthly";
+        const priorityScore = (isMonthly ? 100 : 0) + (totalPlayed * 10) + (standing?.points ?? 0);
+        return { name: p.nickname || p.name, priorityScore, totalPlayed };
+      })
+      .filter((item) => item.totalPlayed > 0)
+      .sort((a, b) => b.priorityScore - a.priorityScore)
+      .slice(0, 6)
+      .map((item) => item.name);
+  }, [data.players, data.matchPlayers, rows, standings]);
 
   if (!match) return <PageTitle title="Partido no encontrado" description="No existe en la base de datos." />;
   const currentMatch = match;
@@ -2207,20 +2790,46 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const matchTeams = data.matchTeams.filter((team) => team.matchId === currentMatch.id).sort((a, b) => a.seq - b.seq);
   const matchGames = data.matchGames.filter((game) => game.matchId === currentMatch.id);
 
+  function persistRows(nextRows: MatchPlayer[]) {
+    setRows(nextRows);
+    startTransition(async () => {
+      try {
+        await saveMatchDetailAction(currentMatch.id, nextRows);
+        commit(replaceMatchPlayers(data, currentMatch.id, nextRows));
+        setError("");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo actualizar el partido.");
+      }
+    });
+  }
+
   function updateRow(index: number, patch: Partial<MatchPlayer>) {
-    setRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch, updatedAt: new Date().toISOString() } : row)));
+    const nextRows = rows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch, updatedAt: new Date().toISOString() } : row));
+    persistRows(nextRows);
   }
 
   function removeRow(rowId: string) {
-    setRows((current) => current.filter((row) => row.id !== rowId));
+    const nextRows = rows.filter((row) => row.id !== rowId);
+    persistRows(nextRows);
   }
 
   function markRowAsOut(rowId: string) {
-    setRows((current) => current.map((row) => (
+    const nextRows = rows.map((row) => (
       row.id === rowId
-        ? { ...row, attendanceStatus: "out", team: "none", updatedAt: new Date().toISOString() }
+        ? { ...row, attendanceStatus: "out" as AttendanceStatus, team: "none" as Team, updatedAt: new Date().toISOString() }
         : row
-    )));
+    ));
+    persistRows(nextRows);
+  }
+
+  function rejoinPlayer(rowId: string) {
+    const nextOrder = Math.max(0, ...rows.map((row) => row.whatsappOrder || 0)) + 1;
+    const nextRows = rows.map((row) => (
+      row.id === rowId
+        ? { ...row, attendanceStatus: "confirmed" as AttendanceStatus, whatsappOrder: row.whatsappOrder || nextOrder, updatedAt: new Date().toISOString() }
+        : row
+    ));
+    persistRows(nextRows);
   }
 
   function buildMatchPlayerRow(player: Player): MatchPlayer {
@@ -2244,8 +2853,55 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
     };
   }
 
+  function quickConfirmPlayer(player: Player) {
+    const existing = rows.find((r) => matchRowBelongsToPlayer(r, player, data.players));
+    let nextRows: MatchPlayer[];
+    if (existing) {
+      nextRows = rows.map((row) => (
+        row.id === existing.id
+          ? { ...row, attendanceStatus: "confirmed" as AttendanceStatus, updatedAt: new Date().toISOString() }
+          : row
+      ));
+    } else {
+      nextRows = [...rows, buildMatchPlayerRow(player)];
+    }
+    persistRows(nextRows);
+  }
+
+  function quickMarkPlayerOut(player: Player) {
+    const existing = rows.find((r) => matchRowBelongsToPlayer(r, player, data.players));
+    const now = new Date().toISOString();
+    let nextRows: MatchPlayer[];
+    if (existing) {
+      nextRows = rows.map((row) => (
+        row.id === existing.id
+          ? { ...row, attendanceStatus: "out" as AttendanceStatus, team: "none" as Team, updatedAt: now }
+          : row
+      ));
+    } else {
+      const outRow: MatchPlayer = {
+        id: newId("mp"),
+        matchId: currentMatch.id,
+        playerId: player.id,
+        name: player.name,
+        phone: player.phone,
+        attendanceStatus: "out",
+        paymentStatus: "paid",
+        amountDue: 0,
+        amountPaid: 0,
+        note: "",
+        team: "none",
+        whatsappOrder: 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+      nextRows = [...rows, outRow];
+    }
+    persistRows(nextRows);
+  }
+
   function addExistingPlayer(player: Player) {
-    setRows((current) => [...current, buildMatchPlayerRow(player)]);
+    persistRows([...rows, buildMatchPlayerRow(player)]);
     setShowAddPlayer(false);
   }
 
@@ -2459,28 +3115,39 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Plantel</p>
-            <h2 className="mt-1 text-xl font-black text-white">{isAdmin ? "Jugadores" : "Lista de jugadores"}</h2>
+            <h2 className="mt-1 text-xl font-black text-white">{isAdmin ? "Jugadores y asistencia" : "Plantel y asistencia"}</h2>
           </div>
         </div>
         {isAdmin ? (
           <TeamAssignmentBoard
             rows={rows}
             players={data.players}
+            allMatchPlayers={data.matchPlayers}
             standings={standings}
+            match={currentMatch}
             onOpenDetails={(rowId) => setEditingIndex(rows.findIndex((row) => row.id === rowId))}
             onMarkOut={markRowAsOut}
+            onRejoin={rejoinPlayer}
             onRemove={removeRow}
             onAddPlayer={() => setShowAddPlayer(true)}
             onAssociate={setAssociatingRowId}
+            onQuickConfirmPlayer={quickConfirmPlayer}
+            onQuickMarkPlayerOut={quickMarkPlayerOut}
           />
         ) : (
-          <PublicMatchRows rows={rows} players={data.players} standings={standings} />
+          <PublicMatchRows
+            rows={rows}
+            players={data.players}
+            allMatchPlayers={data.matchPlayers}
+            standings={standings}
+            match={currentMatch}
+          />
         )}
       </Card>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <CopyBlock title="Resumen de equipos" text={isRoyal ? royalTeamsMessage(currentMatch, matchTeams, rows) : teamsMessage(currentMatch, rows)} />
-        <CopyBlock title="Resumen del partido" text={matchSummaryMessage(currentMatch, rows)} />
+        <CopyBlock title="Resumen del partido" text={matchSummaryMessage(currentMatch, rows, topUnansweredNames)} />
       </div>
 
       {/* Equipos informativos al final */}
