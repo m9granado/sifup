@@ -5,7 +5,7 @@ import { PUBLIC_BASE_URL } from "./sifup-constants";
 const MINIMUM_PLAYERS = 12;
 const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
-export function matchSummaryMessage(match: Match, players: MatchPlayer[], unanswered?: string[]) {
+export function matchSummaryMessage(match: Match, players: MatchPlayer[]) {
   const confirmed = sortByWhatsappOrder(players.filter((player) => player.attendanceStatus === "confirmed"));
   const out = sortByWhatsappOrder(players.filter((player) => player.attendanceStatus === "out"));
   const playerLines = Array.from({ length: Math.max(MINIMUM_PLAYERS, confirmed.length) }, (_, index) => {
@@ -13,16 +13,12 @@ export function matchSummaryMessage(match: Match, players: MatchPlayer[], unansw
     return `${index + 1}- ${player?.name ?? ""}`;
   });
   const outLines = out.length > 0 ? out.map((player) => `- ${player.name}`) : ["-"];
-  const unansweredSection =
-    unanswered && unanswered.length > 0
-      ? `\n\nSin confirmar habituales:\n${unanswered.map((name) => `- ${name}`).join("\n")}`
-      : "";
 
   return `Partidos ${formatMatchDate(match.date)} ${formatMatchTime(match.time)}
 ${match.location}:
 
 Jugadores:
-${playerLines.join("\n")}${unansweredSection}
+${playerLines.join("\n")}
 
 No pueden
 ${outLines.join("\n")}

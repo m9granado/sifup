@@ -2767,21 +2767,6 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const [associatingRowId, setAssociatingRowId] = useState<string | null>(null);
   const [showResultModal, setShowResultModal] = useState(false);
   const standings = useMemo(() => buildPlayerStandings(data), [data]);
-  const topUnansweredNames = useMemo(() => {
-    return data.players
-      .filter((p) => p.active && !rows.some((r) => matchRowBelongsToPlayer(r, p, data.players) && (r.attendanceStatus === "confirmed" || r.attendanceStatus === "out")))
-      .map((p) => {
-        const totalPlayed = data.matchPlayers.filter((r) => matchRowBelongsToPlayer(r, p, data.players) && r.attendanceStatus === "confirmed").length;
-        const standing = standings.get(p.id) ?? standings.get(p.name.toLowerCase());
-        const isMonthly = p.paymentPlan === "monthly";
-        const priorityScore = (isMonthly ? 100 : 0) + (totalPlayed * 10) + (standing?.points ?? 0);
-        return { name: p.nickname || p.name, priorityScore, totalPlayed };
-      })
-      .filter((item) => item.totalPlayed > 0)
-      .sort((a, b) => b.priorityScore - a.priorityScore)
-      .slice(0, 6)
-      .map((item) => item.name);
-  }, [data.players, data.matchPlayers, rows, standings]);
 
   if (!match) return <PageTitle title="Partido no encontrado" description="No existe en la base de datos." />;
   const currentMatch = match;
@@ -3147,7 +3132,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <CopyBlock title="Resumen de equipos" text={isRoyal ? royalTeamsMessage(currentMatch, matchTeams, rows) : teamsMessage(currentMatch, rows)} />
-        <CopyBlock title="Resumen del partido" text={matchSummaryMessage(currentMatch, rows, topUnansweredNames)} />
+        <CopyBlock title="Resumen del partido" text={matchSummaryMessage(currentMatch, rows)} />
       </div>
 
       {/* Equipos informativos al final */}
