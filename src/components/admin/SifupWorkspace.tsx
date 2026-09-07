@@ -21,7 +21,7 @@ import {
 } from "@/app/actions";
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
-import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
+import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, sortByWhatsappOrder, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
 import { calculateRankingRecord, pointsForMatchRow, rankingMatches } from "@/lib/standings";
 import { matchSummaryMessage, royalTeamsMessage, teamsMessage } from "@/lib/whatsapp";
 import { COURT_COST, LOSS_POINTS, MATCH_TEAM_COLOR_CLASSES, MATCH_TEAM_COLOR_LABEL, MATCH_TEAM_DEFAULT_COLORS, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, ROYAL_GAME_TIME_LIMIT_MIN, ROYAL_GOAL_DIFF_TO_WIN, ROYAL_SQUAD_TARGET, SQUAD_TARGET, WIN_POINTS } from "@/lib/sifup-constants";
@@ -1294,6 +1294,15 @@ function UnifiedMatchRoster({
     return rows.filter((row) => row.attendanceStatus === "confirmed");
   }, [rows]);
 
+  const confirmedOrderMap = useMemo(() => {
+    const ordered = sortByWhatsappOrder(confirmedRows);
+    const map = new Map<string, number>();
+    ordered.forEach((row, idx) => {
+      map.set(row.id, idx + 1);
+    });
+    return map;
+  }, [confirmedRows]);
+
   const outRows = useMemo(() => {
     return sortRowsWithMonthlyLast(rows.filter((row) => row.attendanceStatus === "out"), players);
   }, [rows, players]);
@@ -1338,7 +1347,11 @@ function UnifiedMatchRoster({
     });
 
     if (sort.key === "order") {
-      return [...list].sort((a, b) => (sort.direction === "asc" ? 1 : -1) * (whatsappOrderFor(a) - whatsappOrderFor(b) || a.name.localeCompare(b.name)));
+      return [...list].sort((a, b) => {
+        const orderA = confirmedOrderMap.get(a.id) ?? 999;
+        const orderB = confirmedOrderMap.get(b.id) ?? 999;
+        return (sort.direction === "asc" ? 1 : -1) * (orderA - orderB || a.name.localeCompare(b.name));
+      });
     }
 
     return [...list].sort((left, right) => {
@@ -1363,7 +1376,7 @@ function UnifiedMatchRoster({
       if (comparison !== 0) return sort.direction === "asc" ? comparison : -comparison;
       return (leftStanding?.rank ?? Number.POSITIVE_INFINITY) - (rightStanding?.rank ?? Number.POSITIVE_INFINITY);
     });
-  }, [confirmedRows, players, standings, sort, search]);
+  }, [confirmedRows, confirmedOrderMap, players, standings, sort, search]);
 
   const sortedUnanswered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -1599,7 +1612,7 @@ function UnifiedMatchRoster({
                     return (
                       <tr key={row.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04] transition">
                         <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">
-                          #{row.whatsappOrder || index + 1}
+                          #{confirmedOrderMap.get(row.id) ?? index + 1}
                         </td>
                         <td className="px-3 py-2.5 font-bold text-white">
                           <div className="flex items-center gap-1.5 flex-wrap">
