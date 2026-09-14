@@ -4072,14 +4072,6 @@ function PlayerEditorForm({ player, onSave, players = [], allowMerge = true }: {
       <Input label="Pseudonimo" value={draft.nickname} onChange={(value) => setDraft({ ...draft, nickname: value })} />
       <Input label="Sigla (3 caracteres)" value={draft.shortName} onChange={(value) => setDraft({ ...draft, shortName: value.slice(0, 3).toUpperCase() })} />
       <Input label="Telefono" value={draft.phone} onChange={(value) => setDraft({ ...draft, phone: value })} />
-      <label className="space-y-1 text-sm font-medium text-(--muted)">
-        <span>Plan por defecto</span>
-        <p className="text-xs font-normal text-(--muted)">Se usa para sugerir el roster de un mes nuevo. El mes en curso se administra en Pagos → Renovacion mensual.</p>
-        <select className="h-10 w-full rounded-md border border-(--border) bg-(--panel-strong) px-3 text-sm text-white" value={draft.paymentPlan} onChange={(event) => setDraft({ ...draft, paymentPlan: event.target.value as PaymentPlan })}>
-          <option value="monthly">mensual (oficial)</option>
-          <option value="perMatch">por partido (galleta)</option>
-        </select>
-      </label>
       <div className="flex gap-4">
         <label className="flex items-center gap-2 text-sm font-medium text-(--muted)">
           <input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} />
@@ -4233,71 +4225,45 @@ function PlayerLoginForm({
 }
 
 type PlayerHistoryItem = { row: MatchPlayer | undefined; match: Match; result: MatchResult | undefined };
-type PlayerHistorySortKey = "date" | "points" | "result" | "debt";
 
-function PlayerMatchHistory({ history }: { history: PlayerHistoryItem[] }) {
-  const [sort, setSort] = useState<{ key: PlayerHistorySortKey; direction: "asc" | "desc" }>({ key: "date", direction: "desc" });
-  const todayParts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
-  const today = `${todayParts.find((part) => part.type === "year")?.value}-${todayParts.find((part) => part.type === "month")?.value}-${todayParts.find((part) => part.type === "day")?.value}`;
-  const detailsFor = (item: PlayerHistoryItem) => {
-    const result = item.result;
-    const row = item.row;
-    const isFutureMatch = item.match.date > today;
-    const isConfirmed = row?.attendanceStatus === "confirmed";
-    const didNotAttend = !isFutureMatch && (!row || row.attendanceStatus === "out");
-    const isPending = !didNotAttend && (!isConfirmed || !result || row?.team === "none");
-    const isDraw = isConfirmed && result?.winner === "draw" && row?.team !== "none";
-    const isWin = Boolean(isConfirmed && result && !isDraw && row?.team !== "none" && result.winner === row?.team);
-    const attendance = isFutureMatch
-      ? "Pendiente"
-      : !row || row.attendanceStatus === "out"
-      ? "No estuvo"
-      : row.attendanceStatus === "confirmed"
-        ? "Confirmado"
-        : row.attendanceStatus === "maybe"
-          ? "Tal vez"
-          : "En espera";
-    const outcome = didNotAttend ? "No estuvo" : isPending ? (isConfirmed ? "Pendiente" : attendance) : isDraw ? "Empate" : isWin ? "Victoria" : "Derrota";
-    const points = row && isConfirmed ? pointsForMatchRow(row, result) : 0;
-    return { attendance, didNotAttend, isPending, isDraw, isWin, outcome, points, debt: row ? pendingForMatchRow(row) : 0 };
-  };
-  const valueFor = (item: PlayerHistoryItem) => {
-    const details = detailsFor(item);
-    return {
-      date: `${item.match.date} ${item.match.time}`,
-      points: details.points,
-      result: details.outcome,
-      debt: details.debt,
-    };
-  };
-  const sortedHistory = [...history].sort((left, right) => {
-    const leftValue = valueFor(left)[sort.key];
-    const rightValue = valueFor(right)[sort.key];
-    const comparison = typeof leftValue === "number" && typeof rightValue === "number" ? leftValue - rightValue : String(leftValue).localeCompare(String(rightValue), "es");
-    return sort.direction === "asc" ? comparison : -comparison;
-  });
-  const toggleSort = (key: PlayerHistorySortKey) => setSort((current) => ({ key, direction: current.key === key && current.direction === "desc" ? "asc" : "desc" }));
-  const columns: { key: PlayerHistorySortKey; label: string; className?: string }[] = [
-    { key: "date", label: "Fecha", className: "text-left" },
-    { key: "points", label: "Pts" },
-    { key: "result", label: "Estado" },
-    { key: "debt", label: "Deuda" },
-  ];
+function playerHistoryDetails(item: PlayerHistoryItem, today: string) {
+  const result = item.result;
+  const row = item.row;
+  const isFutureMatch = item.match.date > today;
+  const isConfirmed = row?.attendanceStatus === "confirmed";
+  const didNotAttend = !isFutureMatch && (!row || row.attendanceStatus === "out");
+  const isPending = !didNotAttend && (!isConfirmed || !result || row?.team === "none");
+  const isDraw = isConfirmed && result?.winner === "draw" && row?.team !== "none";
+  const isWin = Boolean(isConfirmed && result && !isDraw && row?.team !== "none" && result.winner === row?.team);
+  const attendance = isFutureMatch
+    ? "Pendiente"
+    : !row || row.attendanceStatus === "out"
+    ? "No estuvo"
+    : row.attendanceStatus === "confirmed"
+      ? "Confirmado"
+      : row.attendanceStatus === "maybe"
+        ? "Tal vez"
+        : "En espera";
+  const outcome = didNotAttend ? "No estuvo" : isPending ? (isConfirmed ? "Pendiente" : attendance) : isDraw ? "Empate" : isWin ? "Victoria" : "Derrota";
+  const points = row && isConfirmed ? pointsForMatchRow(row, result) : 0;
+  return { attendance, didNotAttend, isPending, isDraw, isWin, outcome, points, debt: row ? pendingForMatchRow(row) : 0 };
+}
 
+function PlayerHistoryTable({ items, today }: { items: PlayerHistoryItem[]; today: string }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-(--border)">
-      <table className="w-full min-w-[540px] text-sm">
+      <table className="w-full min-w-[480px] text-sm">
         <thead className="border-b border-(--border) bg-white/[0.04] text-[10px] font-black uppercase tracking-wide text-(--muted)">
           <tr>
-            {columns.map((column) => {
-              const active = sort.key === column.key;
-              return <th key={column.key} aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"} className={`px-3 py-2 text-center ${column.className ?? ""}`}><button type="button" onClick={() => toggleSort(column.key)} className="inline-flex items-center gap-1 hover:text-white">{column.label}<span aria-hidden="true" className={active ? "text-white" : "text-(--muted)/60"}>{active ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span></button></th>;
-            })}
+            <th className="px-3 py-2 text-left">Fecha</th>
+            <th className="px-3 py-2 text-center">Pts</th>
+            <th className="px-3 py-2 text-center">Estado</th>
+            <th className="px-3 py-2 text-center">Deuda</th>
           </tr>
         </thead>
         <tbody>
-          {sortedHistory.map((item) => {
-            const details = detailsFor(item);
+          {items.map((item) => {
+            const details = playerHistoryDetails(item, today);
             const iconClass = details.didNotAttend
               ? "border border-(--red)/45 bg-(--red)/12 text-(--red)"
               : details.isPending
@@ -4322,6 +4288,100 @@ function PlayerMatchHistory({ history }: { history: PlayerHistoryItem[] }) {
   );
 }
 
+function PlayerMonthlyHistory({
+  player,
+  history,
+  players,
+  monthlyPayments,
+  isAdmin,
+  onToggleRoster,
+  onTogglePaid,
+}: {
+  player: Player;
+  history: PlayerHistoryItem[];
+  players: Player[];
+  monthlyPayments: MonthlyPayment[];
+  isAdmin: boolean;
+  onToggleRoster: (monthKey: string, shouldBeMonthly: boolean) => void;
+  onTogglePaid: (monthKey: string, paid: boolean) => void;
+}) {
+  const todayParts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const today = `${todayParts.find((part) => part.type === "year")?.value}-${todayParts.find((part) => part.type === "month")?.value}-${todayParts.find((part) => part.type === "day")?.value}`;
+  const nowMonthKey = currentMonthKey();
+  const playerMonthlyPayments = monthlyPayments.filter((payment) => payment.playerId === player.id);
+
+  const groups = new Map<string, PlayerHistoryItem[]>();
+  for (const item of history) {
+    const key = item.match.date.slice(0, 7);
+    const list = groups.get(key);
+    if (list) list.push(item);
+    else groups.set(key, [item]);
+  }
+  for (const payment of playerMonthlyPayments) {
+    if (!groups.has(payment.monthKey)) groups.set(payment.monthKey, []);
+  }
+  const monthKeys = [...groups.keys()].sort((a, b) => b.localeCompare(a));
+
+  if (monthKeys.length === 0) return <p className="text-sm text-(--muted)">Todavia no jugo ningun partido.</p>;
+
+  return (
+    <div className="space-y-4">
+      {monthKeys.map((monthKey) => {
+        const items = [...(groups.get(monthKey) ?? [])].sort((a, b) => `${b.match.date} ${b.match.time}`.localeCompare(`${a.match.date} ${a.match.time}`));
+        const isMonthly = isPlayerMonthlyForMonth(player.id, monthKey, players, monthlyPayments);
+        const isFutureMonth = monthKey > nowMonthKey;
+        const payment = isMonthly ? monthlyPaymentFor(player, monthKey, playerMonthlyPayments.find((item) => item.monthKey === monthKey)) : undefined;
+        const paid = payment?.paymentStatus === "paid";
+        const galletaDebt = items.reduce((sum, item) => sum + playerHistoryDetails(item, today).debt, 0);
+        const paidBadgeClass = paid
+          ? "border-(--green) bg-(--green)/15 text-(--green)"
+          : isFutureMonth
+            ? "border-(--border) bg-white/[0.03] text-(--muted)"
+            : "border-(--red)/40 bg-(--red)/10 text-(--red)";
+        const paidBadgeTitle = paid
+          ? `Pagado${payment?.paidAt ? ` el ${payment.paidAt.slice(0, 10)}` : ""}`
+          : isFutureMonth
+            ? "Mes futuro"
+            : "Pendiente";
+
+        return (
+          <div key={monthKey} className="rounded-lg border border-(--border) bg-white/[0.02] p-3">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-black uppercase tracking-wide text-white">{monthLabel(monthKey)}</h3>
+              <div className="flex flex-wrap items-center gap-2">
+                {isAdmin ? (
+                  <label className="inline-flex items-center gap-1.5 rounded-md border border-(--border) bg-white/[0.03] px-2 py-1 text-[11px] font-bold text-(--muted)">
+                    <input type="checkbox" className="accent-(--cyan)" checked={isMonthly} onChange={(event) => onToggleRoster(monthKey, event.target.checked)} />
+                    Mensual este mes
+                  </label>
+                ) : null}
+                {isMonthly ? (
+                  <button
+                    type="button"
+                    disabled={!isAdmin || isFutureMonth}
+                    title={paidBadgeTitle}
+                    onClick={() => onTogglePaid(monthKey, paid)}
+                    className={`rounded-md border px-2.5 py-1 text-[11px] font-black transition disabled:cursor-not-allowed ${paidBadgeClass} ${isAdmin && !isFutureMonth ? "hover:opacity-80" : ""}`}
+                  >
+                    {paid ? "Mensualidad pagada" : isFutureMonth ? "Mes futuro" : "Mensualidad pendiente"}
+                  </button>
+                ) : (
+                  <span className={`rounded-md border px-2.5 py-1 text-[11px] font-black ${galletaDebt > 0 ? "border-(--red)/40 bg-(--red)/10 text-(--red)" : "border-(--green)/40 bg-(--green)/10 text-(--green)"}`}>
+                    {galletaDebt > 0 ? `Galleta: ${formatCurrency(galletaDebt)} pendiente` : "Galleta: al dia"}
+                  </span>
+                )}
+              </div>
+            </div>
+            {items.length > 0 ? <PlayerHistoryTable items={items} today={today} /> : <p className="px-1 text-sm text-(--muted)">Sin partidos registrados este mes.</p>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const linkButtonClass = "inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md border px-3 text-sm font-bold transition bg-white/[0.06] text-white hover:bg-white/[0.12] border-(--border)";
+
 export function PlayerDetailPage({
   id,
   initialData,
@@ -4329,11 +4389,7 @@ export function PlayerDetailPage({
   canManageLogins = false,
 }: { id: string; playerLogin?: PlayerLogin | null; canManageLogins?: boolean } & InitialDataProps) {
   const isAdmin = useIsAdmin();
-  const router = useRouter();
   const { data, commit } = useSifupData(initialData);
-  const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
-  const [mergingPlayer, setMergingPlayer] = useState<Player | null>(null);
-  const [editingLogin, setEditingLogin] = useState(false);
   const [error, setError] = useState("");
   const player = data.players.find((item) => item.id === id);
   if (!player) return <PageTitle title="Jugador no encontrado" description="No existe en la base de datos." />;
@@ -4346,24 +4402,40 @@ export function PlayerDetailPage({
     row: data.matchPlayers.find((row) => row.matchId === match.id && matchRowBelongsToPlayer(row, player, data.players)),
     result: data.results.find((item) => item.matchId === match.id),
   }));
+  const editHref = `/players/${player.id}/edit`;
 
-  function savePlayer(patch: Partial<Player>) {
-    if (!editingPlayer) return;
-    const updated = { ...editingPlayer, ...patch, updatedAt: new Date().toISOString() };
-    savePlayerAction(updated)
-      .then(() => {
-        commit({ ...upsertPlayer(data, updated), matchPlayers: data.matchPlayers.map((row) => row.playerId === updated.id ? { ...row, name: updated.name, updatedAt: updated.updatedAt } : row) });
-        setEditingPlayer(null);
-        setError("");
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar el jugador."));
+  function toggleMonthlyRoster(monthKey: string, shouldBeMonthly: boolean) {
+    if (!player) return;
+    if (shouldBeMonthly) {
+      const payment = monthlyPaymentFor(player, monthKey, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey));
+      saveMonthlyPaymentAction(payment)
+        .then(() => commit({ ...data, monthlyPayments: upsertMonthlyPayment(data.monthlyPayments, payment) }))
+        .catch((err) => setError(err instanceof Error ? err.message : "No se pudo agregar al roster de fijos."));
+      return;
+    }
+    removeMonthlyPaymentAction(player.id, monthKey)
+      .then(() => commit({ ...data, monthlyPayments: data.monthlyPayments.filter((item) => !(item.playerId === player.id && item.monthKey === monthKey)) }))
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo quitar del roster de fijos."));
+  }
+
+  function toggleMonthlyPaid(monthKey: string, paid: boolean) {
+    if (!player) return;
+    const existing = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey);
+    const base = monthlyPaymentFor(player, monthKey, existing);
+    const now = new Date().toISOString();
+    const updated: MonthlyPayment = paid
+      ? { ...base, paymentStatus: "unpaid", amountPaid: 0, paidAt: undefined, updatedAt: now }
+      : { ...base, paymentStatus: "paid", amountPaid: base.expectedAmount, paidAt: now, updatedAt: now };
+    saveMonthlyPaymentAction(updated)
+      .then(() => commit({ ...data, monthlyPayments: upsertMonthlyPayment(data.monthlyPayments, updated) }))
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo registrar el pago."));
   }
 
   return (
     <>
       <PageTitle title={player.name} description={`${isPlayerMonthlyForMonth(player.id, currentMonthKey(), data.players, data.monthlyPayments) ? "Oficial" : "Galleta"} · ${player.nickname || "Sin pseudonimo"}`} />
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
-      {isAdmin ? <div className="mb-4 flex flex-wrap gap-2"><Button variant="secondary" onClick={() => setEditingPlayer(player)}><Pencil size={16} />Editar datos</Button><Button variant="secondary" onClick={() => setMergingPlayer(player)} className="border-amber-500/40 text-amber-500 hover:bg-amber-500 hover:text-white"><Users size={16} />Fusionar jugador</Button></div> : null}
+      {isAdmin ? <div className="mb-4 flex flex-wrap gap-2"><Link href={editHref} className={linkButtonClass}><Pencil size={16} />Editar jugador</Link></div> : null}
       <section className="relative overflow-hidden rounded-xl border border-(--gold)/30 bg-[linear-gradient(135deg,rgba(250,204,21,0.14),rgba(18,214,154,0.08)_48%,rgba(255,255,255,0.03))] p-5 shadow-(--shadow)">
         <div className="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-(--gold)/10 blur-3xl" aria-hidden="true" />
         <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
@@ -4390,10 +4462,17 @@ export function PlayerDetailPage({
       <Card className="mt-4 space-y-3">
         <div>
           <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Trayectoria</p>
-          <h2 className="mt-1 text-xl font-black text-white">Historial de partidos</h2>
+          <h2 className="mt-1 text-xl font-black text-white">Historial de pagos y partidos</h2>
         </div>
-        {history.length === 0 ? <p className="text-sm text-(--muted)">Todavia no jugo ningun partido.</p> : null}
-        {history.length > 0 ? <PlayerMatchHistory history={history} /> : null}
+        <PlayerMonthlyHistory
+          player={player}
+          history={history}
+          players={data.players}
+          monthlyPayments={data.monthlyPayments}
+          isAdmin={isAdmin}
+          onToggleRoster={toggleMonthlyRoster}
+          onTogglePaid={toggleMonthlyPaid}
+        />
       </Card>
       {canManageLogins ? (
         <Card className="mt-4 space-y-3">
@@ -4402,10 +4481,10 @@ export function PlayerDetailPage({
               <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Acceso al sistema</p>
               <h2 className="mt-1 text-xl font-black text-white">Login</h2>
             </div>
-            <Button variant="secondary" onClick={() => setEditingLogin(true)}>
+            <Link href={editHref} className={linkButtonClass}>
               <Shield size={16} />
               {playerLogin ? "Editar acceso" : "Crear acceso"}
-            </Button>
+            </Link>
           </div>
           {playerLogin ? (
             <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -4420,12 +4499,85 @@ export function PlayerDetailPage({
           )}
         </Card>
       ) : null}
-      {editingPlayer ? <Modal title={`Editar ${editingPlayer.name}`} onClose={() => setEditingPlayer(null)}><PlayerEditorForm player={editingPlayer} onSave={savePlayer} allowMerge={false} /></Modal> : null}
-      {mergingPlayer ? <Modal title={`Fusionar ${mergingPlayer.name}`} onClose={() => setMergingPlayer(null)}><PlayerMergeForm player={mergingPlayer} players={data.players} onMerged={(targetId) => { setMergingPlayer(null); router.replace(`/players/${targetId}`); router.refresh(); }} /></Modal> : null}
-      {editingLogin ? (
-        <Modal title={playerLogin ? `Acceso de ${player.name}` : `Crear acceso para ${player.name}`} onClose={() => setEditingLogin(false)}>
-          <PlayerLoginForm playerId={player.id} login={playerLogin} onClose={() => setEditingLogin(false)} onSaved={() => router.refresh()} />
-        </Modal>
+    </>
+  );
+}
+
+export function PlayerEditPage({
+  id,
+  initialData,
+  playerLogin = null,
+  canManageLogins = false,
+}: { id: string; playerLogin?: PlayerLogin | null; canManageLogins?: boolean } & InitialDataProps) {
+  const isAdmin = useIsAdmin();
+  const router = useRouter();
+  const { data, commit } = useSifupData(initialData);
+  const [editingLogin, setEditingLogin] = useState(false);
+  const [error, setError] = useState("");
+  const player = data.players.find((item) => item.id === id);
+
+  if (!isAdmin) return <PageTitle title="Acceso restringido" description="Solo un administrador puede editar jugadores." />;
+  if (!player) return <PageTitle title="Jugador no encontrado" description="No existe en la base de datos." />;
+
+  const backHref = `/players/${player.id}`;
+
+  function savePlayer(patch: Partial<Player>) {
+    if (!player) return;
+    const updated = { ...player, ...patch, updatedAt: new Date().toISOString() };
+    savePlayerAction(updated)
+      .then(() => {
+        commit({ ...upsertPlayer(data, updated), matchPlayers: data.matchPlayers.map((row) => row.playerId === updated.id ? { ...row, name: updated.name, updatedAt: updated.updatedAt } : row) });
+        setError("");
+        router.push(backHref);
+        router.refresh();
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar el jugador."));
+  }
+
+  return (
+    <>
+      <PageTitle
+        title={`Editar ${player.name}`}
+        description="Datos del jugador, fusion y acceso al sistema."
+        action={<Link href={backHref} className={linkButtonClass}><ChevronLeft size={16} />Volver a la ficha</Link>}
+      />
+      {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
+      <Card className="space-y-3">
+        <h2 className="text-lg font-black text-white">Datos del jugador</h2>
+        <PlayerEditorForm player={player} onSave={savePlayer} allowMerge={false} />
+      </Card>
+      <Card className="mt-4 space-y-3">
+        <h2 className="text-lg font-black text-amber-500">Fusionar jugador</h2>
+        <PlayerMergeForm player={player} players={data.players} onMerged={(targetId) => { router.replace(`/players/${targetId}`); router.refresh(); }} />
+      </Card>
+      {canManageLogins ? (
+        <Card className="mt-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Acceso al sistema</p>
+              <h2 className="mt-1 text-xl font-black text-white">Login</h2>
+            </div>
+            {!editingLogin ? (
+              <Button variant="secondary" onClick={() => setEditingLogin(true)}>
+                <Shield size={16} />
+                {playerLogin ? "Editar acceso" : "Crear acceso"}
+              </Button>
+            ) : null}
+          </div>
+          {editingLogin ? (
+            <PlayerLoginForm playerId={player.id} login={playerLogin} onClose={() => setEditingLogin(false)} onSaved={() => router.refresh()} />
+          ) : playerLogin ? (
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-white">{playerLogin.email}</span>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${playerLogin.role === "admin" ? "bg-(--gold)/15 text-(--gold)" : "bg-white/10 text-(--muted)"}`}>
+                {playerLogin.role === "admin" ? "Administrador" : "Miembro"}
+              </span>
+              {!playerLogin.active ? <span className="rounded-full bg-(--red)/15 px-2 py-0.5 text-xs font-bold text-(--red)">Inactivo</span> : null}
+            </div>
+          ) : (
+            <p className="text-sm text-(--muted)">Este jugador todavia no tiene una cuenta para iniciar sesion.</p>
+          )}
+        </Card>
       ) : null}
     </>
   );
