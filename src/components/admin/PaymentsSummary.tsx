@@ -4,10 +4,19 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
-import { addClubExpenseAction, saveMonthlyPaymentAction } from "@/app/actions";
+import { addClubExpenseAction, saveMonthlyPaymentAction, setMatchPlayerPaymentStatusAction } from "@/app/actions";
 import { Button, Card, Input, Modal, PageTitle, PaymentBadge, Stat } from "./SifupWorkspace";
 import { formatCurrency, isPlayerMonthlyForMonth, monthLabel, monthlyPaymentFor, newId, shiftMonthKey } from "@/lib/store";
-import type { ClubExpense, MonthlyPayment, Player, SifupData } from "@/lib/types";
+import type { ClubExpense, Match, MatchPlayer, MonthlyPayment, Player, SifupData } from "@/lib/types";
+
+type GalletaPlayerSummary = {
+  key: string;
+  name: string;
+  playerId: string | null;
+  paid: number;
+  pending: number;
+  rows: { match: Match; row: MatchPlayer }[];
+};
 
 export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; monthKey: string; canEdit: boolean }) {
   const router = useRouter();
@@ -18,7 +27,14 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
   const monthlyPlayers = data.players
     .filter((player) => player.active && isPlayerMonthlyForMonth(player.id, monthKey, data.players, data.monthlyPayments))
     .sort((a, b) => a.name.localeCompare(b.name));
-  const paidCount = monthlyPlayers.filter((player) => data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey)?.paymentStatus === "paid").length;
+  const cuotaPayments = monthlyPlayers.map((player) => ({
+    player,
+    payment: monthlyPaymentFor(player, monthKey, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey)),
+  }));
+  const paidCount = cuotaPayments.filter((item) => item.payment.paymentStatus === "paid").length;
+  const cuotaCollected = cuotaPayments.reduce((sum, item) => sum + item.payment.amountPaid, 0);
+  const cuotaExpected = cuotaPayments.reduce((sum, item) => sum + item.payment.expectedAmount, 0);
+  const cuotaPending = cuotaPayments.reduce((sum, item) => sum + Math.max(item.payment.expectedAmount - item.payment.amountPaid, 0), 0);
 
   const matchesInMonth = [...data.matches.filter((match) => match.monthKey === monthKey)].sort((a, b) => a.date.localeCompare(b.date));
   const matchIdsInMonth = new Set(matchesInMonth.map((match) => match.id));
@@ -31,6 +47,24 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
     (row) => matchIdsInMonth.has(row.matchId) && !(row.playerId && isPlayerMonthlyForMonth(row.playerId, monthKey, data.players, data.monthlyPayments))
   );
   const ingresosGalleta = galletaRows.reduce((sum, row) => sum + row.amountPaid, 0);
+
+  const galletaByPlayer = new Map<string, GalletaPlayerSummary>();
+  for (const row of galletaRows) {
+    const match = matchesInMonth.find((item) => item.id === row.matchId);
+    if (!match) continue;
+    const key = row.playerId ?? `name:${row.name.trim().toLowerCase()}`;
+    const entry = galletaByPlayer.get(key) ?? { key, name: row.name, playerId: row.playerId ?? null, paid: 0, pending: 0, rows: [] };
+    entry.paid += row.amountPaid;
+    entry.pending += Math.max(row.amountDue - row.amountPaid, 0);
+    entry.rows.push({ match, row });
+    galletaByPlayer.set(key, entry);
+  }
+  const galletaPlayers = [...galletaByPlayer.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const galletaPending = galletaPlayers.reduce((sum, entry) => sum + entry.pending, 0);
+
+  const ingresosDelMes = cuotaCollected + ingresosGalleta;
+  const pendientesDePago = cuotaPending + galletaPending;
+  const saldoDelMes = ingresosDelMes - gastoTotal;
 
   function toggleCuota(player: Player) {
     const existing = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey);
@@ -64,6 +98,19 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
     });
   }
 
+  function toggleGalleta(row: MatchPlayer) {
+    const nextStatus = row.paymentStatus === "paid" ? "unpaid" : "paid";
+    setError("");
+    startTransition(async () => {
+      try {
+        await setMatchPlayerPaymentStatusAction(row.id, nextStatus);
+        router.refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo actualizar el pago.");
+      }
+    });
+  }
+
   return (
     <div>
       <Link href="/payments" className="mb-3 inline-flex items-center gap-1 text-sm font-semibold text-(--muted) transition hover:text-white">
@@ -87,39 +134,17 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
 
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
-      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Stat label="Cuotas pagadas" value={`${paidCount}/${monthlyPlayers.length}`} />
-        <Stat label="Gasto del mes" value={formatCurrency(gastoTotal)} />
-        <Stat label="Ingresos galleta" value={formatCurrency(ingresosGalleta)} />
+      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Costos del mes" value={formatCurrency(gastoTotal)} />
+        <Stat label="Ingresos del mes" value={formatCurrency(ingresosDelMes)} />
+        <Stat label="Pendientes de pago" value={formatCurrency(pendientesDePago)} />
+        <Stat label="Saldo del mes" value={formatCurrency(saldoDelMes)} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="space-y-3">
-          <h2 className="text-lg font-black text-white">Cuota del mes</h2>
-          <ul className="space-y-2">
-            {monthlyPlayers.map((player) => {
-              const payment = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey);
-              const status = payment?.paymentStatus ?? "unpaid";
-              return (
-                <li key={player.id} className="flex items-center justify-between gap-2">
-                  <span className="text-sm text-white">{player.name}</span>
-                  {canEdit ? (
-                    <button type="button" disabled={isPending} onClick={() => toggleCuota(player)} className="disabled:opacity-60">
-                      <PaymentBadge status={status} />
-                    </button>
-                  ) : (
-                    <PaymentBadge status={status} />
-                  )}
-                </li>
-              );
-            })}
-            {monthlyPlayers.length === 0 ? <li className="text-sm text-(--muted)">Sin jugadores mensuales este mes.</li> : null}
-          </ul>
-        </Card>
-
-        <Card className="space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-lg font-black text-white">Gasto del mes</h2>
+            <h2 className="text-lg font-black text-white">Gastos</h2>
             {canEdit ? (
               <Button variant="secondary" onClick={() => setShowExpenseForm(true)}>
                 <Plus size={14} /> Gasto
@@ -127,12 +152,20 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
             ) : null}
           </div>
           <ul className="space-y-2">
-            {matchesInMonth.map((match) => (
-              <li key={match.id} className="flex items-center justify-between gap-2 text-sm">
-                <span className="text-(--muted)">Partido {match.date}</span>
-                <span className="font-bold text-white">{formatCurrency(match.totalCost)}</span>
-              </li>
-            ))}
+            {matchesInMonth.map((match) => {
+              const played = data.results.some((result) => result.matchId === match.id);
+              return (
+                <li key={match.id} className="flex items-center justify-between gap-2 text-sm">
+                  <span className="flex flex-wrap items-center gap-2 text-(--muted)">
+                    <Link href={`/matches/${match.id}`} className="hover:text-(--cyan) hover:underline">Partido {match.date}</Link>
+                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${played ? "bg-(--green)/15 text-(--green)" : "bg-white/10 text-(--muted)"}`}>
+                      {played ? "Jugado" : "Pendiente"}
+                    </span>
+                  </span>
+                  <span className="font-bold text-white">{formatCurrency(match.totalCost)}</span>
+                </li>
+              );
+            })}
             {expensesInMonth.map((expense) => (
               <li key={expense.id} className="flex items-center justify-between gap-2 text-sm">
                 <span className="text-(--muted)">{expense.label}</span>
@@ -148,22 +181,74 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
         </Card>
 
         <Card className="space-y-3">
-          <h2 className="text-lg font-black text-white">Ingresos por galleta</h2>
-          <ul className="space-y-2">
-            {matchesInMonth.map((match) => {
-              const matchGalletaTotal = galletaRows.filter((row) => row.matchId === match.id).reduce((sum, row) => sum + row.amountPaid, 0);
-              return (
-                <li key={match.id} className="flex items-center justify-between gap-2 text-sm">
-                  <span className="text-(--muted)">Partido {match.date}</span>
-                  <span className="font-bold text-white">{formatCurrency(matchGalletaTotal)}</span>
-                </li>
-              );
-            })}
-            {matchesInMonth.length === 0 ? <li className="text-sm text-(--muted)">Sin partidos este mes.</li> : null}
+          <h2 className="text-lg font-black text-white">Situacion galletas</h2>
+          <ul className="space-y-3">
+            {galletaPlayers.map((entry) => (
+              <li key={entry.key} className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  {entry.playerId ? (
+                    <Link href={`/players/${entry.playerId}`} className="text-sm font-semibold text-white hover:text-(--cyan) hover:underline">{entry.name}</Link>
+                  ) : (
+                    <span className="text-sm font-semibold text-white">{entry.name}</span>
+                  )}
+                  <span className={`text-sm font-bold ${entry.pending > 0 ? "text-(--red)" : "text-(--green)"}`}>
+                    {entry.pending > 0 ? formatCurrency(entry.pending) : "Al dia"}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {entry.rows.map(({ match, row }) => {
+                    const paid = row.paymentStatus === "paid";
+                    const title = `${match.date}: ${paid ? "Pagado" : "Pendiente"}${canEdit ? " - toca para cambiar" : ""}`;
+                    return (
+                      <button
+                        key={row.id}
+                        type="button"
+                        disabled={!canEdit || isPending}
+                        title={title}
+                        onClick={() => toggleGalleta(row)}
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-bold transition disabled:cursor-not-allowed ${paid ? "bg-(--green)/15 text-(--green)" : "bg-(--red)/15 text-(--red)"} ${canEdit ? "hover:opacity-80" : ""}`}
+                      >
+                        {match.date.slice(5)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </li>
+            ))}
+            {galletaPlayers.length === 0 ? <li className="text-sm text-(--muted)">Sin galletas este mes.</li> : null}
           </ul>
           <div className="flex items-center justify-between border-t border-(--border) pt-2 text-sm font-black text-white">
             <span>Total</span>
             <span>{formatCurrency(ingresosGalleta)}</span>
+          </div>
+        </Card>
+
+        <Card className="space-y-3">
+          <div>
+            <h2 className="text-lg font-black text-white">Oficiales Mensuales</h2>
+            <p className="text-xs font-semibold text-(--muted)">{paidCount}/{monthlyPlayers.length} pagaron</p>
+          </div>
+          <ul className="space-y-2">
+            {cuotaPayments.map(({ player, payment }) => (
+              <li key={player.id} className="flex items-center justify-between gap-2">
+                <Link href={`/players/${player.id}`} className="text-sm text-white hover:text-(--cyan) hover:underline">{player.name}</Link>
+                <span className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-(--muted)">{formatCurrency(payment.expectedAmount)}</span>
+                  {canEdit ? (
+                    <button type="button" disabled={isPending} onClick={() => toggleCuota(player)} className="disabled:opacity-60">
+                      <PaymentBadge status={payment.paymentStatus} />
+                    </button>
+                  ) : (
+                    <PaymentBadge status={payment.paymentStatus} />
+                  )}
+                </span>
+              </li>
+            ))}
+            {monthlyPlayers.length === 0 ? <li className="text-sm text-(--muted)">Sin jugadores mensuales este mes.</li> : null}
+          </ul>
+          <div className="flex items-center justify-between border-t border-(--border) pt-2 text-sm font-black text-white">
+            <span>Total</span>
+            <span>{formatCurrency(cuotaCollected)} / {formatCurrency(cuotaExpected)}</span>
           </div>
         </Card>
       </div>

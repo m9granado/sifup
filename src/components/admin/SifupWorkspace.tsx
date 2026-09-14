@@ -26,7 +26,7 @@ import {
 import type { PlayerLogin } from "@/lib/auth";
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
-import { adjacentMatches, currentMonthKey, formatCurrency, isPlayerMonthlyForMonth, monthLabel, monthlyPaymentFor, newId, nextMatch, replaceMatchPlayers, shiftMonthKey, sortByWhatsappOrder, summarizeMatch, upsertMatch, upsertMonthlyPayment, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
+import { adjacentMatches, currentMonthKey, formatCurrency, isPlayerMonthlyForMonth, monthLabel, monthlyPaymentFor, newId, newMatchId, nextMatch, replaceMatchPlayers, shiftMonthKey, sortByWhatsappOrder, summarizeMatch, upsertMatch, upsertMonthlyPayment, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
 import { calculateRankingRecord, pointsForMatchRow, rankingMatches } from "@/lib/standings";
 import { matchSummaryMessage, royalTeamsMessage, teamsMessage } from "@/lib/whatsapp";
 import { COURT_COST, LOSS_POINTS, MATCH_TEAM_COLOR_CLASSES, MATCH_TEAM_COLOR_LABEL, MATCH_TEAM_DEFAULT_COLORS, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, ROYAL_GAME_TIME_LIMIT_MIN, ROYAL_GOAL_DIFF_TO_WIN, ROYAL_SQUAD_TARGET, SQUAD_TARGET, WIN_POINTS } from "@/lib/sifup-constants";
@@ -647,7 +647,7 @@ export function MatchesPage({ initialData }: InitialDataProps) {
         for (const date of dates) {
           const now = new Date().toISOString();
           const match: Match = {
-            id: newId("match"),
+            id: newMatchId(date, next.matches.map((item) => item.id)),
             date,
             time: latest.time,
             location: latest.location,
@@ -970,7 +970,7 @@ export function NewMatchPage({ initialData }: InitialDataProps) {
       return;
     }
     const now = new Date().toISOString();
-    const matchId = newId("match");
+    const matchId = newMatchId(match.date, data.matches.map((item) => item.id));
     const nextMatch: Match = {
       id: matchId,
       date: match.date,

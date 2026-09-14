@@ -5,6 +5,15 @@ export function newId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+export function newMatchId(date: string, existingIds: Iterable<string> = []) {
+  const taken = new Set(existingIds);
+  const base = `match-${date}`;
+  if (!taken.has(base)) return base;
+  let suffix = 2;
+  while (taken.has(`${base}-${suffix}`)) suffix++;
+  return `${base}-${suffix}`;
+}
+
 export function nextMatch(matches: Match[]) {
   const now = new Date();
   const upcoming = matches

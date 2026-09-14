@@ -5,7 +5,7 @@ import { COURT_COST, MONTHLY_AMOUNT, PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from ".
 import { monthKey, weekLabel } from "./sifup-date";
 import { parseWhatsAppList } from "./parser";
 import { deleteMonthlyPayment, getSifupData, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment, savePlayer, mergePlayers as dbMergePlayers } from "./repository";
-import { isPlayerMonthlyForMonth, newId, nextMatch, sortByWhatsappOrder, summarizeMatch } from "./store";
+import { isPlayerMonthlyForMonth, newId, newMatchId, nextMatch, sortByWhatsappOrder, summarizeMatch } from "./store";
 import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, standingsMessage, teamsMessage } from "./whatsapp";
 import { calculateRankingRecord } from "./standings";
 import type { AttendanceStatus, Match, MatchPlayer, MatchResult, MonthlyPayment, Player, Team, Winner } from "./types";
@@ -27,7 +27,7 @@ export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MA
     ? data.matches.find((match) => match.id === matchId)
     : data.matches.find((match) => match.date === parsed.match.date && match.time === parsed.match.time);
   const now = new Date().toISOString();
-  const targetId = existing?.id ?? newId("match");
+  const targetId = existing?.id ?? newMatchId(parsed.match.date, data.matches.map((match) => match.id));
   const match: Match = {
     id: targetId,
     date: parsed.match.date,
