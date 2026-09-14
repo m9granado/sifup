@@ -450,12 +450,14 @@ export function Stat({
   tone = "default",
   icon,
   size = "md",
+  highlight = false,
 }: {
   label: string;
   value: string | number;
   tone?: "default" | "green" | "red" | "gold";
   icon?: React.ReactNode;
   size?: "md" | "lg";
+  highlight?: boolean;
 }) {
   const iconToneClass = {
     default: "bg-white/10 text-white",
@@ -463,9 +465,17 @@ export function Stat({
     red: "bg-(--red)/15 text-(--red)",
     gold: "bg-(--gold)/15 text-(--gold)",
   }[tone];
-  const sizeClass = size === "lg" ? "text-3xl" : "text-2xl";
+  const highlightClass = highlight
+    ? {
+        default: "ring-2 ring-white/30 bg-white/5",
+        green: "ring-2 ring-(--green)/40 bg-(--green)/10",
+        red: "ring-2 ring-(--red)/40 bg-(--red)/10",
+        gold: "ring-2 ring-(--gold)/40 bg-(--gold)/10",
+      }[tone]
+    : "";
+  const sizeClass = highlight ? "text-4xl" : size === "lg" ? "text-3xl" : "text-2xl";
   return (
-    <Card className="flex items-start justify-between gap-3">
+    <Card className={`flex items-start justify-between gap-3 ${highlightClass}`}>
       <div>
         <p className="text-xs font-bold uppercase tracking-wide text-(--muted)">{label}</p>
         <p className={`mt-2 font-black text-white ${sizeClass}`}>{value}</p>
