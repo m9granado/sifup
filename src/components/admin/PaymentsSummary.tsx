@@ -66,6 +66,9 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
 
   return (
     <div>
+      <Link href="/payments" className="mb-3 inline-flex items-center gap-1 text-sm font-semibold text-(--muted) transition hover:text-white">
+        <ChevronLeft size={14} /> Pagos
+      </Link>
       <PageTitle
         title="Resumen mensual"
         description={monthLabel(monthKey).replace(/^\w/, (letter) => letter.toUpperCase())}

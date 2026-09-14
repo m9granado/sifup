@@ -3412,7 +3412,11 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
 
   return (
     <>
-      <PageTitle title="Pagos" description={`Mensualidades con vencimiento los dias 10, pagos por partido y balance del club.`} />
+      <PageTitle
+        title="Pagos"
+        description={`Mensualidades con vencimiento los dias 10, pagos por partido y balance del club.`}
+        action={<CtaLink href={`/payments/resumen?date=${month}`}><WalletCards size={16} />Resumen mensual</CtaLink>}
+      />
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: el marcado de pagos queda reservado para admin." /> : null}
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
       <div className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
