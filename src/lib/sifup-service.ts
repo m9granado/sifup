@@ -5,7 +5,7 @@ import { COURT_COST, MONTHLY_AMOUNT, PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from ".
 import { monthKey, weekLabel } from "./sifup-date";
 import { parseWhatsAppList } from "./parser";
 import { deleteMonthlyPayment, getSifupData, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment, savePlayer, mergePlayers as dbMergePlayers } from "./repository";
-import { isPlayerMonthlyForMonth, newId, newMatchId, nextMatch, sortByWhatsappOrder, summarizeMatch } from "./store";
+import { isPlayerMonthlyForMonth, newId, newMatchId, newPlayerId, nextMatch, sortByWhatsappOrder, summarizeMatch } from "./store";
 import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, standingsMessage, teamsMessage } from "./whatsapp";
 import { calculateRankingRecord } from "./standings";
 import type { AttendanceStatus, Match, MatchPlayer, MatchResult, MonthlyPayment, Player, Team, Winner } from "./types";
@@ -52,7 +52,7 @@ export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MA
     let player = findKnownPlayer(knownPlayers, row.name);
     if (!player && !out) {
       const newPlayer: Player = {
-        id: newId("player"),
+        id: newPlayerId(row.name.trim(), knownPlayers.map((item) => item.id)),
         name: row.name.trim(),
         nickname: row.name.trim().split(" ")[0],
         phone: row.phone,

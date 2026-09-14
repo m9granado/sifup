@@ -14,6 +14,22 @@ export function newMatchId(date: string, existingIds: Iterable<string> = []) {
   return `${base}-${suffix}`;
 }
 
+export function newPlayerId(name: string, existingIds: Iterable<string> = []) {
+  const taken = new Set(existingIds);
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const base = `player-${slug || "jugador"}`;
+  if (!taken.has(base)) return base;
+  let suffix = 2;
+  while (taken.has(`${base}-${suffix}`)) suffix++;
+  return `${base}-${suffix}`;
+}
+
 export function nextMatch(matches: Match[]) {
   const now = new Date();
   const upcoming = matches

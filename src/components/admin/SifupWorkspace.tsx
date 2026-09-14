@@ -26,7 +26,7 @@ import {
 import type { PlayerLogin } from "@/lib/auth";
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
-import { adjacentMatches, currentMonthKey, formatCurrency, isPlayerMonthlyForMonth, monthLabel, monthlyPaymentFor, newId, newMatchId, nextMatch, replaceMatchPlayers, shiftMonthKey, sortByWhatsappOrder, summarizeMatch, upsertMatch, upsertMonthlyPayment, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
+import { adjacentMatches, currentMonthKey, formatCurrency, isPlayerMonthlyForMonth, monthLabel, monthlyPaymentFor, newId, newMatchId, newPlayerId, nextMatch, replaceMatchPlayers, shiftMonthKey, sortByWhatsappOrder, summarizeMatch, upsertMatch, upsertMonthlyPayment, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
 import { calculateRankingRecord, pointsForMatchRow, rankingMatches } from "@/lib/standings";
 import { matchSummaryMessage, royalTeamsMessage, teamsMessage } from "@/lib/whatsapp";
 import { COURT_COST, LOSS_POINTS, MATCH_TEAM_COLOR_CLASSES, MATCH_TEAM_COLOR_LABEL, MATCH_TEAM_DEFAULT_COLORS, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, ROYAL_GAME_TIME_LIMIT_MIN, ROYAL_GOAL_DIFF_TO_WIN, ROYAL_SQUAD_TARGET, SQUAD_TARGET, WIN_POINTS } from "@/lib/sifup-constants";
@@ -2869,7 +2869,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   function createAndAddPlayer(name: string, phone: string) {
     if (!name.trim()) return;
     const now = new Date().toISOString();
-    const player: Player = { id: newId("player"), name: name.trim(), nickname: name.trim().split(" ")[0], phone: phone.trim(), paymentPlan: "perMatch", skillLevel: 3, active: true, shortName: name.trim().slice(0, 3).toUpperCase(), isGoalkeeper: name.toLowerCase().includes("arquero"), createdAt: now, updatedAt: now };
+    const player: Player = { id: newPlayerId(name.trim(), data.players.map((item) => item.id)), name: name.trim(), nickname: name.trim().split(" ")[0], phone: phone.trim(), paymentPlan: "perMatch", skillLevel: 3, active: true, shortName: name.trim().slice(0, 3).toUpperCase(), isGoalkeeper: name.toLowerCase().includes("arquero"), createdAt: now, updatedAt: now };
     savePlayerAction(player)
       .then(() => {
         commit(upsertPlayer(data, player));
@@ -3358,7 +3358,7 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
     } else {
       const now = new Date().toISOString();
       setEditingPlayer({
-        id: newId("player"),
+        id: newPlayerId(name, data.players.map((item) => item.id)),
         name: name,
         nickname: name.split(" ")[0],
         phone: "",
@@ -3873,7 +3873,7 @@ export function PlayersPage({ initialData }: InitialDataProps) {
   function addPlayer() {
     if (!name.trim()) return;
     const now = new Date().toISOString();
-    const player: Player = { id: newId("player"), name: name.trim(), nickname: name.trim().split(" ")[0], phone: "", paymentPlan: "perMatch", skillLevel: 3, active: true, shortName: name.trim().slice(0, 3).toUpperCase(), isGoalkeeper: name.toLowerCase().includes("arquero"), createdAt: now, updatedAt: now };
+    const player: Player = { id: newPlayerId(name.trim(), data.players.map((item) => item.id)), name: name.trim(), nickname: name.trim().split(" ")[0], phone: "", paymentPlan: "perMatch", skillLevel: 3, active: true, shortName: name.trim().slice(0, 3).toUpperCase(), isGoalkeeper: name.toLowerCase().includes("arquero"), createdAt: now, updatedAt: now };
     savePlayerAction(player)
       .then(() => {
         commit(upsertPlayer(data, player));
