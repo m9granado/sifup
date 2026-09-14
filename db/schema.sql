@@ -30,6 +30,9 @@ create table if not exists players (
 
 alter table players add column if not exists is_goalkeeper boolean not null default false;
 
+alter table app_users add column if not exists player_id text references players(id) on delete set null;
+create unique index if not exists idx_app_users_player_id on app_users(player_id) where player_id is not null;
+
 create table if not exists matches (
   id text primary key,
   match_date date not null,

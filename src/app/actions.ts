@@ -84,6 +84,8 @@ export async function loginAction(_state: LoginState, formData: FormData): Promi
       permission text not null check (permission in ('dashboard', 'matches', 'players', 'payments', 'standings', 'users')),
       primary key (user_id, permission)
     );
+    alter table app_users add column if not exists player_id text references players(id) on delete set null;
+    create unique index if not exists idx_app_users_player_id on app_users(player_id) where player_id is not null;
   `);
   await ensureSystemUsers(sql);
   let users = await sql<Array<{ id: string; password_hash: string }>>`select id, password_hash from app_users where email = ${email} and active = true`;
@@ -200,4 +202,69 @@ export async function mergePlayersAction(sourceId: string, targetId: string) {
   await requirePermission("users");
   await repositoryMergePlayers(sourceId, targetId);
   revalidateAdminViews();
+}
+
+export type PlayerLoginInput = { email: string; password?: string; role: "admin" | "member"; active: boolean };
+
+async function setPlayerLoginPermissions(sql: ReturnType<typeof getSql>, userId: string, role: "admin" | "member") {
+  await sql`delete from user_permissions where user_id = ${userId}`;
+  if (role === "admin") {
+    await sql`
+      insert into user_permissions (user_id, permission)
+      select ${userId}, permission
+      from unnest(array['dashboard', 'matches', 'players', 'payments', 'standings', 'users']::text[]) as permission
+    `;
+  }
+}
+
+export async function savePlayerLoginAction(playerId: string, input: PlayerLoginInput) {
+  await requirePermission("users");
+  if (!hasDatabaseUrl()) throw new Error("No hay una conexión de base de datos configurada.");
+  const email = input.email.trim().toLowerCase();
+  if (!email) throw new Error("El email es obligatorio.");
+  const sql = getSql();
+
+  try {
+    const existing = await sql<Array<{ id: string }>>`select id from app_users where player_id = ${playerId}`;
+
+    if (existing[0]) {
+      if (input.password) {
+        await sql`
+          update app_users
+          set email = ${email}, role = ${input.role}, active = ${input.active}, password_hash = ${hashPassword(input.password)}, updated_at = now()
+          where id = ${existing[0].id}
+        `;
+      } else {
+        await sql`
+          update app_users
+          set email = ${email}, role = ${input.role}, active = ${input.active}, updated_at = now()
+          where id = ${existing[0].id}
+        `;
+      }
+      await setPlayerLoginPermissions(sql, existing[0].id, input.role);
+    } else {
+      if (!input.password) throw new Error("El password es obligatorio para crear el acceso.");
+      const id = randomUUID();
+      await sql`
+        insert into app_users (id, email, password_hash, role, active, player_id)
+        values (${id}, ${email}, ${hashPassword(input.password)}, ${input.role}, ${input.active}, ${playerId})
+      `;
+      await setPlayerLoginPermissions(sql, id, input.role);
+    }
+  } catch (err) {
+    if (err instanceof Error && /unique/i.test(err.message)) {
+      throw new Error("Ese email ya está en uso por otra cuenta.");
+    }
+    throw err;
+  }
+
+  revalidatePath(`/players/${playerId}`);
+}
+
+export async function removePlayerLoginAction(playerId: string) {
+  await requirePermission("users");
+  if (!hasDatabaseUrl()) throw new Error("No hay una conexión de base de datos configurada.");
+  const sql = getSql();
+  await sql`delete from app_users where player_id = ${playerId}`;
+  revalidatePath(`/players/${playerId}`);
 }

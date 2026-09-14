@@ -54,6 +54,18 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
 
 export async function isAuthenticated() { return Boolean(await getCurrentUser()); }
 
+export type PlayerLogin = { email: string; role: "admin" | "member"; active: boolean };
+
+export async function getPlayerLogin(playerId: string): Promise<PlayerLogin | null> {
+  const { getSql, hasDatabaseUrl } = await import("@/lib/db");
+  if (!hasDatabaseUrl()) return null;
+  const sql = getSql();
+  const rows = await sql<PlayerLogin[]>`
+    select email, role, active from app_users where player_id = ${playerId}
+  `;
+  return rows[0] ?? null;
+}
+
 export async function hasPermission(permission: Permission) {
   const user = await getCurrentUser();
   return Boolean(user && (user.role === "admin" || user.permissions.includes(permission)));

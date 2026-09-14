@@ -1,7 +1,17 @@
 import { PlayerDetailPage } from "@/components/admin/SifupWorkspace";
 import { getSifupData } from "@/lib/repository";
+import { getPlayerLogin, hasPermission } from "@/lib/auth";
 
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return <PlayerDetailPage id={id} initialData={await getSifupData()} />;
+  const canManageLogins = await hasPermission("users");
+  const playerLogin = canManageLogins ? await getPlayerLogin(id) : null;
+  return (
+    <PlayerDetailPage
+      id={id}
+      initialData={await getSifupData()}
+      playerLogin={playerLogin}
+      canManageLogins={canManageLogins}
+    />
+  );
 }

@@ -19,7 +19,11 @@ import {
   startMatchGameAction,
   updateMatchGameScoreAction,
   mergePlayersAction,
+  savePlayerLoginAction,
+  removePlayerLoginAction,
+  type PlayerLoginInput,
 } from "@/app/actions";
+import type { PlayerLogin } from "@/lib/auth";
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
 import { adjacentMatches, formatCurrency, isPlayerMonthlyForMonth, newId, nextMatch, replaceMatchPlayers, sortByWhatsappOrder, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
@@ -4196,6 +4200,75 @@ function PlayerMergeForm({ player, players, onMerged }: { player: Player; player
   );
 }
 
+function PlayerLoginForm({
+  playerId,
+  login,
+  onClose,
+  onSaved,
+}: {
+  playerId: string;
+  login: PlayerLogin | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [email, setEmail] = useState(login?.email ?? "");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"admin" | "member">(login?.role ?? "member");
+  const [active, setActive] = useState(login?.active ?? true);
+  const [error, setError] = useState("");
+  const [isSaving, startSaving] = useTransition();
+
+  function save() {
+    const input: PlayerLoginInput = { email, password: password || undefined, role, active };
+    startSaving(async () => {
+      try {
+        await savePlayerLoginAction(playerId, input);
+        onSaved();
+        onClose();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo guardar el acceso.");
+      }
+    });
+  }
+
+  function remove() {
+    if (!confirm("¿Quitar el acceso de este jugador? Ya no va a poder iniciar sesion.")) return;
+    startSaving(async () => {
+      try {
+        await removePlayerLoginAction(playerId);
+        onSaved();
+        onClose();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo quitar el acceso.");
+      }
+    });
+  }
+
+  return (
+    <div className="space-y-3">
+      <Input label="Email" value={email} onChange={setEmail} type="email" />
+      <Input label={login ? "Nuevo password (dejar vacio para no cambiarlo)" : "Password"} value={password} onChange={setPassword} type="password" />
+      <label className="flex items-center gap-2 text-sm font-medium text-(--muted)">
+        <input type="checkbox" checked={role === "admin"} onChange={(event) => setRole(event.target.checked ? "admin" : "member")} disabled={isSaving} />
+        <span>Administrador (acceso total)</span>
+      </label>
+      <label className="flex items-center gap-2 text-sm font-medium text-(--muted)">
+        <input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} disabled={isSaving} />
+        <span>Cuenta activa</span>
+      </label>
+      {error ? <p className="text-sm font-semibold text-(--red)">{error}</p> : null}
+      <div className="flex flex-wrap gap-2 pt-2">
+        <Button onClick={save} disabled={isSaving}><Save size={16} />Guardar acceso</Button>
+        {login ? (
+          <Button variant="secondary" onClick={remove} disabled={isSaving} className="border-(--red)/40 text-(--red) hover:bg-(--red) hover:text-white">
+            Quitar acceso
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 type PlayerHistoryItem = { row: MatchPlayer | undefined; match: Match; result: MatchResult | undefined };
 type PlayerHistorySortKey = "date" | "points" | "result" | "debt";
 
@@ -4286,12 +4359,18 @@ function PlayerMatchHistory({ history }: { history: PlayerHistoryItem[] }) {
   );
 }
 
-export function PlayerDetailPage({ id, initialData }: { id: string } & InitialDataProps) {
+export function PlayerDetailPage({
+  id,
+  initialData,
+  playerLogin = null,
+  canManageLogins = false,
+}: { id: string; playerLogin?: PlayerLogin | null; canManageLogins?: boolean } & InitialDataProps) {
   const isAdmin = useIsAdmin();
   const router = useRouter();
   const { data, commit } = useSifupData(initialData);
   const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
   const [mergingPlayer, setMergingPlayer] = useState<Player | null>(null);
+  const [editingLogin, setEditingLogin] = useState(false);
   const [error, setError] = useState("");
   const player = data.players.find((item) => item.id === id);
   if (!player) return <PageTitle title="Jugador no encontrado" description="No existe en la base de datos." />;
@@ -4353,8 +4432,38 @@ export function PlayerDetailPage({ id, initialData }: { id: string } & InitialDa
         {history.length === 0 ? <p className="text-sm text-(--muted)">Todavia no jugo ningun partido.</p> : null}
         {history.length > 0 ? <PlayerMatchHistory history={history} /> : null}
       </Card>
+      {canManageLogins ? (
+        <Card className="mt-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Acceso al sistema</p>
+              <h2 className="mt-1 text-xl font-black text-white">Login</h2>
+            </div>
+            <Button variant="secondary" onClick={() => setEditingLogin(true)}>
+              <Shield size={16} />
+              {playerLogin ? "Editar acceso" : "Crear acceso"}
+            </Button>
+          </div>
+          {playerLogin ? (
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-white">{playerLogin.email}</span>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${playerLogin.role === "admin" ? "bg-(--gold)/15 text-(--gold)" : "bg-white/10 text-(--muted)"}`}>
+                {playerLogin.role === "admin" ? "Administrador" : "Miembro"}
+              </span>
+              {!playerLogin.active ? <span className="rounded-full bg-(--red)/15 px-2 py-0.5 text-xs font-bold text-(--red)">Inactivo</span> : null}
+            </div>
+          ) : (
+            <p className="text-sm text-(--muted)">Este jugador todavia no tiene una cuenta para iniciar sesion.</p>
+          )}
+        </Card>
+      ) : null}
       {editingPlayer ? <Modal title={`Editar ${editingPlayer.name}`} onClose={() => setEditingPlayer(null)}><PlayerEditorForm player={editingPlayer} onSave={savePlayer} allowMerge={false} /></Modal> : null}
       {mergingPlayer ? <Modal title={`Fusionar ${mergingPlayer.name}`} onClose={() => setMergingPlayer(null)}><PlayerMergeForm player={mergingPlayer} players={data.players} onMerged={(targetId) => { setMergingPlayer(null); router.replace(`/players/${targetId}`); router.refresh(); }} /></Modal> : null}
+      {editingLogin ? (
+        <Modal title={playerLogin ? `Acceso de ${player.name}` : `Crear acceso para ${player.name}`} onClose={() => setEditingLogin(false)}>
+          <PlayerLoginForm playerId={player.id} login={playerLogin} onClose={() => setEditingLogin(false)} onSaved={() => router.refresh()} />
+        </Modal>
+      ) : null}
     </>
   );
 }
