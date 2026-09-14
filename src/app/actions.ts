@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { createSession, destroySession, validPassword, requirePermission } from "@/lib/auth";
+import { createSession, destroySession, validPassword, requirePermission, ensurePlayerLoginSchema } from "@/lib/auth";
 import { getSql, hasDatabaseUrl } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
 import { randomUUID } from "crypto";
@@ -231,6 +231,7 @@ export async function savePlayerLoginAction(playerId: string, input: PlayerLogin
   const email = input.email.trim().toLowerCase();
   if (!email) throw new Error("El email es obligatorio.");
   const sql = getSql();
+  await ensurePlayerLoginSchema(sql);
 
   try {
     const existing = await sql<Array<{ id: string }>>`select id from app_users where player_id = ${playerId}`;
@@ -273,6 +274,7 @@ export async function removePlayerLoginAction(playerId: string) {
   await requirePermission("users");
   if (!hasDatabaseUrl()) throw new Error("No hay una conexión de base de datos configurada.");
   const sql = getSql();
+  await ensurePlayerLoginSchema(sql);
   await sql`delete from app_users where player_id = ${playerId}`;
   revalidatePath(`/players/${playerId}`);
 }

@@ -3,6 +3,7 @@ import "server-only";
 import { createHmac, timingSafeEqual, randomBytes, scryptSync } from "crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import type { getSql } from "@/lib/db";
 
 const COOKIE_NAME = "sifup_session";
 export type Permission = "dashboard" | "matches" | "players" | "payments" | "standings" | "users";
@@ -56,14 +57,29 @@ export async function isAuthenticated() { return Boolean(await getCurrentUser())
 
 export type PlayerLogin = { email: string; role: "admin" | "member"; active: boolean };
 
+export async function ensurePlayerLoginSchema(sql: ReturnType<typeof getSql>) {
+  await sql.unsafe(`
+    alter table app_users add column if not exists player_id text references players(id) on delete set null;
+    create unique index if not exists idx_app_users_player_id on app_users(player_id) where player_id is not null;
+  `);
+}
+
 export async function getPlayerLogin(playerId: string): Promise<PlayerLogin | null> {
   const { getSql, hasDatabaseUrl } = await import("@/lib/db");
   if (!hasDatabaseUrl()) return null;
   const sql = getSql();
-  const rows = await sql<PlayerLogin[]>`
-    select email, role, active from app_users where player_id = ${playerId}
-  `;
-  return rows[0] ?? null;
+  try {
+    const rows = await sql<PlayerLogin[]>`
+      select email, role, active from app_users where player_id = ${playerId}
+    `;
+    return rows[0] ?? null;
+  } catch {
+    await ensurePlayerLoginSchema(sql);
+    const rows = await sql<PlayerLogin[]>`
+      select email, role, active from app_users where player_id = ${playerId}
+    `;
+    return rows[0] ?? null;
+  }
 }
 
 export async function hasPermission(permission: Permission) {
