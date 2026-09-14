@@ -71,7 +71,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
 
   const ingresosDelMes = cuotaCollected + ingresosGalleta;
   const pendientesDePago = cuotaPending + galletaPending;
-  const saldoDelMes = ingresosDelMes - gastoTotal;
+  const saldoDelMes = ingresosDelMes + pendientesDePago - gastoTotal;
 
   function toggleCuota(player: Player) {
     const existing = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey);
