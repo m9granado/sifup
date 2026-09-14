@@ -44,7 +44,10 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
   const gastoTotal = gastoPartidos + gastoExtra;
 
   const galletaRows = data.matchPlayers.filter(
-    (row) => matchIdsInMonth.has(row.matchId) && !(row.playerId && isPlayerMonthlyForMonth(row.playerId, monthKey, data.players, data.monthlyPayments))
+    (row) =>
+      matchIdsInMonth.has(row.matchId) &&
+      row.attendanceStatus !== "out" &&
+      !(row.playerId && isPlayerMonthlyForMonth(row.playerId, monthKey, data.players, data.monthlyPayments))
   );
   const ingresosGalleta = galletaRows.reduce((sum, row) => sum + row.amountPaid, 0);
 
@@ -181,40 +184,46 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
         </Card>
 
         <Card className="space-y-3">
-          <h2 className="text-lg font-black text-white">Situacion galletas</h2>
-          <ul className="space-y-3">
-            {galletaPlayers.map((entry) => (
-              <li key={entry.key} className="space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  {entry.playerId ? (
-                    <Link href={`/players/${entry.playerId}`} className="text-sm font-semibold text-white hover:text-(--cyan) hover:underline">{entry.name}</Link>
-                  ) : (
-                    <span className="text-sm font-semibold text-white">{entry.name}</span>
-                  )}
-                  <span className={`text-sm font-bold ${entry.pending > 0 ? "text-(--red)" : "text-(--green)"}`}>
+          <div>
+            <h2 className="text-lg font-black text-white">Situacion galletas</h2>
+            <p className="text-xs text-(--muted)">Solo jugadores que jugaron algun partido este mes.</p>
+          </div>
+          <ul className="space-y-2">
+            {galletaPlayers.map((entry) => {
+              const sortedRows = [...entry.rows].sort((a, b) => a.match.date.localeCompare(b.match.date));
+              return (
+                <li key={entry.key} className="flex items-center justify-between gap-3 text-sm">
+                  <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
+                    {entry.playerId ? (
+                      <Link href={`/players/${entry.playerId}`} className="shrink-0 font-semibold text-white hover:text-(--cyan) hover:underline">{entry.name}</Link>
+                    ) : (
+                      <span className="shrink-0 font-semibold text-white">{entry.name}</span>
+                    )}
+                    <div className="flex shrink-0 gap-1">
+                      {sortedRows.map(({ match, row }) => {
+                        const paid = row.paymentStatus === "paid";
+                        const title = `${match.date}: ${paid ? "Pagado" : "Pendiente"}${canEdit ? " - toca para cambiar" : ""}`;
+                        return (
+                          <button
+                            key={row.id}
+                            type="button"
+                            disabled={!canEdit || isPending}
+                            title={title}
+                            onClick={() => toggleGalleta(row)}
+                            className={`rounded px-1.5 py-0.5 text-[10px] font-bold transition disabled:cursor-not-allowed ${paid ? "bg-(--green)/15 text-(--green)" : "bg-(--red)/15 text-(--red)"} ${canEdit ? "hover:opacity-80" : ""}`}
+                          >
+                            {match.date.slice(5)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <span className={`shrink-0 font-bold ${entry.pending > 0 ? "text-(--red)" : "text-(--green)"}`}>
                     {entry.pending > 0 ? formatCurrency(entry.pending) : "Al dia"}
                   </span>
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {entry.rows.map(({ match, row }) => {
-                    const paid = row.paymentStatus === "paid";
-                    const title = `${match.date}: ${paid ? "Pagado" : "Pendiente"}${canEdit ? " - toca para cambiar" : ""}`;
-                    return (
-                      <button
-                        key={row.id}
-                        type="button"
-                        disabled={!canEdit || isPending}
-                        title={title}
-                        onClick={() => toggleGalleta(row)}
-                        className={`rounded px-1.5 py-0.5 text-[10px] font-bold transition disabled:cursor-not-allowed ${paid ? "bg-(--green)/15 text-(--green)" : "bg-(--red)/15 text-(--red)"} ${canEdit ? "hover:opacity-80" : ""}`}
-                      >
-                        {match.date.slice(5)}
-                      </button>
-                    );
-                  })}
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
             {galletaPlayers.length === 0 ? <li className="text-sm text-(--muted)">Sin galletas este mes.</li> : null}
           </ul>
           <div className="flex items-center justify-between border-t border-(--border) pt-2 text-sm font-black text-white">
