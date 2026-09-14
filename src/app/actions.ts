@@ -11,6 +11,7 @@ import {
   deleteMonthlyPayment,
   finishMatchGame,
   markMatchPlayerPaid,
+  saveClubExpense,
   saveMatchPlayers,
   saveMatchTeams,
   saveMatchWithPlayers,
@@ -22,7 +23,7 @@ import {
   updateMatchGameScore,
   mergePlayers as repositoryMergePlayers,
 } from "@/lib/repository";
-import type { Match, MatchGame, MatchPlayer, MatchResult, MatchTeam, MonthlyPayment, Player } from "@/lib/types";
+import type { ClubExpense, Match, MatchGame, MatchPlayer, MatchResult, MatchTeam, MonthlyPayment, Player } from "@/lib/types";
 
 export type LoginState = { error: string };
 
@@ -109,6 +110,7 @@ function revalidateAdminViews(matchId?: string) {
   revalidatePath("/dashboard");
   revalidatePath("/matches");
   revalidatePath("/payments");
+  revalidatePath("/payments/resumen");
   revalidatePath("/players");
   revalidatePath("/standings");
   if (matchId) revalidatePath(`/matches/${matchId}`);
@@ -195,6 +197,12 @@ export async function saveMonthlyPaymentAction(payment: MonthlyPayment) {
 export async function removeMonthlyPaymentAction(playerId: string, monthKey: string) {
   await requirePermission("payments");
   await deleteMonthlyPayment(playerId, monthKey);
+  revalidateAdminViews();
+}
+
+export async function addClubExpenseAction(expense: ClubExpense) {
+  await requirePermission("payments");
+  await saveClubExpense(expense);
   revalidateAdminViews();
 }
 

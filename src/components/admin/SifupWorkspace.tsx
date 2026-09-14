@@ -26,7 +26,7 @@ import {
 import type { PlayerLogin } from "@/lib/auth";
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
-import { adjacentMatches, formatCurrency, isPlayerMonthlyForMonth, newId, nextMatch, replaceMatchPlayers, sortByWhatsappOrder, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
+import { adjacentMatches, currentMonthKey, formatCurrency, isPlayerMonthlyForMonth, monthLabel, monthlyPaymentFor, newId, nextMatch, replaceMatchPlayers, shiftMonthKey, sortByWhatsappOrder, summarizeMatch, upsertMatch, upsertMonthlyPayment, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
 import { calculateRankingRecord, pointsForMatchRow, rankingMatches } from "@/lib/standings";
 import { matchSummaryMessage, royalTeamsMessage, teamsMessage } from "@/lib/whatsapp";
 import { COURT_COST, LOSS_POINTS, MATCH_TEAM_COLOR_CLASSES, MATCH_TEAM_COLOR_LABEL, MATCH_TEAM_DEFAULT_COLORS, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, ROYAL_GAME_TIME_LIMIT_MIN, ROYAL_GOAL_DIFF_TO_WIN, ROYAL_SQUAD_TARGET, SQUAD_TARGET, WIN_POINTS } from "@/lib/sifup-constants";
@@ -363,7 +363,7 @@ function sortRowsWithMonthlyLast(rows: MatchPlayer[], players: Player[], monthKe
   });
 }
 
-function PageTitle({ title, description, action }: { title: string; description?: string; action?: React.ReactNode }) {
+export function PageTitle({ title, description, action }: { title: string; description?: string; action?: React.ReactNode }) {
   return (
     <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
@@ -375,11 +375,11 @@ function PageTitle({ title, description, action }: { title: string; description?
   );
 }
 
-function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+export function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <section className={`panel p-4 ${className}`}>{children}</section>;
 }
 
-function Button({
+export function Button({
   children,
   onClick,
   type = "button",
@@ -431,7 +431,7 @@ function AdminOnlyNotice({ label = "Solo admin puede editar esta vista." }: { la
   );
 }
 
-function PaymentBadge({ status }: { status: PaymentStatus }) {
+export function PaymentBadge({ status }: { status: PaymentStatus }) {
   const styles = {
     paid: "bg-(--green)/15 text-(--green) ring-(--green)/30",
     unpaid: "bg-(--red)/15 text-(--red) ring-(--red)/30",
@@ -444,7 +444,7 @@ function StatusBadge({ value }: { value: string }) {
   return <span className="rounded-full bg-white/[0.08] px-2 py-1 text-xs font-bold text-white ring-1 ring-(--border)">{value}</span>;
 }
 
-function Stat({ label, value }: { label: string; value: string | number }) {
+export function Stat({ label, value }: { label: string; value: string | number }) {
   return (
     <Card>
       <p className="text-xs font-bold uppercase tracking-wide text-(--muted)">{label}</p>
@@ -495,7 +495,7 @@ function CopyBlock({ title, text }: { title: string; text: string }) {
   );
 }
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center" onClick={onClose}>
       <div
@@ -517,48 +517,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   );
 }
 
-function currentMonthKey() {
-  return new Date().toISOString().slice(0, 7);
-}
-
-function shiftMonthKey(key: string, delta: number) {
-  const [year, month] = key.split("-").map(Number);
-  const date = new Date(year, month - 1 + delta, 1);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function monthLabel(key: string) {
-  const value = new Date(`${key}-10T12:00:00`);
-  return new Intl.DateTimeFormat("es-CL", { month: "long", year: "numeric" }).format(value);
-}
-
-function paymentDueLabel(key: string) {
-  return `10/${key.slice(5)}`;
-}
-
 const MONTH_ABBR = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-
-function monthlyPaymentFor(player: Player, month: string, existing?: MonthlyPayment): MonthlyPayment {
-  if (existing) return existing;
-  const now = new Date().toISOString();
-  return {
-    id: `monthly-${month}-${player.id}`,
-    playerId: player.id,
-    monthKey: month,
-    expectedAmount: MONTHLY_AMOUNT,
-    amountPaid: 0,
-    paymentStatus: "unpaid",
-    note: `Mensualidad ${monthLabel(month)}, vencimiento ${paymentDueLabel(month)}`,
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-function upsertMonthlyPayment(payments: MonthlyPayment[], payment: MonthlyPayment) {
-  return payments.some((item) => item.id === payment.id || (item.playerId === payment.playerId && item.monthKey === payment.monthKey))
-    ? payments.map((item) => (item.id === payment.id || (item.playerId === payment.playerId && item.monthKey === payment.monthKey) ? payment : item))
-    : [...payments, payment];
-}
 
 function totalPayments(payments: MonthlyPayment[], rows: MatchPlayer[]) {
   return payments.reduce((sum, payment) => sum + payment.amountPaid, 0) + rows.reduce((sum, row) => sum + row.amountPaid, 0);
@@ -1115,7 +1074,7 @@ export function NewMatchPage({ initialData }: InitialDataProps) {
   );
 }
 
-function Input({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
+export function Input({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
   return (
     <label className="space-y-1 text-sm font-medium text-(--muted)">
       <span>{label}</span>

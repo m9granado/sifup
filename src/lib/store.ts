@@ -1,4 +1,5 @@
-import type { Match, MatchPlayer, MatchResult, Player, SifupData } from "./types";
+import type { Match, MatchPlayer, MatchResult, MonthlyPayment, Player, SifupData } from "./types";
+import { MONTHLY_AMOUNT } from "./sifup-constants";
 
 export function newId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -94,4 +95,45 @@ export function formatCurrency(value: number) {
     currency: "CLP",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+export function currentMonthKey() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+export function shiftMonthKey(key: string, delta: number) {
+  const [year, month] = key.split("-").map(Number);
+  const date = new Date(year, month - 1 + delta, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function monthLabel(key: string) {
+  const value = new Date(`${key}-10T12:00:00`);
+  return new Intl.DateTimeFormat("es-CL", { month: "long", year: "numeric" }).format(value);
+}
+
+export function paymentDueLabel(key: string) {
+  return `10/${key.slice(5)}`;
+}
+
+export function monthlyPaymentFor(player: Player, month: string, existing?: MonthlyPayment): MonthlyPayment {
+  if (existing) return existing;
+  const now = new Date().toISOString();
+  return {
+    id: `monthly-${month}-${player.id}`,
+    playerId: player.id,
+    monthKey: month,
+    expectedAmount: MONTHLY_AMOUNT,
+    amountPaid: 0,
+    paymentStatus: "unpaid",
+    note: `Mensualidad ${monthLabel(month)}, vencimiento ${paymentDueLabel(month)}`,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function upsertMonthlyPayment(payments: MonthlyPayment[], payment: MonthlyPayment) {
+  return payments.some((item) => item.id === payment.id || (item.playerId === payment.playerId && item.monthKey === payment.monthKey))
+    ? payments.map((item) => (item.id === payment.id || (item.playerId === payment.playerId && item.monthKey === payment.monthKey) ? payment : item))
+    : [...payments, payment];
 }

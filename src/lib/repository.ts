@@ -488,6 +488,14 @@ export async function deleteMonthlyPayment(playerId: string, monthKey: string) {
   await sql`delete from monthly_payments where player_id = ${playerId} and month_key = ${monthKey}`;
 }
 
+export async function saveClubExpense(expense: ClubExpense) {
+  const sql = requireDatabase();
+  await sql`
+    insert into club_expenses (id, expense_date, label, amount, category, note, created_at, updated_at)
+    values (${expense.id}, ${expense.expenseDate}, ${expense.label}, ${expense.amount}, ${expense.category}, ${expense.note}, ${expense.createdAt}, ${expense.updatedAt})
+  `;
+}
+
 export async function mergePlayers(sourceId: string, targetId: string) {
   const sql = requireDatabase();
   await sql.begin(async (tx) => {
