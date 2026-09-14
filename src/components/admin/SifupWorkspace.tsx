@@ -2777,7 +2777,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   function markRowAsOut(rowId: string) {
     const nextRows = rows.map((row) => (
       row.id === rowId
-        ? { ...row, attendanceStatus: "out" as AttendanceStatus, team: "none" as Team, updatedAt: new Date().toISOString() }
+        ? { ...row, attendanceStatus: "out" as AttendanceStatus, team: "none" as Team, paymentStatus: "paid" as PaymentStatus, amountDue: 0, updatedAt: new Date().toISOString() }
         : row
     ));
     persistRows(nextRows);
@@ -2836,7 +2836,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
     if (existing) {
       nextRows = rows.map((row) => (
         row.id === existing.id
-          ? { ...row, attendanceStatus: "out" as AttendanceStatus, team: "none" as Team, updatedAt: now }
+          ? { ...row, attendanceStatus: "out" as AttendanceStatus, team: "none" as Team, paymentStatus: "paid" as PaymentStatus, amountDue: 0, updatedAt: now }
           : row
       ));
     } else {
