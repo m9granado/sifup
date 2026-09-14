@@ -27,17 +27,21 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
   const monthlyPlayers = data.players
     .filter((player) => player.active && isPlayerMonthlyForMonth(player.id, monthKey, data.players, data.monthlyPayments))
     .sort((a, b) => a.name.localeCompare(b.name));
+
+  const matchesInMonth = [...data.matches.filter((match) => match.monthKey === monthKey)].sort((a, b) => a.date.localeCompare(b.date));
+  const matchIdsInMonth = new Set(matchesInMonth.map((match) => match.id));
+
   const cuotaPayments = monthlyPlayers.map((player) => ({
     player,
     payment: monthlyPaymentFor(player, monthKey, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey)),
+    playedCount: data.matchPlayers.filter((row) => matchIdsInMonth.has(row.matchId) && row.playerId === player.id && row.attendanceStatus !== "out").length,
   }));
   const paidCount = cuotaPayments.filter((item) => item.payment.paymentStatus === "paid").length;
   const cuotaCollected = cuotaPayments.reduce((sum, item) => sum + item.payment.amountPaid, 0);
   const cuotaExpected = cuotaPayments.reduce((sum, item) => sum + item.payment.expectedAmount, 0);
   const cuotaPending = cuotaPayments.reduce((sum, item) => sum + Math.max(item.payment.expectedAmount - item.payment.amountPaid, 0), 0);
+  const cuotaPlayedTotal = cuotaPayments.reduce((sum, item) => sum + item.playedCount, 0);
 
-  const matchesInMonth = [...data.matches.filter((match) => match.monthKey === monthKey)].sort((a, b) => a.date.localeCompare(b.date));
-  const matchIdsInMonth = new Set(matchesInMonth.map((match) => match.id));
   const gastoPartidos = matchesInMonth.reduce((sum, match) => sum + match.totalCost, 0);
   const expensesInMonth = [...data.clubExpenses.filter((expense) => expense.expenseDate.slice(0, 7) === monthKey)].sort((a, b) => a.expenseDate.localeCompare(b.expenseDate));
   const gastoExtra = expensesInMonth.reduce((sum, expense) => sum + expense.amount, 0);
@@ -144,7 +148,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
         <Stat label="Saldo del mes" value={formatCurrency(saldoDelMes)} />
       </div>
 
-      <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="space-y-3">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-lg font-black text-white">Gastos</h2>
@@ -264,12 +268,13 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
               <thead className="bg-white/[0.04] text-[10px] font-black uppercase tracking-wide text-(--muted)">
                 <tr>
                   <th className="px-2 py-1.5 text-left">Jugador</th>
+                  <th className="px-2 py-1.5 text-right">Partidos</th>
                   <th className="px-2 py-1.5 text-right">Pagado</th>
                   <th className="px-2 py-1.5 text-right">No pagado</th>
                 </tr>
               </thead>
               <tbody>
-                {cuotaPayments.map(({ player, payment }) => {
+                {cuotaPayments.map(({ player, payment, playedCount }) => {
                   const paid = payment.paymentStatus === "paid";
                   const amountCell = canEdit ? (
                     <button
@@ -289,6 +294,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
                       <td className="whitespace-nowrap px-2 py-1.5">
                         <Link href={`/players/${player.id}`} className="font-semibold text-white hover:text-(--cyan) hover:underline">{player.name}</Link>
                       </td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right text-(--muted)">{playedCount}</td>
                       <td className="whitespace-nowrap px-2 py-1.5 text-right">{paid ? amountCell : "-"}</td>
                       <td className="whitespace-nowrap px-2 py-1.5 text-right">{paid ? "-" : amountCell}</td>
                     </tr>
@@ -296,13 +302,14 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
                 })}
                 {monthlyPlayers.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="px-2 py-2 text-sm text-(--muted)">Sin jugadores mensuales este mes.</td>
+                    <td colSpan={4} className="px-2 py-2 text-sm text-(--muted)">Sin jugadores mensuales este mes.</td>
                   </tr>
                 ) : null}
               </tbody>
               <tfoot>
                 <tr className="border-t border-(--border) font-black text-white">
                   <td className="px-2 py-1.5">Total</td>
+                  <td className="whitespace-nowrap px-2 py-1.5 text-right">{cuotaPlayedTotal}</td>
                   <td className="whitespace-nowrap px-2 py-1.5 text-right">{formatCurrency(cuotaCollected)}</td>
                   <td className="whitespace-nowrap px-2 py-1.5 text-right">{formatCurrency(cuotaExpected - cuotaCollected)}</td>
                 </tr>
