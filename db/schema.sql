@@ -2,11 +2,16 @@ create table if not exists app_users (
   id text primary key,
   email text not null unique,
   password_hash text not null,
-  role text not null default 'member' check (role in ('admin', 'member')),
+  role text not null default 'jugador' check (role in ('admin', 'jugador', 'galleta')),
   active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+update app_users set role = 'jugador' where role = 'member';
+alter table app_users drop constraint if exists app_users_role_check;
+alter table app_users add constraint app_users_role_check check (role in ('admin', 'jugador', 'galleta'));
+alter table app_users alter column role set default 'jugador';
 
 create table if not exists user_permissions (
   user_id text not null references app_users(id) on delete cascade,
@@ -29,6 +34,7 @@ create table if not exists players (
 );
 
 alter table players add column if not exists is_goalkeeper boolean not null default false;
+alter table app_users add column if not exists player_id text references players(id) on delete set null;
 
 create table if not exists matches (
   id text primary key,

@@ -19,7 +19,7 @@ import {
   updateMatchGameScoreAction,
   mergePlayersAction,
 } from "@/app/actions";
-import { useIsAdmin } from "./AuthMode";
+import { useAuthMode, useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
 import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, sortByWhatsappOrder, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
 import { calculateRankingRecord, pointsForMatchRow, rankingMatches } from "@/lib/standings";
@@ -355,7 +355,7 @@ function sortRowsWithMonthlyLast(rows: MatchPlayer[], players: Player[]) {
   });
 }
 
-function PageTitle({ title, description, action }: { title: string; description?: string; action?: React.ReactNode }) {
+export function PageTitle({ title, description, action }: { title: string; description?: string; action?: React.ReactNode }) {
   return (
     <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
@@ -367,11 +367,11 @@ function PageTitle({ title, description, action }: { title: string; description?
   );
 }
 
-function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+export function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <section className={`panel p-4 ${className}`}>{children}</section>;
 }
 
-function Button({
+export function Button({
   children,
   onClick,
   type = "button",
@@ -487,7 +487,7 @@ function CopyBlock({ title, text }: { title: string; text: string }) {
   );
 }
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center" onClick={onClose}>
       <div
@@ -639,7 +639,7 @@ export function DashboardPage({ initialData }: InitialDataProps) {
       <div className="mt-5 flex items-center justify-end">
         {isAdmin ? <CtaLink href="/matches/new"><Plus size={16} />Nuevo partido</CtaLink> : null}
       </div>
-      {!isAdmin ? <AdminOnlyNotice label="Vista publica: entra como admin para crear partidos y editar pagos." /> : null}
+      {!isAdmin ? <AdminOnlyNotice label="Vista de solo lectura: crear partidos y editar pagos queda reservado para admin." /> : null}
       <div className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
         <Card>
           <div className="flex items-start justify-between gap-3">
@@ -1109,7 +1109,7 @@ export function NewMatchPage({ initialData }: InitialDataProps) {
   );
 }
 
-function Input({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
+export function Input({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
   return (
     <label className="space-y-1 text-sm font-medium text-(--muted)">
       <span>{label}</span>
@@ -3010,7 +3010,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         previous={previous}
         next={next}
       />
-      {!isAdmin ? <AdminOnlyNotice label="Vista publica: equipos y resultado son solo lectura." /> : null}
+      {!isAdmin ? <AdminOnlyNotice label="Vista de solo lectura: equipos y resultado quedan reservados para admin." /> : null}
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
       {isRoyal ? (
@@ -3408,7 +3408,7 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
   return (
     <>
       <PageTitle title="Pagos" description={`Mensualidades con vencimiento los dias 10, pagos por partido y balance del club.`} />
-      {!isAdmin ? <AdminOnlyNotice label="Vista publica: el marcado de pagos queda reservado para admin." /> : null}
+      {!isAdmin ? <AdminOnlyNotice label="Vista de solo lectura: marcar pagos y registrar gastos queda reservado para admin." /> : null}
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
       <div className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Cobrado" value={formatCurrency(collected)} />
@@ -3781,7 +3781,8 @@ function ExpenseRow({ expense }: { expense: ClubExpense }) {
 }
 
 export function PlayersPage({ initialData }: InitialDataProps) {
-  const isAdmin = useIsAdmin();
+  const { role, playerId: currentPlayerId } = useAuthMode();
+  const isAdmin = role === "admin";
   const { data, commit } = useSifupData(initialData);
   const [name, setName] = useState("");
   const [error, setError] = useState("");
@@ -3819,13 +3820,11 @@ export function PlayersPage({ initialData }: InitialDataProps) {
       .catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar el jugador."));
   }
 
-  const visiblePlayers = isAdmin ? data.players : data.players.filter((player) => player.active);
   const month = currentMonthKey();
 
   return (
     <>
-      <PageTitle title="Jugadores" description={isAdmin ? "Oficiales: mensualidad del mes actual e historico de pagos. Galletas: deuda acumulada por partido." : "Lista publica de jugadores activos."} />
-      {!isAdmin ? <AdminOnlyNotice label="Vista publica: telefonos, WhatsApp y edicion quedan ocultos." /> : null}
+      <PageTitle title="Jugadores" description={isAdmin ? "Oficiales: mensualidad del mes actual e historico de pagos. Galletas: deuda acumulada por partido." : "Podes editar tu propia ficha; el resto queda solo en modo lectura."} />
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
       {isAdmin ? <Card className="mb-4 flex gap-2"><input className="h-10 min-w-0 flex-1 rounded-md border border-(--border) bg-(--panel-strong) px-3 text-sm text-white" value={name} onChange={(event) => setName(event.target.value)} placeholder="Nombre del jugador nuevo" /><Button onClick={addPlayer}><Plus size={16} />Agregar</Button></Card> : null}
       <Card className="space-y-3">
@@ -3833,11 +3832,11 @@ export function PlayersPage({ initialData }: InitialDataProps) {
           <h2 className="font-semibold">Jugadores</h2>
           <p className="text-xs text-(--muted)">Oficiales y galletas en una sola tabla; ordena por cualquier columna.</p>
         </div>
-        <PlayerDirectoryTable players={visiblePlayers} data={data} month={month} isAdmin={isAdmin} onEdit={setEditingPlayer} />
+        <PlayerDirectoryTable players={data.players} data={data} month={month} isAdmin={isAdmin} currentPlayerId={currentPlayerId} onEdit={setEditingPlayer} />
       </Card>
       {editingPlayer ? (
         <Modal title={`Editar ${editingPlayer.name}`} onClose={() => setEditingPlayer(null)}>
-          <PlayerEditorForm player={editingPlayer} onSave={savePlayer} players={data.players} />
+          <PlayerEditorForm player={editingPlayer} onSave={savePlayer} players={data.players} allowMerge={isAdmin} />
         </Modal>
       ) : null}
     </>
@@ -3869,7 +3868,8 @@ function PaymentHistory({ payments }: { payments: MonthlyPayment[] }) {
 
 type PlayerDirectorySortKey = "position" | "name" | "plan" | "nickname" | "played" | "points" | "status" | "debt";
 
-function PlayerDirectoryTable({ players, data, month, isAdmin, onEdit }: { players: Player[]; data: SifupData; month: string; isAdmin: boolean; onEdit: (player: Player) => void }) {
+function PlayerDirectoryTable({ players, data, month, isAdmin, currentPlayerId, onEdit }: { players: Player[]; data: SifupData; month: string; isAdmin: boolean; currentPlayerId?: string | null; onEdit: (player: Player) => void }) {
+  const showActions = isAdmin || Boolean(currentPlayerId);
   const [sort, setSort] = useState<{ key: PlayerDirectorySortKey; direction: "asc" | "desc" }>({ key: "name", direction: "asc" });
   const rows = players.map((player) => {
     const payment = player.paymentPlan === "monthly" ? monthlyPaymentFor(player, month, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === month)) : undefined;
@@ -3918,7 +3918,7 @@ function PlayerDirectoryTable({ players, data, month, isAdmin, onEdit }: { playe
               return <th key={column.key} aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"} className={`px-3 py-2 text-center ${column.className ?? ""}`}><button type="button" onClick={() => toggleSort(column.key)} className="inline-flex items-center gap-1 hover:text-white">{column.label}<span aria-hidden="true" className={active ? "text-white" : "text-(--muted)/60"}>{active ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span></button></th>;
             })}
             <th className="px-3 py-2 text-center">Historial</th>
-            {isAdmin ? <th className="px-3 py-2 text-center">Acciones</th> : null}
+            {showActions ? <th className="px-3 py-2 text-center">Acciones</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -3934,7 +3934,7 @@ function PlayerDirectoryTable({ players, data, month, isAdmin, onEdit }: { playe
               <td className="px-3 py-3 text-center">{player.paymentPlan === "monthly" ? <PaymentBadge status={payment?.paymentStatus ?? "unpaid"} /> : <span className="text-xs font-bold text-(--muted)">Por partido</span>}</td>
               <td className={`px-3 py-3 text-center font-bold ${debt > 0 ? "text-(--red)" : "text-(--green)"}`}>{formatCurrency(debt)}</td>
               <td className="px-3 py-3">{player.paymentPlan === "monthly" ? <PaymentHistory payments={history} /> : <span className="text-xs text-(--muted)">—</span>}</td>
-              {isAdmin ? <td className="px-3 py-2"><div className="flex justify-center gap-1">{whatsapp ? <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15" aria-label={`WhatsApp ${player.name}`} title="WhatsApp"><MessageCircle size={16} /></a> : null}<button type="button" onClick={() => onEdit(player)} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14]" aria-label={`Editar ${player.name}`} title="Editar"><Pencil size={16} /></button></div></td> : null}
+              {showActions ? <td className="px-3 py-2"><div className="flex justify-center gap-1">{whatsapp ? <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15" aria-label={`WhatsApp ${player.name}`} title="WhatsApp"><MessageCircle size={16} /></a> : null}{isAdmin || player.id === currentPlayerId ? <button type="button" onClick={() => onEdit(player)} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14]" aria-label={`Editar ${player.name}`} title="Editar"><Pencil size={16} /></button> : null}</div></td> : null}
             </tr>;
           })}
         </tbody>
@@ -4169,7 +4169,9 @@ function PlayerMatchHistory({ history }: { history: PlayerHistoryItem[] }) {
 }
 
 export function PlayerDetailPage({ id, initialData }: { id: string } & InitialDataProps) {
-  const isAdmin = useIsAdmin();
+  const { role, playerId: currentPlayerId } = useAuthMode();
+  const isAdmin = role === "admin";
+  const canEdit = isAdmin || (role === "jugador" && currentPlayerId === id);
   const router = useRouter();
   const { data, commit } = useSifupData(initialData);
   const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
@@ -4203,7 +4205,12 @@ export function PlayerDetailPage({ id, initialData }: { id: string } & InitialDa
     <>
       <PageTitle title={player.name} description={`${player.paymentPlan === "monthly" ? "Oficial" : "Galleta"} · ${player.nickname || "Sin pseudonimo"}`} />
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
-      {isAdmin ? <div className="mb-4 flex flex-wrap gap-2"><Button variant="secondary" onClick={() => setEditingPlayer(player)}><Pencil size={16} />Editar datos</Button><Button variant="secondary" onClick={() => setMergingPlayer(player)} className="border-amber-500/40 text-amber-500 hover:bg-amber-500 hover:text-white"><Users size={16} />Fusionar jugador</Button></div> : null}
+      {canEdit || isAdmin ? (
+        <div className="mb-4 flex flex-wrap gap-2">
+          {canEdit ? <Button variant="secondary" onClick={() => setEditingPlayer(player)}><Pencil size={16} />Editar datos</Button> : null}
+          {isAdmin ? <Button variant="secondary" onClick={() => setMergingPlayer(player)} className="border-amber-500/40 text-amber-500 hover:bg-amber-500 hover:text-white"><Users size={16} />Fusionar jugador</Button> : null}
+        </div>
+      ) : null}
       <section className="relative overflow-hidden rounded-xl border border-(--gold)/30 bg-[linear-gradient(135deg,rgba(250,204,21,0.14),rgba(18,214,154,0.08)_48%,rgba(255,255,255,0.03))] p-5 shadow-(--shadow)">
         <div className="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-(--gold)/10 blur-3xl" aria-hidden="true" />
         <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">

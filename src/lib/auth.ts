@@ -5,8 +5,8 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 const COOKIE_NAME = "sifup_session";
-export type Permission = "dashboard" | "matches" | "players" | "payments" | "standings" | "users";
-export type SessionUser = { id: string; email: string; role: "admin" | "member"; permissions: Permission[] };
+export type Role = "admin" | "jugador" | "galleta";
+export type SessionUser = { id: string; email: string; role: Role; playerId: string | null };
 
 function getSecret() {
   return process.env.SESSION_SECRET || "dev-only-change-me";
@@ -39,10 +39,8 @@ async function findUser(id: string): Promise<SessionUser | null> {
   if (!hasDatabaseUrl()) return null;
   const sql = getSql();
   const rows = await sql<SessionUser[]>`
-    select u.id, u.email, u.role,
-      coalesce(array_agg(p.permission) filter (where p.permission is not null), '{}') as permissions
-    from app_users u left join user_permissions p on p.user_id = u.id
-    where u.id = ${id} and u.active = true group by u.id`;
+    select id, email, role, player_id as "playerId"
+    from app_users where id = ${id} and active = true`;
   return rows[0] ?? null;
 }
 
@@ -52,21 +50,30 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   return id ? findUser(id) : null;
 }
 
-export async function isAuthenticated() { return Boolean(await getCurrentUser()); }
-
-export async function hasPermission(permission: Permission) {
-  const user = await getCurrentUser();
-  return Boolean(user && (user.role === "admin" || user.permissions.includes(permission)));
+/** Ruta a la que se redirige cuando un rol no tiene acceso a la pagina pedida. */
+function fallbackRouteFor(role: Role) {
+  return role === "galleta" ? "/matches" : "/dashboard";
 }
 
-export async function requirePermission(permission: Permission) {
+export async function requireRole(roles: Role[]): Promise<SessionUser> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
-  if (user.role !== "admin" && !user.permissions.includes(permission)) redirect("/dashboard");
+  if (!roles.includes(user.role)) redirect(fallbackRouteFor(user.role));
   return user;
 }
 
-export const requireAdmin = () => requirePermission("matches");
+export async function requireAdmin(): Promise<SessionUser> {
+  return requireRole(["admin"]);
+}
+
+/** Para acciones donde un jugador solo puede operar sobre su propia ficha; admin siempre puede. */
+export async function requireOwnPlayerOrAdmin(playerId: string): Promise<SessionUser> {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+  if (user.role === "admin") return user;
+  if (user.role === "jugador" && user.playerId === playerId) return user;
+  redirect(fallbackRouteFor(user.role));
+}
 
 export async function createSession(userId: string) {
   const cookieStore = await cookies();

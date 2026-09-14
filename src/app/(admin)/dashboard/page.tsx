@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { CalendarDays, CircleDollarSign, MapPin, Medal, Trophy } from "lucide-react";
+import { requireRole } from "@/lib/auth";
 import { getSifupData } from "@/lib/repository";
 import { SQUAD_TARGET } from "@/lib/sifup-constants";
 import { calculateRankingRecord, pointsForMatchRow } from "@/lib/standings";
@@ -118,6 +119,7 @@ function pointsRowsForResult(rows: MatchPlayer[], winner: Winner | undefined) {
 }
 
 export default async function Page() {
+  await requireRole(["admin", "jugador"]);
   const data = await getSifupData();
   const now = new Date();
   const nextMatch = upcomingMatch(data.matches, now);

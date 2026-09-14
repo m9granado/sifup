@@ -2,7 +2,7 @@ import "server-only";
 
 import { seedData } from "./mock-data";
 import { getSql, hasDatabaseUrl } from "./db";
-import type { ClubExpense, Match, MatchGame, MatchPlayer, MatchResult, MatchTeam, MonthlyPayment, Player, SifupData } from "./types";
+import type { AppUser, AppUserRole, ClubExpense, Match, MatchGame, MatchPlayer, MatchResult, MatchTeam, MonthlyPayment, Player, SifupData } from "./types";
 
 function iso(value: Date | string) {
   if (value instanceof Date) return value.toISOString();
@@ -528,4 +528,58 @@ export async function mergePlayers(sourceId: string, targetId: string) {
     // 4. Eliminar el jugador origen
     await tx`delete from players where id = ${sourceId}`;
   });
+}
+
+type AppUserRow = {
+  id: string;
+  email: string;
+  role: AppUserRole;
+  active: boolean;
+  player_id: string | null;
+  created_at: Date | string;
+};
+
+function mapAppUser(row: AppUserRow): AppUser {
+  return {
+    id: row.id,
+    email: row.email,
+    role: row.role,
+    active: row.active,
+    playerId: row.player_id,
+    createdAt: iso(row.created_at),
+  };
+}
+
+export async function listUsers(): Promise<AppUser[]> {
+  const sql = requireDatabase();
+  const rows = await sql<AppUserRow[]>`
+    select id, email, role, active, player_id, created_at from app_users order by email asc
+  `;
+  return rows.map(mapAppUser);
+}
+
+export async function createUser(input: { id: string; email: string; passwordHash: string; role: AppUserRole; playerId: string | null }) {
+  const sql = requireDatabase();
+  await sql`
+    insert into app_users (id, email, password_hash, role, player_id)
+    values (${input.id}, ${input.email}, ${input.passwordHash}, ${input.role}, ${input.playerId})
+  `;
+}
+
+export async function updateUser(userId: string, input: { role?: AppUserRole; active?: boolean; playerId?: string | null }) {
+  const sql = requireDatabase();
+  if (input.role !== undefined) {
+    await sql`update app_users set role = ${input.role}, updated_at = now() where id = ${userId}`;
+  }
+  if (input.active !== undefined) {
+    await sql`update app_users set active = ${input.active}, updated_at = now() where id = ${userId}`;
+  }
+  if (input.playerId !== undefined) {
+    await sql`update app_users set player_id = ${input.playerId}, updated_at = now() where id = ${userId}`;
+  }
+}
+
+export async function resetUserPassword(userId: string, passwordHash: string) {
+  const sql = requireDatabase();
+  await sql`update app_users set password_hash = ${passwordHash}, updated_at = now() where id = ${userId}`;
 }

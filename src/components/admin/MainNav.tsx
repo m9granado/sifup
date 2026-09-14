@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { Role } from "@/lib/auth";
 
 type NavItem = {
   href: string;
@@ -9,16 +10,30 @@ type NavItem = {
   icon: string;
 };
 
-export function MainNav({ isAdmin, canPayments }: { isAdmin: boolean; canPayments: boolean }) {
-  const pathname = usePathname();
+function itemsForRole(role: Role | null): NavItem[] {
+  if (role === "galleta") {
+    return [
+      { href: "/matches", label: "Partidos", icon: "icon-calendar" },
+      { href: "/standings", label: "Rankings", icon: "icon-trophy" },
+    ];
+  }
 
   const items: NavItem[] = [
     { href: "/dashboard", label: "Inicio", icon: "icon-home" },
     { href: "/matches", label: "Partidos", icon: "icon-calendar" },
-    ...(isAdmin ? [{ href: "/players", label: "Jugadores", icon: "icon-users" }] : []),
-    ...(canPayments ? [{ href: "/payments", label: "Pagos", icon: "icon-wallet" }] : []),
+    { href: "/players", label: "Jugadores", icon: "icon-users" },
+    { href: "/payments", label: "Pagos", icon: "icon-wallet" },
     { href: "/standings", label: "Rankings", icon: "icon-trophy" },
   ];
+
+  if (role === "admin") items.push({ href: "/users", label: "Usuarios", icon: "icon-settings" });
+
+  return items;
+}
+
+export function MainNav({ role }: { role: Role | null }) {
+  const pathname = usePathname();
+  const items = itemsForRole(role);
 
   return (
     <nav className="main-nav">

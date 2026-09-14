@@ -147,6 +147,17 @@ export type SifupData = {
   clubFinance: ClubFinance;
 };
 
+export type AppUserRole = "admin" | "jugador" | "galleta";
+
+export type AppUser = {
+  id: string;
+  email: string;
+  role: AppUserRole;
+  active: boolean;
+  playerId: string | null;
+  createdAt: string;
+};
+
 export type MatchSummary = {
   confirmedCount: number;
   paidCount: number;
