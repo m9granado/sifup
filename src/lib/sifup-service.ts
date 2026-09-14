@@ -5,7 +5,7 @@ import { COURT_COST, MONTHLY_AMOUNT, PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from ".
 import { monthKey, weekLabel } from "./sifup-date";
 import { parseWhatsAppList } from "./parser";
 import { getSifupData, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment, savePlayer, mergePlayers as dbMergePlayers } from "./repository";
-import { newId, nextMatch, sortByWhatsappOrder, summarizeMatch } from "./store";
+import { isPlayerMonthlyForMonth, newId, nextMatch, sortByWhatsappOrder, summarizeMatch } from "./store";
 import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, standingsMessage, teamsMessage } from "./whatsapp";
 import { calculateRankingRecord } from "./standings";
 import type { AttendanceStatus, Match, MatchPlayer, MatchResult, MonthlyPayment, Player, Team, Winner } from "./types";
@@ -68,7 +68,7 @@ export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MA
       knownPlayers.push(newPlayer);
       player = newPlayer;
     }
-    const monthly = player?.paymentPlan === "monthly";
+    const monthly = player ? isPlayerMonthlyForMonth(player.id, match.monthKey, data.players, data.monthlyPayments) : false;
     rows.push({
       ...row,
       id: `${targetId}-player-${index + 1}`,
@@ -90,7 +90,7 @@ export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MA
   await saveMatchWithPlayers(match, rows);
   revalidateSifupViews(match.id);
 
-  return buildMatchPayload(match, rows, data.results.find((result) => result.matchId === match.id), existing ? "updated" : "created");
+  return buildMatchPayload(match, rows, data.results.find((result) => result.matchId === match.id), existing ? "updated" : "created", data.players, data.monthlyPayments);
 }
 
 export async function getNextMatchSummary(input: { matchId?: string; date?: string } = {}) {
@@ -101,7 +101,7 @@ export async function getNextMatchSummary(input: { matchId?: string; date?: stri
 
   const rows = sortByWhatsappOrder(data.matchPlayers.filter((row) => row.matchId === match.id));
   const result = data.results.find((item) => item.matchId === match.id);
-  return buildMatchPayload(match, rows, result, "summary");
+  return buildMatchPayload(match, rows, result, "summary", data.players, data.monthlyPayments);
 }
 
 export type AddPlayerToMatchInput = {
@@ -129,13 +129,13 @@ export async function addPlayerToMatch(input: AddPlayerToMatchInput) {
     (row) => (known && row.playerId === known.id) || normalizeName(row.name) === normalizeName(name),
   );
   if (already) {
-    const payload = buildMatchPayload(match, currentRows, result, "unchanged");
+    const payload = buildMatchPayload(match, currentRows, result, "unchanged", data.players, data.monthlyPayments);
     return { ...payload, note: `${already.name} ya estaba en la lista del partido.` };
   }
 
   const attendanceStatus = input.attendanceStatus ?? "confirmed";
   const out = attendanceStatus === "out";
-  const monthly = known?.paymentPlan === "monthly";
+  const monthly = known ? isPlayerMonthlyForMonth(known.id, match.monthKey, data.players, data.monthlyPayments) : false;
   const amountDue = input.amountDue ?? PER_MATCH_AMOUNT;
   const now = new Date().toISOString();
   const newRow: MatchPlayer = {
@@ -160,7 +160,7 @@ export async function addPlayerToMatch(input: AddPlayerToMatchInput) {
   await saveMatchPlayers(match.id, nextRows);
   revalidateSifupViews(match.id);
 
-  const payload = buildMatchPayload(match, nextRows, result, "updated");
+  const payload = buildMatchPayload(match, nextRows, result, "updated", data.players, data.monthlyPayments);
   return { ...payload, note: `${newRow.name} agregado al partido en el puesto #${newRow.whatsappOrder}.` };
 }
 
@@ -191,9 +191,9 @@ export async function registerMonthlyPayment(input: RegisterMonthlyPaymentInput)
       ? findKnownPlayer(data.players, input.name)
       : undefined;
   if (!player) throw new Error("Jugador no encontrado.");
-  if (player.paymentPlan !== "monthly") throw new Error(`${player.name} no es jugador mensual (oficial).`);
-
   const targetMonth = input.monthKey ?? currentMonthKey();
+  if (!isPlayerMonthlyForMonth(player.id, targetMonth, data.players, data.monthlyPayments)) throw new Error(`${player.name} no es jugador mensual (oficial) en ${targetMonth}.`);
+
   const paid = input.paid ?? true;
   const existing = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === targetMonth);
   const expected = existing?.expectedAmount ?? MONTHLY_AMOUNT;
@@ -295,7 +295,7 @@ export async function getPendingPayments(input: { monthKey?: string } = {}) {
   const targetMonth = input.monthKey ?? currentMonthKey();
 
   const monthlyPending = data.players
-    .filter((player) => player.active && player.paymentPlan === "monthly")
+    .filter((player) => player.active && isPlayerMonthlyForMonth(player.id, targetMonth, data.players, data.monthlyPayments))
     .map((player) => {
       const payment = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === targetMonth);
       const expected = payment?.expectedAmount ?? MONTHLY_AMOUNT;
@@ -322,7 +322,7 @@ export async function getPendingPayments(input: { monthKey?: string } = {}) {
   };
 }
 
-function buildMatchPayload(match: Match, rows: MatchPlayer[], result: Parameters<typeof finalResultMessage>[1], status: "created" | "updated" | "summary" | "unchanged") {
+function buildMatchPayload(match: Match, rows: MatchPlayer[], result: Parameters<typeof finalResultMessage>[1], status: "created" | "updated" | "summary" | "unchanged", players: Player[], monthlyPayments: MonthlyPayment[]) {
   const sortedRows = sortByWhatsappOrder(rows);
   const summary = summarizeMatch(sortedRows);
   const confirmed = sortedRows.filter((row) => row.attendanceStatus === "confirmed");
@@ -338,7 +338,7 @@ function buildMatchPayload(match: Match, rows: MatchPlayer[], result: Parameters
       all: sortedRows.map(publicMatchPlayer),
     },
     messages: {
-      matchSummary: matchSummaryMessage(match, sortedRows),
+      matchSummary: matchSummaryMessage(match, sortedRows, players, monthlyPayments),
       pendingPayments: pendingPaymentsMessage(match, sortedRows),
       teams: teamsMessage(match, sortedRows),
       finalResult: finalResultMessage(match, result),

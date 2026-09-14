@@ -53,6 +53,14 @@ export function whatsappOrderFor(row: MatchPlayer) {
   return row.whatsappOrder || orderFromId || Number.MAX_SAFE_INTEGER;
 }
 
+export function isPlayerMonthlyForMonth(playerId: string, monthKey: string, players: Player[], monthlyPayments: SifupData["monthlyPayments"]) {
+  const hasRosterForMonth = monthlyPayments.some((payment) => payment.monthKey === monthKey);
+  if (hasRosterForMonth) {
+    return monthlyPayments.some((payment) => payment.playerId === playerId && payment.monthKey === monthKey);
+  }
+  return players.find((player) => player.id === playerId)?.paymentPlan === "monthly";
+}
+
 export function upsertResult(data: SifupData, result: MatchResult) {
   const results = data.results.some((item) => item.matchId === result.matchId)
     ? data.results.map((item) => (item.matchId === result.matchId ? result : item))

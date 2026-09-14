@@ -61,6 +61,8 @@ test("matchSummaryMessage renders ordered call-up with 12 minimum slots", () => 
       createdAt: "2026-07-03T00:00:00.000Z",
       updatedAt: "2026-07-03T00:00:00.000Z",
     })),
+    [],
+    [],
   );
 
   assert.match(text, /Partidos 07 Julio 21 horas/);

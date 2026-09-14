@@ -9,6 +9,7 @@ import {
   createMatchAction,
   finishMatchGameAction,
   markMatchPlayerPaidAction,
+  removeMonthlyPaymentAction,
   saveMatchAction,
   saveMatchDetailAction,
   saveMatchTeamsAction,
@@ -21,7 +22,7 @@ import {
 } from "@/app/actions";
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
-import { adjacentMatches, formatCurrency, newId, nextMatch, replaceMatchPlayers, sortByWhatsappOrder, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
+import { adjacentMatches, formatCurrency, isPlayerMonthlyForMonth, newId, nextMatch, replaceMatchPlayers, sortByWhatsappOrder, summarizeMatch, upsertMatch, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
 import { calculateRankingRecord, pointsForMatchRow, rankingMatches } from "@/lib/standings";
 import { matchSummaryMessage, royalTeamsMessage, teamsMessage } from "@/lib/whatsapp";
 import { COURT_COST, LOSS_POINTS, MATCH_TEAM_COLOR_CLASSES, MATCH_TEAM_COLOR_LABEL, MATCH_TEAM_DEFAULT_COLORS, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, ROYAL_GAME_TIME_LIMIT_MIN, ROYAL_GOAL_DIFF_TO_WIN, ROYAL_SQUAD_TARGET, SQUAD_TARGET, WIN_POINTS } from "@/lib/sifup-constants";
@@ -138,8 +139,11 @@ function matchRowBelongsToPlayer(row: Pick<MatchPlayer, "playerId" | "name">, pl
   return row.playerId === player.id || playerForMatchRow(row, players)?.id === player.id;
 }
 
-function isMonthlyMatchRow(row: MatchPlayer, players: Player[]) {
-  return playerForMatchRow(row, players)?.paymentPlan === "monthly" || row.note.toLowerCase().includes("mensualidad");
+function isMonthlyMatchRow(row: MatchPlayer, players: Player[], monthKey: string, monthlyPayments: MonthlyPayment[]) {
+  const player = playerForMatchRow(row, players);
+  if (row.note.toLowerCase().includes("mensualidad")) return true;
+  if (!player) return false;
+  return isPlayerMonthlyForMonth(player.id, monthKey, players, monthlyPayments);
 }
 
 function buildPlayerStandings(data: SifupData) {
@@ -346,10 +350,10 @@ function pendingForMatchRow(row: MatchPlayer) {
   return Math.max(row.amountDue - row.amountPaid, 0);
 }
 
-function sortRowsWithMonthlyLast(rows: MatchPlayer[], players: Player[]) {
+function sortRowsWithMonthlyLast(rows: MatchPlayer[], players: Player[], monthKey: string, monthlyPayments: MonthlyPayment[]) {
   return [...rows].sort((a, b) => {
-    const monthlyA = isMonthlyMatchRow(a, players) ? 1 : 0;
-    const monthlyB = isMonthlyMatchRow(b, players) ? 1 : 0;
+    const monthlyA = isMonthlyMatchRow(a, players, monthKey, monthlyPayments) ? 1 : 0;
+    const monthlyB = isMonthlyMatchRow(b, players, monthKey, monthlyPayments) ? 1 : 0;
     if (monthlyA !== monthlyB) return monthlyA - monthlyB;
     return whatsappOrderFor(a) - whatsappOrderFor(b) || a.name.localeCompare(b.name);
   });
@@ -513,6 +517,12 @@ function currentMonthKey() {
   return new Date().toISOString().slice(0, 7);
 }
 
+function shiftMonthKey(key: string, delta: number) {
+  const [year, month] = key.split("-").map(Number);
+  const date = new Date(year, month - 1 + delta, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function monthLabel(key: string) {
   const value = new Date(`${key}-10T12:00:00`);
   return new Intl.DateTimeFormat("es-CL", { month: "long", year: "numeric" }).format(value);
@@ -538,14 +548,6 @@ function monthlyPaymentFor(player: Player, month: string, existing?: MonthlyPaym
     createdAt: now,
     updatedAt: now,
   };
-}
-
-function paymentsWithCurrentMonth(data: SifupData, month: string) {
-  const current = data.players
-    .filter((player) => player.active && player.paymentPlan === "monthly")
-    .map((player) => monthlyPaymentFor(player, month, data.monthlyPayments.find((payment) => payment.playerId === player.id && payment.monthKey === month)));
-  const currentIds = new Set(current.map((payment) => payment.id));
-  return [...data.monthlyPayments.filter((payment) => !currentIds.has(payment.id)), ...current];
 }
 
 function upsertMonthlyPayment(payments: MonthlyPayment[], payment: MonthlyPayment) {
@@ -658,7 +660,7 @@ export function DashboardPage({ initialData }: InitialDataProps) {
             ))}
           </div>
         </Card>
-        {match ? <CopyBlock title="Resumen del partido" text={matchSummaryMessage(match, rows)} /> : null}
+        {match ? <CopyBlock title="Resumen del partido" text={matchSummaryMessage(match, rows, data.players, data.monthlyPayments)} /> : null}
       </div>
       <div className="mt-4"><PaymentAccountCard data={data} /></div>
     </>
@@ -1025,7 +1027,7 @@ export function NewMatchPage({ initialData }: InitialDataProps) {
     const balancedRows = balanceRows(rows);
     const nextRows: MatchPlayer[] = balancedRows.map((row) => {
       const player = findKnownPlayer(data.players, row.name);
-      const monthly = player?.paymentPlan === "monthly";
+      const monthly = player ? isPlayerMonthlyForMonth(player.id, nextMatch.monthKey, data.players, data.monthlyPayments) : false;
       return {
         ...row,
         id: newId("mp"),
@@ -1256,6 +1258,7 @@ function UnifiedMatchRoster({
   allMatchPlayers,
   standings,
   match,
+  monthlyPayments,
   isAdmin,
   onOpenDetails,
   onMarkOut,
@@ -1271,6 +1274,7 @@ function UnifiedMatchRoster({
   allMatchPlayers: MatchPlayer[];
   standings: Map<string, PlayerStanding>;
   match: Match;
+  monthlyPayments: MonthlyPayment[];
   isAdmin: boolean;
   onOpenDetails?: (rowId: string) => void;
   onMarkOut?: (rowId: string) => void;
@@ -1304,8 +1308,8 @@ function UnifiedMatchRoster({
   }, [confirmedRows]);
 
   const outRows = useMemo(() => {
-    return sortRowsWithMonthlyLast(rows.filter((row) => row.attendanceStatus === "out"), players);
-  }, [rows, players]);
+    return sortRowsWithMonthlyLast(rows.filter((row) => row.attendanceStatus === "out"), players, match.monthKey, monthlyPayments);
+  }, [rows, players, match.monthKey, monthlyPayments]);
 
   const unansweredItems = useMemo(() => {
     return players
@@ -1321,7 +1325,7 @@ function UnifiedMatchRoster({
         const existingRow = rows.find((r) => matchRowBelongsToPlayer(r, player, players));
         const totalPlayed = allMatchPlayers.filter((r) => matchRowBelongsToPlayer(r, player, players) && r.attendanceStatus === "confirmed").length;
         const standing = standingForMatchRow({ playerId: player.id, name: player.name }, players, standings);
-        const isMonthly = player.paymentPlan === "monthly";
+        const isMonthly = isPlayerMonthlyForMonth(player.id, match.monthKey, players, monthlyPayments);
         const priorityScore = (isMonthly ? 100 : 0) + (totalPlayed * 10) + (standing?.points ?? 0);
         return {
           player,
@@ -1333,7 +1337,7 @@ function UnifiedMatchRoster({
         };
       })
       .sort((a, b) => b.priorityScore - a.priorityScore || b.totalPlayed - a.totalPlayed || a.player.name.localeCompare(b.player.name));
-  }, [players, rows, allMatchPlayers, standings]);
+  }, [players, rows, allMatchPlayers, standings, match.monthKey, monthlyPayments]);
 
   const confirmedCount = confirmedRows.length;
   const missing = Math.max(squadTarget - confirmedCount, 0);
@@ -1348,6 +1352,9 @@ function UnifiedMatchRoster({
 
     if (sort.key === "order") {
       return [...list].sort((a, b) => {
+        const monthlyA = isMonthlyMatchRow(a, players, match.monthKey, monthlyPayments) ? 0 : 1;
+        const monthlyB = isMonthlyMatchRow(b, players, match.monthKey, monthlyPayments) ? 0 : 1;
+        if (monthlyA !== monthlyB) return (sort.direction === "asc" ? 1 : -1) * (monthlyA - monthlyB);
         const orderA = confirmedOrderMap.get(a.id) ?? 999;
         const orderB = confirmedOrderMap.get(b.id) ?? 999;
         return (sort.direction === "asc" ? 1 : -1) * (orderA - orderB || a.name.localeCompare(b.name));
@@ -1376,7 +1383,7 @@ function UnifiedMatchRoster({
       if (comparison !== 0) return sort.direction === "asc" ? comparison : -comparison;
       return (leftStanding?.rank ?? Number.POSITIVE_INFINITY) - (rightStanding?.rank ?? Number.POSITIVE_INFINITY);
     });
-  }, [confirmedRows, confirmedOrderMap, players, standings, sort, search]);
+  }, [confirmedRows, confirmedOrderMap, players, standings, sort, search, match.monthKey, monthlyPayments]);
 
   const sortedUnanswered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -1605,7 +1612,7 @@ function UnifiedMatchRoster({
                     const player = playerForMatchRow(row, players);
                     const standing = standingForMatchRow(row, players, standings);
                     const playerName = player?.name ?? row.name;
-                    const isMonthly = player?.paymentPlan === "monthly" || row.note.toLowerCase().includes("mensualidad");
+                    const isMonthly = isMonthlyMatchRow(row, players, match.monthKey, monthlyPayments);
                     const isArq = player?.isGoalkeeper === true;
                     const whatsapp = whatsappHref(row.phone || player?.phone || "");
 
@@ -1860,7 +1867,7 @@ function UnifiedMatchRoster({
                     const player = playerForMatchRow(row, players);
                     const standing = standingForMatchRow(row, players, standings);
                     const playerName = player?.name ?? row.name;
-                    const isMonthly = player?.paymentPlan === "monthly" || row.note.toLowerCase().includes("mensualidad");
+                    const isMonthly = isMonthlyMatchRow(row, players, match.monthKey, monthlyPayments);
                     const isArq = player?.isGoalkeeper === true;
                     const whatsapp = whatsappHref(row.phone || player?.phone || "");
 
@@ -1967,6 +1974,7 @@ function TeamAssignmentBoard({
   allMatchPlayers,
   standings,
   match,
+  monthlyPayments,
   onOpenDetails,
   onMarkOut,
   onRejoin,
@@ -1981,6 +1989,7 @@ function TeamAssignmentBoard({
   allMatchPlayers: MatchPlayer[];
   standings: Map<string, PlayerStanding>;
   match: Match;
+  monthlyPayments: MonthlyPayment[];
   onOpenDetails: (rowId: string) => void;
   onMarkOut: (rowId: string) => void;
   onRejoin: (rowId: string) => void;
@@ -1997,6 +2006,7 @@ function TeamAssignmentBoard({
       allMatchPlayers={allMatchPlayers}
       standings={standings}
       match={match}
+      monthlyPayments={monthlyPayments}
       isAdmin={true}
       onOpenDetails={onOpenDetails}
       onMarkOut={onMarkOut}
@@ -2016,12 +2026,14 @@ function PublicMatchRows({
   allMatchPlayers,
   standings,
   match,
+  monthlyPayments,
 }: {
   rows: MatchPlayer[];
   players: Player[];
   allMatchPlayers: MatchPlayer[];
   standings: Map<string, PlayerStanding>;
   match: Match;
+  monthlyPayments: MonthlyPayment[];
 }) {
   return (
     <UnifiedMatchRoster
@@ -2030,6 +2042,7 @@ function PublicMatchRows({
       allMatchPlayers={allMatchPlayers}
       standings={standings}
       match={match}
+      monthlyPayments={monthlyPayments}
       isAdmin={false}
     />
   );
@@ -2819,7 +2832,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
 
   function buildMatchPlayerRow(player: Player): MatchPlayer {
     const now = new Date().toISOString();
-    const monthly = player.paymentPlan === "monthly";
+    const monthly = isPlayerMonthlyForMonth(player.id, currentMatch.monthKey, data.players, data.monthlyPayments);
     return {
       id: newId("mp"),
       matchId: currentMatch.id,
@@ -3110,6 +3123,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             allMatchPlayers={data.matchPlayers}
             standings={standings}
             match={currentMatch}
+            monthlyPayments={data.monthlyPayments}
             onOpenDetails={(rowId) => setEditingIndex(rows.findIndex((row) => row.id === rowId))}
             onMarkOut={markRowAsOut}
             onRejoin={rejoinPlayer}
@@ -3126,13 +3140,14 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             allMatchPlayers={data.matchPlayers}
             standings={standings}
             match={currentMatch}
+            monthlyPayments={data.monthlyPayments}
           />
         )}
       </Card>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <CopyBlock title="Resumen de equipos" text={isRoyal ? royalTeamsMessage(currentMatch, matchTeams, rows) : teamsMessage(currentMatch, rows)} />
-        <CopyBlock title="Resumen del partido" text={matchSummaryMessage(currentMatch, rows)} />
+        <CopyBlock title="Resumen del partido" text={matchSummaryMessage(currentMatch, rows, data.players, data.monthlyPayments)} />
       </div>
 
       {/* Equipos informativos al final */}
@@ -3299,10 +3314,12 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
   const [editingGuestName, setEditingGuestName] = useState<string | null>(null);
   const month = currentMonthKey();
   const [planYear, setPlanYear] = useState(() => Number(month.slice(0, 4)));
+  const [rosterMonth, setRosterMonth] = useState(month);
   const monthlyPlayers = data.players
-    .filter((player) => player.active && player.paymentPlan === "monthly")
+    .filter((player) => player.active && (player.paymentPlan === "monthly" || data.monthlyPayments.some((payment) => payment.playerId === player.id)))
     .sort((a, b) => a.name.localeCompare(b.name));
-  const allMonthlyPayments = paymentsWithCurrentMonth(data, month);
+  const allMonthlyPayments = data.monthlyPayments;
+  const rosterHasExplicitData = data.monthlyPayments.some((payment) => payment.monthKey === rosterMonth);
   const currentMonthlyPayments = allMonthlyPayments
     .filter((payment) => payment.monthKey === month)
     .sort((a, b) => {
@@ -3337,6 +3354,31 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
     saveMonthlyPaymentAction(updated)
       .then(() => commit({ ...data, monthlyPayments: upsertMonthlyPayment(data.monthlyPayments, updated) }))
       .catch((err) => setError(err instanceof Error ? err.message : "No se pudo registrar el pago."));
+  }
+
+  function toggleRosterMembership(player: Player, monthKey: string, shouldBeMonthly: boolean) {
+    if (shouldBeMonthly) {
+      const payment = monthlyPaymentFor(player, monthKey, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey));
+      saveMonthlyPaymentAction(payment)
+        .then(() => commit({ ...data, monthlyPayments: upsertMonthlyPayment(data.monthlyPayments, payment) }))
+        .catch((err) => setError(err instanceof Error ? err.message : "No se pudo agregar al roster de fijos."));
+      return;
+    }
+    removeMonthlyPaymentAction(player.id, monthKey)
+      .then(() => commit({ ...data, monthlyPayments: data.monthlyPayments.filter((item) => !(item.playerId === player.id && item.monthKey === monthKey)) }))
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo quitar del roster de fijos."));
+  }
+
+  function initRosterFromSuggested(monthKey: string) {
+    const suggested = data.players.filter((player) => player.active && isPlayerMonthlyForMonth(player.id, monthKey, data.players, data.monthlyPayments));
+    Promise.all(suggested.map((player) => {
+      const payment = monthlyPaymentFor(player, monthKey, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey));
+      return saveMonthlyPaymentAction(payment).then(() => payment);
+    }))
+      .then((payments) => {
+        commit({ ...data, monthlyPayments: payments.reduce((acc, payment) => upsertMonthlyPayment(acc, payment), data.monthlyPayments) });
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo guardar el roster sugerido."));
   }
 
   function startEditMonthly(player: Player) {
@@ -3425,6 +3467,19 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
           <p className="mt-3 rounded-md bg-(--cyan)/15 px-3 py-2 text-sm font-bold text-(--cyan)">Por cobrar ahora: {formatCurrency(pending)}.</p>
         </Card>
       </div>
+      {isAdmin ? (
+        <div className="mb-4">
+          <MonthlyRosterEditor
+            players={data.players}
+            monthlyPayments={data.monthlyPayments}
+            monthKey={rosterMonth}
+            onMonthChange={setRosterMonth}
+            hasExplicitRoster={rosterHasExplicitData}
+            onInit={() => initRosterFromSuggested(rosterMonth)}
+            onToggle={(player, shouldBeMonthly) => toggleRosterMembership(player, rosterMonth, shouldBeMonthly)}
+          />
+        </div>
+      ) : null}
       <div className="mb-4">
         <MonthlyPaymentPlan
           players={monthlyPlayers}
@@ -3460,6 +3515,68 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
         </Card>
       </div>
     </>
+  );
+}
+
+function MonthlyRosterEditor({
+  players,
+  monthlyPayments,
+  monthKey,
+  onMonthChange,
+  hasExplicitRoster,
+  onInit,
+  onToggle,
+}: {
+  players: Player[];
+  monthlyPayments: MonthlyPayment[];
+  monthKey: string;
+  onMonthChange: (monthKey: string) => void;
+  hasExplicitRoster: boolean;
+  onInit: () => void;
+  onToggle: (player: Player, shouldBeMonthly: boolean) => void;
+}) {
+  const activePlayers = [...players].filter((player) => player.active).sort((a, b) => a.name.localeCompare(b.name));
+  return (
+    <Card className="space-y-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase tracking-wide text-(--cyan)">Renovacion mensual</p>
+          <h2 className="mt-1 text-xl font-black text-white">Roster fijo de {monthLabel(monthKey)}</h2>
+          <p className="mt-1 text-sm text-(--muted)">Marca quien va como fijo este mes. El resto queda como galleta (paga por partido).</p>
+        </div>
+        <div className="flex items-center gap-1">
+          <button type="button" onClick={() => onMonthChange(shiftMonthKey(monthKey, -1))} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-(--border) bg-white/[0.06] text-white transition hover:bg-white/[0.12]" aria-label="Mes anterior">
+            <ChevronLeft size={16} />
+          </button>
+          <span className="min-w-24 rounded-md border border-(--border) bg-white/[0.04] px-3 py-1.5 text-center text-sm font-black text-white">{monthKey}</span>
+          <button type="button" onClick={() => onMonthChange(shiftMonthKey(monthKey, 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-(--border) bg-white/[0.06] text-white transition hover:bg-white/[0.12]" aria-label="Mes siguiente">
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+      {!hasExplicitRoster ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-(--gold)/40 bg-(--gold)/10 px-3 py-2">
+          <p className="text-sm text-(--gold)">Este mes aun no tiene roster propio: se muestra el plan por defecto de cada jugador.</p>
+          <Button variant="secondary" onClick={onInit}>Guardar roster sugerido</Button>
+        </div>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        {activePlayers.map((player) => {
+          const checked = isPlayerMonthlyForMonth(player.id, monthKey, players, monthlyPayments);
+          return (
+            <label
+              key={player.id}
+              className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-bold transition ${
+                checked ? "border-(--cyan)/50 bg-(--cyan)/15 text-(--cyan)" : "border-(--border) bg-white/[0.03] text-(--muted)"
+              }`}
+            >
+              <input type="checkbox" className="accent-(--cyan)" checked={checked} onChange={(event) => onToggle(player, event.target.checked)} />
+              {player.name}
+            </label>
+          );
+        })}
+      </div>
+    </Card>
   );
 }
 
@@ -3608,9 +3725,8 @@ function FinanceRow({
   );
 }
 
-function isGalletaRow(row: MatchPlayer, players: Player[]) {
-  const player = players.find((item) => item.id === row.playerId);
-  return !player || player.paymentPlan !== "monthly";
+function isGalletaRow(row: MatchPlayer, players: Player[], monthKey: string, monthlyPayments: MonthlyPayment[]) {
+  return !isMonthlyMatchRow(row, players, monthKey, monthlyPayments);
 }
 
 function recentMonthKeys(count: number) {
@@ -3660,7 +3776,7 @@ function GalletaMatchBreakdown({
 
   const playersByKey = new Map<string, GalletaPlayerRow>();
   for (const match of matches) {
-    const rows = data.matchPlayers.filter((row) => row.matchId === match.id && isGalletaRow(row, data.players));
+    const rows = data.matchPlayers.filter((row) => row.matchId === match.id && isGalletaRow(row, data.players, match.monthKey, data.monthlyPayments));
     for (const row of rows) {
       const key = row.playerId ?? `name:${normalizeName(row.name)}`;
       const entry = playersByKey.get(key) ?? { key, name: row.name, byMatch: new Map(), pending: 0 };
@@ -3872,19 +3988,20 @@ type PlayerDirectorySortKey = "position" | "name" | "plan" | "nickname" | "playe
 function PlayerDirectoryTable({ players, data, month, isAdmin, onEdit }: { players: Player[]; data: SifupData; month: string; isAdmin: boolean; onEdit: (player: Player) => void }) {
   const [sort, setSort] = useState<{ key: PlayerDirectorySortKey; direction: "asc" | "desc" }>({ key: "name", direction: "asc" });
   const rows = players.map((player) => {
-    const payment = player.paymentPlan === "monthly" ? monthlyPaymentFor(player, month, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === month)) : undefined;
-    const debt = player.paymentPlan === "monthly"
+    const isMonthly = isPlayerMonthlyForMonth(player.id, month, data.players, data.monthlyPayments);
+    const payment = isMonthly ? monthlyPaymentFor(player, month, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === month)) : undefined;
+    const debt = isMonthly
       ? data.monthlyPayments.filter((item) => item.playerId === player.id).reduce((sum, item) => sum + Math.max(item.expectedAmount - item.amountPaid, 0), 0)
       : data.matchPlayers.filter((item) => item.playerId === player.id).reduce((sum, item) => sum + Math.max(item.amountDue - item.amountPaid, 0), 0);
     const history = payment ? upsertMonthlyPayment(data.monthlyPayments.filter((item) => item.playerId === player.id), payment) : [];
     const stats = computePlayerStats(player, data);
-    return { player, payment, debt, history, played: stats.played, points: stats.points };
+    return { player, isMonthly, payment, debt, history, played: stats.played, points: stats.points };
   });
   const sortedRows = [...rows].sort((left, right) => {
     const value = (row: typeof rows[number]) => {
       if (sort.key === "position") return row.player.isGoalkeeper ? "Arquero" : "Jugador de campo";
       if (sort.key === "name") return row.player.name;
-      if (sort.key === "plan") return row.player.paymentPlan;
+      if (sort.key === "plan") return row.isMonthly ? "monthly" : "perMatch";
       if (sort.key === "nickname") return row.player.nickname;
       if (sort.key === "played") return row.played;
       if (sort.key === "points") return row.points;
@@ -3922,18 +4039,18 @@ function PlayerDirectoryTable({ players, data, month, isAdmin, onEdit }: { playe
           </tr>
         </thead>
         <tbody>
-          {sortedRows.map(({ player, payment, debt, history, played, points }) => {
+          {sortedRows.map(({ player, isMonthly, payment, debt, history, played, points }) => {
             const whatsapp = whatsappHref(player.phone);
             return <tr key={player.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04]">
               <td className="px-3 py-2 text-center"><span aria-label={player.isGoalkeeper ? "Arquero" : "Jugador de campo"} title={player.isGoalkeeper ? "Arquero" : "Jugador de campo"} className={`inline-flex h-9 w-9 items-center justify-center rounded-full text-xl ring-2 ${player.isGoalkeeper ? "bg-amber-400 text-(--bg-deep) ring-amber-200 shadow-[0_0_16px_rgba(251,191,36,0.65)]" : "bg-emerald-950 ring-(--green)/70 shadow-[0_0_12px_rgba(18,214,154,0.35)]"}`}>{player.isGoalkeeper ? "🧤" : "⚽"}</span></td>
               <td className="px-3 py-3 font-bold text-white"><Link href={`/players/${player.id}`} className="hover:underline">{player.name}</Link></td>
-              <td className="px-3 py-3 text-center text-xs font-bold text-(--muted)">{player.paymentPlan === "monthly" ? "Oficial" : "Galleta"}</td>
+              <td className="px-3 py-3 text-center text-xs font-bold text-(--muted)">{isMonthly ? "Oficial" : "Galleta"}</td>
               <td className="px-3 py-3 text-(--muted)">{player.nickname || "Sin pseudónimo"}</td>
               <td className="px-3 py-3 text-center font-bold text-white">{played}</td>
               <td className="px-3 py-3 text-center font-black text-(--gold)">{points}</td>
-              <td className="px-3 py-3 text-center">{player.paymentPlan === "monthly" ? <PaymentBadge status={payment?.paymentStatus ?? "unpaid"} /> : <span className="text-xs font-bold text-(--muted)">Por partido</span>}</td>
+              <td className="px-3 py-3 text-center">{isMonthly ? <PaymentBadge status={payment?.paymentStatus ?? "unpaid"} /> : <span className="text-xs font-bold text-(--muted)">Por partido</span>}</td>
               <td className={`px-3 py-3 text-center font-bold ${debt > 0 ? "text-(--red)" : "text-(--green)"}`}>{formatCurrency(debt)}</td>
-              <td className="px-3 py-3">{player.paymentPlan === "monthly" ? <PaymentHistory payments={history} /> : <span className="text-xs text-(--muted)">—</span>}</td>
+              <td className="px-3 py-3">{isMonthly ? <PaymentHistory payments={history} /> : <span className="text-xs text-(--muted)">—</span>}</td>
               {isAdmin ? <td className="px-3 py-2"><div className="flex justify-center gap-1">{whatsapp ? <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15" aria-label={`WhatsApp ${player.name}`} title="WhatsApp"><MessageCircle size={16} /></a> : null}<button type="button" onClick={() => onEdit(player)} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14]" aria-label={`Editar ${player.name}`} title="Editar"><Pencil size={16} /></button></div></td> : null}
             </tr>;
           })}
@@ -3989,7 +4106,8 @@ function PlayerEditorForm({ player, onSave, players = [], allowMerge = true }: {
       <Input label="Sigla (3 caracteres)" value={draft.shortName} onChange={(value) => setDraft({ ...draft, shortName: value.slice(0, 3).toUpperCase() })} />
       <Input label="Telefono" value={draft.phone} onChange={(value) => setDraft({ ...draft, phone: value })} />
       <label className="space-y-1 text-sm font-medium text-(--muted)">
-        <span>Plan</span>
+        <span>Plan por defecto</span>
+        <p className="text-xs font-normal text-(--muted)">Se usa para sugerir el roster de un mes nuevo. El mes en curso se administra en Pagos → Renovacion mensual.</p>
         <select className="h-10 w-full rounded-md border border-(--border) bg-(--panel-strong) px-3 text-sm text-white" value={draft.paymentPlan} onChange={(event) => setDraft({ ...draft, paymentPlan: event.target.value as PaymentPlan })}>
           <option value="monthly">mensual (oficial)</option>
           <option value="perMatch">por partido (galleta)</option>
@@ -4201,7 +4319,7 @@ export function PlayerDetailPage({ id, initialData }: { id: string } & InitialDa
 
   return (
     <>
-      <PageTitle title={player.name} description={`${player.paymentPlan === "monthly" ? "Oficial" : "Galleta"} · ${player.nickname || "Sin pseudonimo"}`} />
+      <PageTitle title={player.name} description={`${isPlayerMonthlyForMonth(player.id, currentMonthKey(), data.players, data.monthlyPayments) ? "Oficial" : "Galleta"} · ${player.nickname || "Sin pseudonimo"}`} />
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
       {isAdmin ? <div className="mb-4 flex flex-wrap gap-2"><Button variant="secondary" onClick={() => setEditingPlayer(player)}><Pencil size={16} />Editar datos</Button><Button variant="secondary" onClick={() => setMergingPlayer(player)} className="border-amber-500/40 text-amber-500 hover:bg-amber-500 hover:text-white"><Users size={16} />Fusionar jugador</Button></div> : null}
       <section className="relative overflow-hidden rounded-xl border border-(--gold)/30 bg-[linear-gradient(135deg,rgba(250,204,21,0.14),rgba(18,214,154,0.08)_48%,rgba(255,255,255,0.03))] p-5 shadow-(--shadow)">
@@ -4248,13 +4366,14 @@ export function StandingsPage({ initialData }: InitialDataProps) {
   const [error, setError] = useState("");
 
   const filteredStandings = useMemo(() => {
+    const rankingMonth = currentMonthKey();
     const baseStandings = data.players.map((player) => {
       const stats = computePlayerStats(player, data);
       return {
         id: player.id,
         player: player.name,
         nickname: player.nickname,
-        plan: player.paymentPlan,
+        plan: (isPlayerMonthlyForMonth(player.id, rankingMonth, data.players, data.monthlyPayments) ? "monthly" : "perMatch") as PaymentPlan,
         shortName: player.shortName,
         isGoalkeeper: player.isGoalkeeper,
         ...stats,

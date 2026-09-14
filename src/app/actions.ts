@@ -8,6 +8,7 @@ import { hashPassword } from "@/lib/auth";
 import { randomUUID } from "crypto";
 import {
   clearMatchFinalStanding,
+  deleteMonthlyPayment,
   finishMatchGame,
   markMatchPlayerPaid,
   saveMatchPlayers,
@@ -186,6 +187,12 @@ export async function savePlayerAction(player: Player, guestName?: string) {
 export async function saveMonthlyPaymentAction(payment: MonthlyPayment) {
   await requirePermission("payments");
   await saveMonthlyPayment(payment);
+  revalidateAdminViews();
+}
+
+export async function removeMonthlyPaymentAction(playerId: string, monthKey: string) {
+  await requirePermission("payments");
+  await deleteMonthlyPayment(playerId, monthKey);
   revalidateAdminViews();
 }
 

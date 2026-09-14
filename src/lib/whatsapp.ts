@@ -1,13 +1,28 @@
-import type { Match, MatchPlayer, MatchResult, MatchTeam } from "./types";
-import { formatCurrency, sortByWhatsappOrder, whatsappOrderFor } from "./store";
+import type { Match, MatchPlayer, MatchResult, MatchTeam, MonthlyPayment, Player } from "./types";
+import { formatCurrency, isPlayerMonthlyForMonth, sortByWhatsappOrder, whatsappOrderFor } from "./store";
 import { PUBLIC_BASE_URL } from "./sifup-constants";
 
 const MINIMUM_PLAYERS = 12;
 const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
-export function matchSummaryMessage(match: Match, players: MatchPlayer[]) {
-  const confirmed = sortByWhatsappOrder(players.filter((player) => player.attendanceStatus === "confirmed"));
-  const out = sortByWhatsappOrder(players.filter((player) => player.attendanceStatus === "out"));
+function isMonthlyRow(row: MatchPlayer, players: Player[], monthKey: string, monthlyPayments: MonthlyPayment[]) {
+  if (row.note.toLowerCase().includes("mensualidad")) return true;
+  const player = players.find((item) => item.id === row.playerId) ?? players.find((item) => item.name.toLowerCase() === row.name.toLowerCase());
+  return player ? isPlayerMonthlyForMonth(player.id, monthKey, players, monthlyPayments) : false;
+}
+
+function sortRowsMonthlyFirst(rows: MatchPlayer[], players: Player[], monthKey: string, monthlyPayments: MonthlyPayment[]) {
+  return [...rows].sort((a, b) => {
+    const monthlyA = isMonthlyRow(a, players, monthKey, monthlyPayments) ? 0 : 1;
+    const monthlyB = isMonthlyRow(b, players, monthKey, monthlyPayments) ? 0 : 1;
+    if (monthlyA !== monthlyB) return monthlyA - monthlyB;
+    return whatsappOrderFor(a) - whatsappOrderFor(b) || a.name.localeCompare(b.name);
+  });
+}
+
+export function matchSummaryMessage(match: Match, rows: MatchPlayer[], players: Player[], monthlyPayments: MonthlyPayment[]) {
+  const confirmed = sortRowsMonthlyFirst(rows.filter((row) => row.attendanceStatus === "confirmed"), players, match.monthKey, monthlyPayments);
+  const out = sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "out"));
   const playerLines = Array.from({ length: Math.max(MINIMUM_PLAYERS, confirmed.length) }, (_, index) => {
     const player = confirmed[index];
     return `${index + 1}- ${player?.name ?? ""}`;
