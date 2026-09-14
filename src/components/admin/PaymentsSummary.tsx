@@ -145,7 +145,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
         <Stat label="Costos del mes" value={formatCurrency(-gastoTotal)} tone="red" icon={<Wallet size={18} />} />
         <Stat label="Ingresos del mes" value={formatCurrency(ingresosDelMes)} tone="green" icon={<TrendingUp size={18} />} />
         <Stat label="Pendientes de pago" value={formatCurrency(pendientesDePago)} tone="gold" icon={<Clock size={18} />} />
-        <Stat label="Saldo del mes" value={formatCurrency(saldoDelMes)} tone={saldoDelMes >= 0 ? "green" : "red"} icon={<Scale size={18} />} />
+        <Stat label="Saldo del mes" value={formatCurrency(saldoDelMes)} tone={saldoDelMes >= 0 ? "green" : "red"} icon={<Scale size={18} />} size="lg" />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
