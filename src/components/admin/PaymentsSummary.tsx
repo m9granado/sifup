@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, Plus, Scale, TrendingUp, Wallet } from "lucide-react";
 import { addClubExpenseAction, saveMonthlyPaymentAction, setMatchPlayerPaymentStatusAction } from "@/app/actions";
 import { Button, Card, Input, Modal, PageTitle, Stat } from "./SifupWorkspace";
 import { formatCurrency, isPlayerMonthlyForMonth, monthLabel, monthlyPaymentFor, newId, shiftMonthKey } from "@/lib/store";
@@ -142,10 +142,10 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Costos del mes" value={formatCurrency(gastoTotal)} />
-        <Stat label="Ingresos del mes" value={formatCurrency(ingresosDelMes)} />
-        <Stat label="Pendientes de pago" value={formatCurrency(pendientesDePago)} />
-        <Stat label="Saldo del mes" value={formatCurrency(saldoDelMes)} />
+        <Stat label="Costos del mes" value={formatCurrency(-gastoTotal)} tone="red" icon={<Wallet size={18} />} />
+        <Stat label="Ingresos del mes" value={formatCurrency(ingresosDelMes)} tone="green" icon={<TrendingUp size={18} />} />
+        <Stat label="Pendientes de pago" value={formatCurrency(pendientesDePago)} tone="gold" icon={<Clock size={18} />} />
+        <Stat label="Saldo del mes" value={formatCurrency(saldoDelMes)} tone={saldoDelMes >= 0 ? "green" : "red"} icon={<Scale size={18} />} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

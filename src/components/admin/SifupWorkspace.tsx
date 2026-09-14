@@ -444,11 +444,31 @@ function StatusBadge({ value }: { value: string }) {
   return <span className="rounded-full bg-white/[0.08] px-2 py-1 text-xs font-bold text-white ring-1 ring-(--border)">{value}</span>;
 }
 
-export function Stat({ label, value }: { label: string; value: string | number }) {
+export function Stat({
+  label,
+  value,
+  tone = "default",
+  icon,
+}: {
+  label: string;
+  value: string | number;
+  tone?: "default" | "green" | "red" | "gold";
+  icon?: React.ReactNode;
+}) {
+  const toneClass = { default: "text-white", green: "text-(--green)", red: "text-(--red)", gold: "text-(--gold)" }[tone];
+  const iconToneClass = {
+    default: "bg-white/10 text-white",
+    green: "bg-(--green)/15 text-(--green)",
+    red: "bg-(--red)/15 text-(--red)",
+    gold: "bg-(--gold)/15 text-(--gold)",
+  }[tone];
   return (
-    <Card>
-      <p className="text-xs font-bold uppercase tracking-wide text-(--muted)">{label}</p>
-      <p className="mt-2 text-2xl font-black text-white">{value}</p>
+    <Card className="flex items-start justify-between gap-3">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wide text-(--muted)">{label}</p>
+        <p className={`mt-2 text-2xl font-black ${toneClass}`}>{value}</p>
+      </div>
+      {icon ? <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${iconToneClass}`}>{icon}</span> : null}
     </Card>
   );
 }
