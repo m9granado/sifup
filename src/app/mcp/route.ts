@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { addPlayerToMatch, assignPlayerTeam, findPlayer, generateBalancedTeams, getMatchTeams, getNextMatchSummary, getPendingPayments, getPlayerStandings, importWhatsAppMatch, mergePlayers, registerMatchPayment, registerMonthlyPayment, setMatchResult } from "@/lib/sifup-service";
+import { addPlayerToMatch, assignPlayerTeam, findPlayer, generateBalancedTeams, getMatchTeams, getNextMatchSummary, getPendingPayments, getPlayerStandings, importWhatsAppMatch, mergePlayers, registerMatchPayment, registerMonthlyPayment, setMatchResult, setMonthlyRoster } from "@/lib/sifup-service";
 import { PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "@/lib/sifup-constants";
 
 type ToolResult = {
@@ -106,6 +106,21 @@ function createServer() {
       },
     },
     (input) => runTool(() => registerMonthlyPayment(input)),
+  );
+
+  server.registerTool(
+    "set_monthly_roster",
+    {
+      title: "Marcar fijo o galleta del mes",
+      description: "Agrega o quita a un jugador del roster de fijos (mensuales) de un mes especifico, sin depender del plan por defecto del jugador. Usar para armar o corregir la renovacion mensual (quien va fijo vs galleta ese mes). Por defecto usa el mes actual.",
+      inputSchema: {
+        name: z.string().optional().describe("Nombre o apodo del jugador (o usa playerId)."),
+        playerId: z.string().optional().describe("ID del jugador si se conoce."),
+        monthKey: z.string().optional().describe("Mes YYYY-MM. Default: mes actual."),
+        monthly: z.boolean().describe("true para marcarlo fijo (mensual) ese mes, false para quitarlo del roster (pasa a galleta)."),
+      },
+    },
+    (input) => runTool(() => setMonthlyRoster(input)),
   );
 
   server.registerTool(

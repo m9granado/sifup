@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { COURT_COST, MONTHLY_AMOUNT, PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "./sifup-constants";
 import { monthKey, weekLabel } from "./sifup-date";
 import { parseWhatsAppList } from "./parser";
-import { getSifupData, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment, savePlayer, mergePlayers as dbMergePlayers } from "./repository";
+import { deleteMonthlyPayment, getSifupData, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment, savePlayer, mergePlayers as dbMergePlayers } from "./repository";
 import { isPlayerMonthlyForMonth, newId, nextMatch, sortByWhatsappOrder, summarizeMatch } from "./store";
 import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, standingsMessage, teamsMessage } from "./whatsapp";
 import { calculateRankingRecord } from "./standings";
@@ -225,6 +225,54 @@ export async function registerMonthlyPayment(input: RegisterMonthlyPaymentInput)
       ? `${player.name} pago la mensualidad de ${targetMonth}.`
       : `Se marco pendiente la mensualidad de ${player.name} para ${targetMonth}.`,
   };
+}
+
+export type SetMonthlyRosterInput = {
+  name?: string;
+  playerId?: string;
+  monthKey?: string;
+  monthly: boolean;
+};
+
+export async function setMonthlyRoster(input: SetMonthlyRosterInput) {
+  const data = await getSifupData();
+  const player = input.playerId
+    ? data.players.find((item) => item.id === input.playerId)
+    : input.name
+      ? findKnownPlayer(data.players, input.name)
+      : undefined;
+  if (!player) throw new Error("Jugador no encontrado.");
+
+  const targetMonth = input.monthKey ?? currentMonthKey();
+  const existing = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === targetMonth);
+
+  if (input.monthly) {
+    if (existing) {
+      return { status: "unchanged", player: player.name, monthKey: targetMonth, note: `${player.name} ya estaba como fijo en ${targetMonth}.` };
+    }
+    const now = new Date().toISOString();
+    const payment: MonthlyPayment = {
+      id: `monthly-${targetMonth}-${player.id}`,
+      playerId: player.id,
+      monthKey: targetMonth,
+      expectedAmount: MONTHLY_AMOUNT,
+      amountPaid: 0,
+      paymentStatus: "unpaid",
+      note: `Mensualidad ${targetMonth}, vencimiento 10/${targetMonth.slice(5)}`,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await saveMonthlyPayment(payment);
+    revalidateSifupViews();
+    return { status: "added", player: player.name, monthKey: targetMonth, note: `${player.name} agregado como fijo (mensual) en ${targetMonth}.` };
+  }
+
+  if (!existing) {
+    return { status: "unchanged", player: player.name, monthKey: targetMonth, note: `${player.name} ya era galleta en ${targetMonth}.` };
+  }
+  await deleteMonthlyPayment(player.id, targetMonth);
+  revalidateSifupViews();
+  return { status: "removed", player: player.name, monthKey: targetMonth, note: `${player.name} pasa a galleta en ${targetMonth}.` };
 }
 
 export type RegisterMatchPaymentInput = {
