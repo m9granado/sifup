@@ -80,7 +80,7 @@ function weekLabel(date: string) {
   return `${Math.ceil(value.getDate() / 7)}a sem ${month}`;
 }
 
-function findKnownPlayer(players: Player[], name: string) {
+export function findKnownPlayer(players: Player[], name: string) {
   const clean = name.trim().toLowerCase();
   const normalized = clean === "wictor" ? "victor" : clean;
 

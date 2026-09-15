@@ -434,6 +434,18 @@ export async function setMatchPlayerPaymentStatus(rowId: string, status: "paid" 
   `;
 }
 
+export async function bumpMatchAmountDue(monthKey: string, fromAmount: number, toAmount: number): Promise<number> {
+  const sql = requireDatabase();
+  const updated = await sql<{ id: string }[]>`
+    update match_players
+    set amount_due = ${toAmount}, updated_at = now()
+    where amount_due = ${fromAmount}
+      and match_id in (select id from matches where month_key = ${monthKey})
+    returning id
+  `;
+  return updated.length;
+}
+
 export async function savePlayer(player: Player, guestName?: string) {
   const sql = requireDatabase();
   await sql.begin(async (tx) => {

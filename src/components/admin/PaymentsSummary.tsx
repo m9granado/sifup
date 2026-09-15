@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Clock, Plus, Scale, TrendingUp, Wallet } from "lucide-react";
-import { addClubExpenseAction, saveMonthlyPaymentAction, setMatchPlayerPaymentStatusAction } from "@/app/actions";
-import { Button, Card, Input, Modal, PageTitle, Stat } from "./SifupWorkspace";
+import { addClubExpenseAction, bumpMatchAmountDueAction, saveMonthlyPaymentAction, setMatchPlayerPaymentStatusAction } from "@/app/actions";
+import { Button, Card, findKnownPlayer, Input, Modal, PageTitle, Stat } from "./SifupWorkspace";
 import { formatCurrency, isPlayerMonthlyForMonth, monthLabel, monthlyPaymentFor, newId, shiftMonthKey } from "@/lib/store";
+import { PER_MATCH_AMOUNT } from "@/lib/sifup-constants";
 import type { ClubExpense, Match, MatchPlayer, MonthlyPayment, Player, SifupData } from "@/lib/types";
 
 type GalletaPlayerSummary = {
@@ -18,14 +19,22 @@ type GalletaPlayerSummary = {
   rows: { match: Match; row: MatchPlayer }[];
 };
 
+const LEGACY_MATCH_AMOUNT = 3500;
+
 export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; monthKey: string; canEdit: boolean }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const [optimisticCuota, setOptimisticCuota] = useState<Record<string, "paid" | "unpaid">>({});
+  const [optimisticGalleta, setOptimisticGalleta] = useState<Record<string, "paid" | "unpaid">>({});
 
   const monthlyPlayers = data.players
-    .filter((player) => player.active && isPlayerMonthlyForMonth(player.id, monthKey, data.players, data.monthlyPayments))
+    .filter((player) => {
+      const hasRecordThisMonth = data.monthlyPayments.some((payment) => payment.playerId === player.id && payment.monthKey === monthKey);
+      return (player.active || hasRecordThisMonth) && isPlayerMonthlyForMonth(player.id, monthKey, data.players, data.monthlyPayments);
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const matchesInMonth = [...data.matches.filter((match) => match.monthKey === monthKey)].sort((a, b) => a.date.localeCompare(b.date));
@@ -34,7 +43,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
   const cuotaPayments = monthlyPlayers.map((player) => ({
     player,
     payment: monthlyPaymentFor(player, monthKey, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey)),
-    playedCount: data.matchPlayers.filter((row) => matchIdsInMonth.has(row.matchId) && row.playerId === player.id && row.attendanceStatus !== "out").length,
+    playedCount: data.matchPlayers.filter((row) => matchIdsInMonth.has(row.matchId) && row.playerId === player.id && row.attendanceStatus === "confirmed").length,
   }));
   const paidCount = cuotaPayments.filter((item) => item.payment.paymentStatus === "paid").length;
   const cuotaCollected = cuotaPayments.reduce((sum, item) => sum + item.payment.amountPaid, 0);
@@ -50,7 +59,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
   const galletaRows = data.matchPlayers.filter(
     (row) =>
       matchIdsInMonth.has(row.matchId) &&
-      row.attendanceStatus !== "out" &&
+      row.attendanceStatus === "confirmed" &&
       !(row.playerId && isPlayerMonthlyForMonth(row.playerId, monthKey, data.players, data.monthlyPayments))
   );
   const ingresosGalleta = galletaRows.reduce((sum, row) => sum + row.amountPaid, 0);
@@ -60,8 +69,9 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
   for (const row of galletaRows) {
     const match = matchesInMonth.find((item) => item.id === row.matchId);
     if (!match) continue;
-    const key = row.playerId ?? `name:${row.name.trim().toLowerCase()}`;
-    const entry = galletaByPlayer.get(key) ?? { key, playerId: row.playerId ?? null, name: row.name, paid: 0, pending: 0, rows: [] };
+    const resolvedPlayer = row.playerId ? data.players.find((player) => player.id === row.playerId) : findKnownPlayer(data.players, row.name);
+    const key = resolvedPlayer?.id ?? `name:${row.name.trim().toLowerCase()}`;
+    const entry = galletaByPlayer.get(key) ?? { key, playerId: resolvedPlayer?.id ?? null, name: resolvedPlayer?.name ?? row.name, paid: 0, pending: 0, rows: [] };
     entry.paid += row.amountPaid;
     entry.pending += Math.max(row.amountDue - row.amountPaid, 0);
     entry.rows.push({ match, row });
@@ -71,22 +81,30 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
 
   const ingresosDelMes = cuotaCollected + ingresosGalleta;
   const pendientesDePago = cuotaPending + galletaPending;
-  const saldoDelMes = ingresosDelMes + pendientesDePago - gastoTotal;
+  const saldoDelMes = ingresosDelMes - gastoTotal;
 
   function toggleCuota(player: Player) {
     const existing = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey);
     const base = monthlyPaymentFor(player, monthKey, existing);
     const now = new Date().toISOString();
     const wasPaid = base.paymentStatus === "paid";
+    const nextStatus = wasPaid ? "unpaid" : "paid";
     const updated: MonthlyPayment = wasPaid
       ? { ...base, paymentStatus: "unpaid", amountPaid: 0, paidAt: undefined, updatedAt: now }
       : { ...base, paymentStatus: "paid", amountPaid: base.expectedAmount, paidAt: now, updatedAt: now };
+    const cuotaKey = `${monthKey}:${player.id}`;
     setError("");
+    setOptimisticCuota((prev) => ({ ...prev, [cuotaKey]: nextStatus }));
     startTransition(async () => {
       try {
         await saveMonthlyPaymentAction(updated);
         router.refresh();
       } catch (err) {
+        setOptimisticCuota((prev) => {
+          const next = { ...prev };
+          delete next[cuotaKey];
+          return next;
+        });
         setError(err instanceof Error ? err.message : "No se pudo actualizar la cuota.");
       }
     });
@@ -108,12 +126,32 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
   function toggleGalleta(row: MatchPlayer) {
     const nextStatus = row.paymentStatus === "paid" ? "unpaid" : "paid";
     setError("");
+    setOptimisticGalleta((prev) => ({ ...prev, [row.id]: nextStatus }));
     startTransition(async () => {
       try {
         await setMatchPlayerPaymentStatusAction(row.id, nextStatus);
         router.refresh();
       } catch (err) {
+        setOptimisticGalleta((prev) => {
+          const next = { ...prev };
+          delete next[row.id];
+          return next;
+        });
         setError(err instanceof Error ? err.message : "No se pudo actualizar el pago.");
+      }
+    });
+  }
+
+  function bumpPrice() {
+    setError("");
+    setNotice("");
+    startTransition(async () => {
+      try {
+        const count = await bumpMatchAmountDueAction(monthKey, LEGACY_MATCH_AMOUNT, PER_MATCH_AMOUNT);
+        setNotice(count > 0 ? `Actualizadas ${count} galletas a ${formatCurrency(PER_MATCH_AMOUNT)}.` : "No quedaban galletas con el monto anterior.");
+        router.refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo actualizar el monto de las galletas.");
       }
     });
   }
@@ -140,6 +178,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
       />
 
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
+      {notice ? <p className="mb-4 rounded-md bg-(--green)/15 px-3 py-2 text-sm font-bold text-(--green)">{notice}</p> : null}
 
       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Costos del mes" value={formatCurrency(-gastoTotal)} tone="red" icon={<Wallet size={18} />} />
@@ -188,9 +227,16 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
         </Card>
 
         <Card className="space-y-3">
-          <div>
-            <h2 className="text-lg font-black text-white">Situacion galletas</h2>
-            <p className="text-xs text-(--muted)">Solo jugadores que jugaron algun partido este mes.</p>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-black text-white">Situacion galletas</h2>
+              <p className="text-xs text-(--muted)">Solo jugadores que jugaron algun partido este mes.</p>
+            </div>
+            {canEdit ? (
+              <Button variant="secondary" onClick={bumpPrice} disabled={isPending}>
+                Subir galletas a {formatCurrency(PER_MATCH_AMOUNT)}
+              </Button>
+            ) : null}
           </div>
           <div className="overflow-x-auto rounded-lg border border-(--border)">
             <table className="w-full text-sm">
@@ -215,9 +261,9 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
                         )}
                       </td>
                       <td className="px-2 py-1.5">
-                        <div className="flex flex-wrap gap-1">
+                        <div className="flex flex-wrap gap-1.5">
                           {sortedRows.map(({ match, row }) => {
-                            const paid = row.paymentStatus === "paid";
+                            const paid = (optimisticGalleta[row.id] ?? row.paymentStatus) === "paid";
                             const title = `${match.date}: ${paid ? "Pagado" : "Pendiente"}${canEdit ? " - toca para cambiar" : ""}`;
                             return (
                               <button
@@ -226,7 +272,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
                                 disabled={!canEdit || isPending}
                                 title={title}
                                 onClick={() => toggleGalleta(row)}
-                                className={`rounded px-1.5 py-0.5 text-[10px] font-bold transition disabled:cursor-not-allowed ${paid ? "bg-(--green)/15 text-(--green)" : "bg-(--red)/15 text-(--red)"} ${canEdit ? "hover:opacity-80" : ""}`}
+                                className={`min-h-9 min-w-9 rounded px-2 py-1.5 text-xs font-bold transition disabled:cursor-not-allowed ${paid ? "bg-(--green)/15 text-(--green)" : "bg-(--red)/15 text-(--red)"} ${canEdit ? "hover:opacity-80" : ""}`}
                               >
                                 {match.date.slice(5)}
                               </button>
@@ -269,20 +315,20 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
                 <tr>
                   <th className="px-2 py-1.5 text-left">Jugador</th>
                   <th className="px-2 py-1.5 text-right">Partidos</th>
-                  <th className="px-2 py-1.5 text-right">Pagado</th>
-                  <th className="px-2 py-1.5 text-right">No pagado</th>
+                  <th className="px-2 py-1.5 text-right">Cuota</th>
                 </tr>
               </thead>
               <tbody>
                 {cuotaPayments.map(({ player, payment, playedCount }) => {
-                  const paid = payment.paymentStatus === "paid";
+                  const cuotaKey = `${monthKey}:${player.id}`;
+                  const paid = (optimisticCuota[cuotaKey] ?? payment.paymentStatus) === "paid";
                   const amountCell = canEdit ? (
                     <button
                       type="button"
                       disabled={isPending}
                       onClick={() => toggleCuota(player)}
                       title="Toca para cambiar el estado"
-                      className={`font-bold transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-60 ${paid ? "text-(--green)" : "text-(--red)"}`}
+                      className={`min-h-9 rounded px-2 py-1 font-bold transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-60 ${paid ? "bg-(--green)/15 text-(--green)" : "bg-(--red)/15 text-(--red)"}`}
                     >
                       {formatCurrency(payment.expectedAmount)}
                     </button>
@@ -295,14 +341,13 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
                         <Link href={`/players/${player.id}`} className="font-semibold text-white hover:text-(--cyan) hover:underline">{player.name}</Link>
                       </td>
                       <td className="whitespace-nowrap px-2 py-1.5 text-right text-(--muted)">{playedCount}</td>
-                      <td className="whitespace-nowrap px-2 py-1.5 text-right">{paid ? amountCell : "-"}</td>
-                      <td className="whitespace-nowrap px-2 py-1.5 text-right">{paid ? "-" : amountCell}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right">{amountCell}</td>
                     </tr>
                   );
                 })}
                 {monthlyPlayers.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-2 py-2 text-sm text-(--muted)">Sin jugadores mensuales este mes.</td>
+                    <td colSpan={3} className="px-2 py-2 text-sm text-(--muted)">Sin jugadores mensuales este mes.</td>
                   </tr>
                 ) : null}
               </tbody>
@@ -310,8 +355,11 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
                 <tr className="border-t border-(--border) font-black text-white">
                   <td className="px-2 py-1.5">Total</td>
                   <td className="whitespace-nowrap px-2 py-1.5 text-right">{cuotaPlayedTotal}</td>
-                  <td className="whitespace-nowrap px-2 py-1.5 text-right">{formatCurrency(cuotaCollected)}</td>
-                  <td className="whitespace-nowrap px-2 py-1.5 text-right">{formatCurrency(cuotaExpected - cuotaCollected)}</td>
+                  <td className="whitespace-nowrap px-2 py-1.5 text-right">
+                    <span className="text-(--green)">{formatCurrency(cuotaCollected)}</span>
+                    <span className="text-(--muted)"> / </span>
+                    <span className="text-(--red)">{formatCurrency(cuotaExpected - cuotaCollected)}</span>
+                  </td>
                 </tr>
               </tfoot>
             </table>
@@ -321,7 +369,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
 
       {showExpenseForm ? (
         <Modal title="Agregar gasto" onClose={() => setShowExpenseForm(false)}>
-          <ExpenseForm monthKey={monthKey} isPending={isPending} onSave={addExpense} onCancel={() => setShowExpenseForm(false)} />
+          <ExpenseForm monthKey={monthKey} isPending={isPending} serverError={error} onSave={addExpense} onCancel={() => setShowExpenseForm(false)} />
         </Modal>
       ) : null}
     </div>
@@ -331,11 +379,13 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
 function ExpenseForm({
   monthKey,
   isPending,
+  serverError,
   onSave,
   onCancel,
 }: {
   monthKey: string;
   isPending: boolean;
+  serverError: string;
   onSave: (expense: ClubExpense) => void;
   onCancel: () => void;
 }) {
@@ -343,9 +393,18 @@ function ExpenseForm({
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState<ClubExpense["category"]>("other");
   const [expenseDate, setExpenseDate] = useState(`${monthKey}-01`);
+  const [validationError, setValidationError] = useState("");
 
   function submit() {
-    if (!label.trim() || !Number(amount)) return;
+    if (!label.trim()) {
+      setValidationError("Ingresa una descripcion.");
+      return;
+    }
+    if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) {
+      setValidationError("El monto debe ser mayor a 0.");
+      return;
+    }
+    setValidationError("");
     const now = new Date().toISOString();
     onSave({
       id: newId("expense"),
@@ -361,6 +420,8 @@ function ExpenseForm({
 
   return (
     <div className="space-y-3 pb-4">
+      {validationError ? <p className="rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{validationError}</p> : null}
+      {serverError ? <p className="rounded-md bg-(--red)/15 px-3 py-2 text-sm font-bold text-(--red)">{serverError}</p> : null}
       <Input label="Descripcion" value={label} onChange={setLabel} />
       <Input label="Monto" type="number" value={amount} onChange={setAmount} />
       <Input label="Fecha" type="date" value={expenseDate} onChange={setExpenseDate} />

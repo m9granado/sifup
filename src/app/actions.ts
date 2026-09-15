@@ -7,6 +7,7 @@ import { getSql, hasDatabaseUrl } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
 import { randomUUID } from "crypto";
 import {
+  bumpMatchAmountDue,
   clearMatchFinalStanding,
   deleteMonthlyPayment,
   finishMatchGame,
@@ -204,6 +205,13 @@ export async function addClubExpenseAction(expense: ClubExpense) {
   await requirePermission("payments");
   await saveClubExpense(expense);
   revalidateAdminViews();
+}
+
+export async function bumpMatchAmountDueAction(monthKey: string, fromAmount: number, toAmount: number) {
+  await requirePermission("payments");
+  const count = await bumpMatchAmountDue(monthKey, fromAmount, toAmount);
+  revalidateAdminViews();
+  return count;
 }
 
 export async function mergePlayersAction(sourceId: string, targetId: string) {
