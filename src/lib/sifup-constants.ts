@@ -1,6 +1,6 @@
 import type { MatchTeamColor, PaymentStatus, Team } from "./types";
 
-export const PER_MATCH_AMOUNT = 3500;
+export const PER_MATCH_AMOUNT = 5000;
 export const MONTHLY_AMOUNT = 20000;
 export const COURT_COST = 35000;
 export const WIN_POINTS = 4;
