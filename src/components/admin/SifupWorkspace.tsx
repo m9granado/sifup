@@ -56,7 +56,7 @@ type PlayerStanding = {
   draws: number;
   losses: number;
 };
-type TeamAssignableRow = Pick<MatchPlayer, "attendanceStatus" | "name" | "playerId" | "team" | "whatsappOrder">;
+type TeamAssignableRow = Pick<MatchPlayer, "attendanceStatus" | "name" | "playerId" | "team" | "whatsappOrder"> & { id?: string };
 type RankedTeamRow<T extends TeamAssignableRow> = {
   row: T;
   index: number;
@@ -264,14 +264,16 @@ function buildRankedTeamRows<T extends TeamAssignableRow>(rows: T[], players: Pl
   return [...rankedGoalkeepers, ...rankedFieldPlayers];
 }
 
-function applyBalancedTeams<T extends TeamAssignableRow>(rows: T[], players: Player[], standings: Map<string, PlayerStanding>) {
+function applyBalancedTeams<T extends TeamAssignableRow>(rows: T[], players: Player[], standings: Map<string, PlayerStanding>, playableRowIds?: Set<string>) {
   const assignments = new Map<number, Team>();
   buildRankedTeamRows(rows, players, standings).forEach((item) => {
     assignments.set(item.index, item.suggestedTeam);
   });
   return rows.map((row, index) => ({
     ...row,
-    team: row.attendanceStatus === "confirmed" ? assignments.get(index) ?? "none" : "none",
+    team: (row.attendanceStatus === "confirmed" || (row.attendanceStatus === "waitlist" && Boolean(row.id && (!playableRowIds || playableRowIds.has(row.id)))))
+      ? assignments.get(index) ?? "none"
+      : "none",
   }));
 }
 
@@ -5356,9 +5358,15 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
   }
 
   const confirmedRows = rows.filter((r) => r.attendanceStatus === "confirmed");
-  const teamA = confirmedRows.filter((row) => row.team === "A");
-  const teamB = confirmedRows.filter((row) => row.team === "B");
-  const unassigned = confirmedRows.filter((row) => row.team !== "A" && row.team !== "B");
+  const squadTarget = currentMatch.squadTarget ?? SQUAD_TARGET;
+  const openSlots = Math.max(squadTarget - confirmedRows.length, 0);
+  const galletaRows = sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "waitlist" && !row.note.toLowerCase().includes("banca")));
+  const playableGalletas = galletaRows.slice(0, openSlots);
+  const playableRowIds = new Set(playableGalletas.map((row) => row.id));
+  const teamRows = [...confirmedRows, ...playableGalletas];
+  const teamA = teamRows.filter((row) => row.team === "A");
+  const teamB = teamRows.filter((row) => row.team === "B");
+  const unassigned = teamRows.filter((row) => row.team !== "A" && row.team !== "B");
 
   const pointsA = teamA.reduce((sum, row) => sum + (standingForMatchRow(row, data.players, standings)?.points ?? 0), 0);
   const pointsB = teamB.reduce((sum, row) => sum + (standingForMatchRow(row, data.players, standings)?.points ?? 0), 0);
@@ -5382,15 +5390,20 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
   }
 
   function resetBalancedTeams() {
-    setRows((current) => applyBalancedTeams(current, data.players, standings));
+    setRows((current) => applyBalancedTeams(current, data.players, standings, playableRowIds));
   }
 
   function save() {
     setError("");
+    const nextRows = rows.map((row) => (
+      playableRowIds.has(row.id) && row.team !== "none"
+        ? { ...row, attendanceStatus: "confirmed" as AttendanceStatus, note: row.note.includes("Lista de espera") ? "galleta incorporada" : row.note, updatedAt: new Date().toISOString() }
+        : row
+    ));
     startTransition(async () => {
       try {
-        await saveMatchDetailAction(currentMatch.id, rows);
-        commit({ ...data, matchPlayers: data.matchPlayers.map((item) => rows.find((r) => r.id === item.id) ?? item) });
+        await saveMatchDetailAction(currentMatch.id, nextRows);
+        commit({ ...data, matchPlayers: data.matchPlayers.map((item) => nextRows.find((r) => r.id === item.id) ?? item) });
         router.push(`/matches/${currentMatch.id}`);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Error al guardar equipos.");
@@ -5408,9 +5421,9 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
             <Link href={`/matches/${currentMatch.id}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
               Volver al partido
             </Link>
-            <Button onClick={save} disabled={isPending}>
-              <Save size={16} />
-              Guardar equipos
+              <Button onClick={save} disabled={isPending}>
+                <Save size={16} />
+                Guardar y cerrar lista
             </Button>
           </div>
         }
@@ -5421,7 +5434,7 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-(--border) bg-white/[0.04] px-3 py-2">
           <p className={`text-xs font-bold ${pointsDifference === 0 ? "text-(--green)" : "text-(--muted)"}`}>
-            {pointsDifference === 0 ? "Equipos equilibrados" : `Diferencia: ${pointsDifference} pts`}
+            {pointsDifference === 0 ? "Equipos equilibrados" : `Diferencia: ${pointsDifference} pts`} · {teamRows.length}/{squadTarget} para jugar
           </p>
           <Button variant="secondary" onClick={resetBalancedTeams} disabled={isPending} className="h-8 px-2.5 text-xs">
             <Sparkles size={14} />
@@ -5469,6 +5482,18 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
             </div>
           </Card>
         </div>
+        {galletaRows.length > playableGalletas.length ? (
+          <Card className="border-(--gold)/30 bg-(--gold)/5 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-sm font-bold text-(--gold)">Galletas de respaldo</h2>
+              <span className="text-xs font-black text-(--muted)">{galletaRows.length - playableGalletas.length} disponibles</span>
+            </div>
+            <p className="text-xs text-(--muted)">El plantel ya tiene el cupo completo; quedan fuera de los equipos hasta que alguien se caiga o cambies el cupo.</p>
+            <div className="flex flex-wrap gap-2">
+              {galletaRows.slice(playableGalletas.length).map((row) => <span key={row.id} className="rounded-md border border-(--gold)/30 bg-(--gold)/10 px-2.5 py-1.5 text-sm font-bold text-white">🍪 {row.name}</span>)}
+            </div>
+          </Card>
+        ) : null}
       </div>
     </>
   );
