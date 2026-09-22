@@ -5294,17 +5294,14 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
   const pointsA = teamA.reduce((sum, row) => sum + (standingForMatchRow(row, data.players, standings)?.points ?? 0), 0);
   const pointsB = teamB.reduce((sum, row) => sum + (standingForMatchRow(row, data.players, standings)?.points ?? 0), 0);
   const pointsDifference = Math.abs(pointsA - pointsB);
-  const sortByPoints = (teamRows: MatchPlayer[]) => [...teamRows].sort((left, right) => {
-    const leftStanding = standingForMatchRow(left, data.players, standings);
-    const rightStanding = standingForMatchRow(right, data.players, standings);
-    const pointsOrder = (rightStanding?.points ?? -1) - (leftStanding?.points ?? -1);
-    if (pointsOrder !== 0) return pointsOrder;
-    const rankOrder = (leftStanding?.rank ?? Number.POSITIVE_INFINITY) - (rightStanding?.rank ?? Number.POSITIVE_INFINITY);
-    return rankOrder !== 0 ? rankOrder : left.name.localeCompare(right.name, "es");
-  });
-  const sortedTeamA = sortByPoints(teamA);
-  const sortedTeamB = sortByPoints(teamB);
-  const sortedUnassigned = sortByPoints(unassigned);
+  // El orden operativo del plantel es el numerado en WhatsApp, no el ranking.
+  // El ranking se mantiene visible en cada fila como dato de apoyo.
+  const sortByWhatsapp = (teamRows: MatchPlayer[]) => [...teamRows].sort((left, right) => (
+    whatsappOrderFor(left) - whatsappOrderFor(right) || left.name.localeCompare(right.name, "es")
+  ));
+  const sortedTeamA = sortByWhatsapp(teamA);
+  const sortedTeamB = sortByWhatsapp(teamB);
+  const sortedUnassigned = sortByWhatsapp(unassigned);
 
   function handleTeamChange(rowId: string, team: Team) {
     setRows((current) =>
