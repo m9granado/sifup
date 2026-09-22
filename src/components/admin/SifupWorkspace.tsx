@@ -1265,6 +1265,7 @@ function UnifiedMatchRoster({
   onAddPlayer,
   onQuickConfirmPlayer,
   onQuickMarkPlayerOut,
+  onSetAttendanceStatus,
 }: {
   rows: MatchPlayer[];
   players: Player[];
@@ -1281,6 +1282,7 @@ function UnifiedMatchRoster({
   onAddPlayer?: () => void;
   onQuickConfirmPlayer?: (player: Player) => void;
   onQuickMarkPlayerOut?: (player: Player) => void;
+  onSetAttendanceStatus?: (rowId: string, status: MatchPlayer["attendanceStatus"]) => void;
 }) {
   const [tab, setTab] = useState<FilterTab>("all");
   const [search, setSearch] = useState("");
@@ -1682,6 +1684,14 @@ function UnifiedMatchRoster({
                                   <Pencil size={15} />
                                 </button>
                               ) : null}
+                              {!isMonthly && row.attendanceStatus !== "confirmed" && onSetAttendanceStatus ? (
+                                <div className="flex items-center gap-1 rounded-md border border-(--gold)/25 bg-(--gold)/5 px-1 py-0.5">
+                                  <button type="button" onClick={() => onSetAttendanceStatus(row.id, "waitlist")} className="rounded px-1.5 py-1 text-[10px] font-black text-(--gold) hover:bg-(--gold)/15" title="Galleta abierta / disponible">Abierto</button>
+                                  <button type="button" onClick={() => onSetAttendanceStatus(row.id, "confirmed")} className="rounded px-1.5 py-1 text-[10px] font-black text-(--green) hover:bg-(--green)/15" title="Confirmar que la galleta sí va">Sí voy</button>
+                                  <button type="button" onClick={() => onSetAttendanceStatus(row.id, "out")} className="rounded px-1.5 py-1 text-[10px] font-black text-(--red) hover:bg-(--red)/15" title="Marcar que la galleta no va">No voy</button>
+                                  <button type="button" onClick={() => onSetAttendanceStatus(row.id, "maybe")} className="rounded px-1.5 py-1 text-[10px] font-black text-amber-300 hover:bg-amber-500/15" title="Dejar la galleta sin respuesta">Sin resp.</button>
+                                </div>
+                              ) : null}
                               {onMarkOut ? (
                                 <button type="button" onClick={() => onMarkOut(row.id)} className="rounded-md p-1.5 text-(--red) hover:bg-(--red)/15 transition" title={`Marcar que ${playerName} no puede jugar`}>
                                   <X size={15} />
@@ -1738,6 +1748,14 @@ function UnifiedMatchRoster({
                       {teamsAssigned ? <td className="px-3 py-2.5 text-center text-xs text-(--muted)">—</td> : null}
                       {isAdmin ? (
                         <td className="px-3 py-2.5 text-center">
+                          {onSetAttendanceStatus ? (
+                            <div className="flex items-center gap-1 rounded-md border border-(--gold)/25 bg-(--gold)/5 px-1 py-0.5">
+                              <button type="button" onClick={() => onSetAttendanceStatus(row.id, "waitlist")} className="rounded px-1.5 py-1 text-[10px] font-black text-(--gold) hover:bg-(--gold)/15">Abierto</button>
+                              <button type="button" onClick={() => onSetAttendanceStatus(row.id, "confirmed")} className="rounded px-1.5 py-1 text-[10px] font-black text-(--green) hover:bg-(--green)/15">Sí voy</button>
+                              <button type="button" onClick={() => onSetAttendanceStatus(row.id, "out")} className="rounded px-1.5 py-1 text-[10px] font-black text-(--red) hover:bg-(--red)/15">No voy</button>
+                              <button type="button" onClick={() => onSetAttendanceStatus(row.id, "maybe")} className="rounded px-1.5 py-1 text-[10px] font-black text-amber-300 hover:bg-amber-500/15">Sin resp.</button>
+                            </div>
+                          ) : null}
                           {onOpenDetails ? <button type="button" onClick={() => onOpenDetails(row.id)} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14]" title={`Editar ${playerName}`}><Pencil size={15} /></button> : null}
                         </td>
                       ) : null}
@@ -2037,6 +2055,7 @@ function TeamAssignmentBoard({
   onAddPlayer,
   onQuickConfirmPlayer,
   onQuickMarkPlayerOut,
+  onSetAttendanceStatus,
 }: {
   rows: MatchPlayer[];
   players: Player[];
@@ -2052,6 +2071,7 @@ function TeamAssignmentBoard({
   onAddPlayer: () => void;
   onQuickConfirmPlayer: (player: Player) => void;
   onQuickMarkPlayerOut: (player: Player) => void;
+  onSetAttendanceStatus: (rowId: string, status: MatchPlayer["attendanceStatus"]) => void;
 }) {
   return (
     <UnifiedMatchRoster
@@ -2070,6 +2090,7 @@ function TeamAssignmentBoard({
       onAddPlayer={onAddPlayer}
       onQuickConfirmPlayer={onQuickConfirmPlayer}
       onQuickMarkPlayerOut={onQuickMarkPlayerOut}
+      onSetAttendanceStatus={onSetAttendanceStatus}
     />
   );
 }
@@ -2217,10 +2238,10 @@ function PlayerDetailModal({
         <label className="space-y-1 text-sm font-medium text-(--muted)">
           <span>Asistencia</span>
           <select className="h-10 w-full rounded-md border border-(--border) bg-(--panel-strong) px-3 text-sm text-white" value={draft.attendanceStatus} onChange={(event) => setDraft({ ...draft, attendanceStatus: event.target.value as MatchPlayer["attendanceStatus"] })}>
-            <option value="confirmed">Confirmado</option>
-            <option value="maybe">Tal vez</option>
-            <option value="out">No puede</option>
-            <option value="waitlist">En espera</option>
+            <option value="confirmed">Sí voy</option>
+            <option value="maybe">Sin respuesta</option>
+            <option value="out">No voy</option>
+            <option value="waitlist">Abierto</option>
           </select>
         </label>
         <Input label="# WhatsApp" type="number" value={String(draft.whatsappOrder)} onChange={(value) => setDraft({ ...draft, whatsappOrder: Number(value) })} />
@@ -2875,6 +2896,23 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
     persistRows(nextRows);
   }
 
+  function setAttendanceStatus(rowId: string, status: AttendanceStatus) {
+    const current = rows.find((row) => row.id === rowId);
+    const isGalleta = current && !isMonthlyMatchRow(current, data.players, currentMatch.monthKey, data.monthlyPayments);
+    if (isGalleta && current.attendanceStatus === "confirmed" && status !== "confirmed") return;
+    const nextRows = rows.map((row) => (
+      row.id === rowId
+        ? {
+            ...row,
+            attendanceStatus: status,
+            team: status === "out" ? "none" as Team : row.team,
+            updatedAt: new Date().toISOString(),
+          }
+        : row
+    ));
+    persistRows(nextRows);
+  }
+
   function rejoinPlayer(rowId: string) {
     const nextOrder = Math.max(0, ...rows.map((row) => row.whatsappOrder || 0)) + 1;
     const nextRows = rows.map((row) => (
@@ -3198,6 +3236,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             onAssociate={setAssociatingRowId}
             onQuickConfirmPlayer={quickConfirmPlayer}
             onQuickMarkPlayerOut={quickMarkPlayerOut}
+            onSetAttendanceStatus={setAttendanceStatus}
           />
         ) : (
           <PublicMatchRows
@@ -3266,7 +3305,9 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
           row={rows[editingIndex]}
           onClose={() => setEditingIndex(null)}
           onSave={(patch) => {
-            updateRow(editingIndex, patch);
+            const current = rows[editingIndex];
+            const isConfirmedGalleta = !isMonthlyMatchRow(current, data.players, currentMatch.monthKey, data.monthlyPayments) && current.attendanceStatus === "confirmed";
+            updateRow(editingIndex, isConfirmedGalleta ? { ...patch, attendanceStatus: "confirmed" } : patch);
             setEditingIndex(null);
           }}
           onAssociate={() => {

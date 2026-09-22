@@ -58,8 +58,8 @@ function formatWaitlistSection(title: string, rows: MatchPlayer[]) {
 }
 
 function formatGalletasSection(rows: MatchPlayer[], openSlots: number) {
-  return `Lista de Espera de Galletas:\n${rows.map((row, index) => {
-    const role = index < openSlots ? "disponible para completar el cupo" : "respaldo si alguien se cae";
+  return `Galletas abiertas:\n${rows.map((row, index) => {
+    const role = index < openSlots ? "Abierto · puede completar el cupo" : "Abierto · respaldo si alguien se cae";
     return `${index + 1}- ${row.name} (${role})`;
   }).join("\n") || "-"}`;
 }

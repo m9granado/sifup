@@ -113,7 +113,7 @@ test("matchSummaryMessage renders categorized waiting lists", () => {
     notes: "", matchFormat: "clasico", createdAt: "", updatedAt: "",
   }, parsed.players.map((player, index) => ({ ...player, id: `row-${index}`, matchId: "match-categories", createdAt: "", updatedAt: "" })), [], []);
   assert.match(text, /Jugadores:\n1- Marcio/);
-  assert.match(text, /Lista de Espera de Galletas:\n1- Mella/);
+  assert.match(text, /Galletas abiertas:\n1- Mella/);
   assert.match(text, /Banca:\n1- Eduardo Loaiza/);
 });
 

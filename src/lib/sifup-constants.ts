@@ -46,7 +46,7 @@ export const PAYMENT_STATUS_LABEL: Record<PaymentStatus, string> = {
 
 export const ATTENDANCE_LABEL: Record<string, string> = {
   confirmed: "Confirmado",
-  maybe: "Tal vez",
-  out: "No puede",
-  waitlist: "En espera",
+  maybe: "Sin respuesta",
+  out: "No voy",
+  waitlist: "Abierto",
 };
