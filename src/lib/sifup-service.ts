@@ -623,6 +623,63 @@ export async function assignPlayerTeam(input: AssignPlayerTeamInput) {
   };
 }
 
+export type ReplaceMatchTeamsInput = {
+  red: string[];
+  yellow: string[];
+  matchId?: string;
+  date?: string;
+};
+
+/** Replaces the complete Rojo/Amarillo distribution without touching payments or attendance. */
+export async function replaceMatchTeams(input: ReplaceMatchTeamsInput) {
+  const data = await getSifupData();
+  const match = resolveMatch(data.matches, input);
+  if (!match) throw new Error("No hay partido para actualizar.");
+
+  const red = input.red.map((value) => value.trim()).filter(Boolean);
+  const yellow = input.yellow.map((value) => value.trim()).filter(Boolean);
+  const requested = [...red, ...yellow];
+  const duplicateRequested = requested.find((value, index) => requested.findIndex((item) => normalizeName(item) === normalizeName(value)) !== index);
+  if (duplicateRequested) throw new Error(`Jugador repetido en la distribución: ${duplicateRequested}.`);
+
+  const rows = data.matchPlayers.filter((row) => row.matchId === match.id);
+  const resolveRow = (value: string) => {
+    const byId = rows.find((row) => row.playerId === value || row.id === value);
+    if (byId) return byId;
+    const matches = rows.filter((row) => normalizeName(row.name) === normalizeName(value));
+    if (matches.length > 1) throw new Error(`Hay más de un jugador que coincide con ${value}; usa su playerId.`);
+    return matches[0];
+  };
+
+  const assignments = new Map<string, Team>();
+  for (const [team, values] of [["A", red], ["B", yellow]] as const) {
+    for (const value of values) {
+      const row = resolveRow(value);
+      if (!row) throw new Error(`${value} no está en la lista del partido.`);
+      if (row.attendanceStatus === "out") throw new Error(`${row.name} está marcado como No voy y no puede entrar a un equipo.`);
+      assignments.set(row.id, team);
+    }
+  }
+
+  const now = new Date().toISOString();
+  const updatedRows = rows.map((row) => ({ ...row, team: assignments.get(row.id) ?? "none" as Team, updatedAt: now }));
+  await saveMatchPlayers(match.id, updatedRows);
+  revalidateSifupViews(match.id);
+
+  const sorted = sortByWhatsappOrder(updatedRows);
+  return {
+    status: "replaced",
+    match: { id: match.id, date: match.date, weekLabel: match.weekLabel },
+    teams: {
+      A: sorted.filter((row) => row.team === "A").map(publicMatchPlayer),
+      B: sorted.filter((row) => row.team === "B").map(publicMatchPlayer),
+      none: sorted.filter((row) => row.team === "none").map(publicMatchPlayer),
+    },
+    messages: { teams: teamsMessage(match, sorted) },
+    note: `Distribución reemplazada: ${red.length} en Rojo, ${yellow.length} en Amarillo.`
+  };
+}
+
 export type SetMatchResultInput = {
   scoreA: number;
   scoreB: number;

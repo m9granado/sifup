@@ -63,6 +63,9 @@ Tools:
 - `register_monthly_payment`: marks a player's monthly fee as paid/unpaid.
 - `get_pending_payments`: lists who owes money (monthly fees and per-match balances) with totals.
 - `get_next_match_summary`: returns the next match summary and copy-ready WhatsApp texts.
+- `get_match_teams`: returns the current Rojo/Amarillo distribution and a copy-ready WhatsApp message.
+- `assign_player_team`: moves one player between Rojo, Amarillo and sin equipo without changing payments or attendance.
+- `replace_match_teams`: replaces both complete team lists in one operation, preserving payments, attendance and WhatsApp order.
 
 ### OpenClaw / static bearer token clients
 

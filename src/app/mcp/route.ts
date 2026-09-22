@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { addPlayerToMatch, assignPlayerTeam, findPlayer, generateBalancedTeams, getMatchTeams, getNextMatchSummary, getPendingPayments, getPlayerStandings, importWhatsAppMatch, mergePlayers, registerMatchPayment, registerMonthlyPayment, setMatchResult, setMonthlyRoster } from "@/lib/sifup-service";
+import { addPlayerToMatch, assignPlayerTeam, findPlayer, generateBalancedTeams, getMatchTeams, getNextMatchSummary, getPendingPayments, getPlayerStandings, importWhatsAppMatch, mergePlayers, registerMatchPayment, registerMonthlyPayment, replaceMatchTeams, setMatchResult, setMonthlyRoster } from "@/lib/sifup-service";
 import { PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "@/lib/sifup-constants";
 
 type ToolResult = {
@@ -203,6 +203,21 @@ function createServer() {
       },
     },
     (input) => runTool(() => assignPlayerTeam(input)),
+  );
+
+  server.registerTool(
+    "replace_match_teams",
+    {
+      title: "Reemplazar equipos del partido",
+      description: "Reemplaza de una vez la distribución completa de Rojo y Amarillo. Primero deja a todos sin equipo y luego asigna las listas recibidas. Conserva jugadores, asistencia, pagos y orden de WhatsApp. Úsalo para corregir la formación en cancha; para mover a una sola persona también existe assign_player_team.",
+      inputSchema: {
+        red: z.array(z.string().min(1)).describe("Lista completa de nombres o IDs de jugadores para Rojo."),
+        yellow: z.array(z.string().min(1)).describe("Lista completa de nombres o IDs de jugadores para Amarillo."),
+        matchId: z.string().optional().describe("ID del partido. Si se omite, se usa el próximo partido."),
+        date: z.string().optional().describe("Fecha YYYY-MM-DD si no se entrega matchId."),
+      },
+    },
+    (input) => runTool(() => replaceMatchTeams(input)),
   );
 
   server.registerTool(
