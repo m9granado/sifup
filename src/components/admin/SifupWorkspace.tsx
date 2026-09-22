@@ -1306,6 +1306,12 @@ function UnifiedMatchRoster({
     return sortRowsWithMonthlyLast(rows.filter((row) => row.attendanceStatus === "out"), players, match.monthKey, monthlyPayments);
   }, [rows, players, match.monthKey, monthlyPayments]);
 
+  const waitlistRows = useMemo(() => {
+    return sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "waitlist"));
+  }, [rows]);
+  const galletaRows = waitlistRows.filter((row) => !row.note.toLowerCase().includes("banca"));
+  const benchRows = waitlistRows.filter((row) => row.note.toLowerCase().includes("banca"));
+
   const unansweredItems = useMemo(() => {
     return players
       .filter((player) => {
@@ -1336,6 +1342,7 @@ function UnifiedMatchRoster({
 
   const confirmedCount = confirmedRows.length;
   const missing = Math.max(squadTarget - confirmedCount, 0);
+  const openSlots = Math.max(squadTarget - confirmedCount, 0);
 
   const sortedConfirmed = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -1693,7 +1700,57 @@ function UnifiedMatchRoster({
               </>
             ) : null}
 
-            {/* 2. SECCION: SIN RESPUESTA TODAVIA */}
+            {/* 2. SECCION: GALLETAS Y BANCA */}
+            {tab === "all" && waitlistRows.length > 0 ? (
+              <>
+                <tr className="border-b border-(--border) bg-(--gold)/10">
+                  <td colSpan={totalCols} className="px-3 py-1.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-(--gold)">
+                        <span>🍪 Galletas disponibles ({galletaRows.length})</span>
+                        <span className="text-[11px] font-semibold text-(--muted)">
+                          · {openSlots > 0 ? `${Math.min(openSlots, galletaRows.length)} completa${Math.min(openSlots, galletaRows.length) === 1 ? "" : "n"} el cupo de ${squadTarget}` : "respaldo si alguien se cae"}
+                        </span>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+                {galletaRows.map((row, index) => {
+                  const player = playerForMatchRow(row, players);
+                  const playerName = player?.name ?? row.name;
+                  const isAvailable = index < openSlots;
+                  return (
+                    <tr key={row.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04] transition">
+                      <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">🍪</td>
+                      <td className="px-3 py-2.5 font-bold text-white">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {player ? <Link href={`/players/${player.id}`} className="hover:underline">{playerName}</Link> : <span>{playerName}</span>}
+                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide ${isAvailable ? "bg-(--green)/15 text-(--green)" : "bg-white/[0.08] text-(--muted)"}`}>
+                            {isAvailable ? `Completa ${squadTarget}` : "Respaldo"}
+                          </span>
+                        </div>
+                      </td>
+                      <td colSpan={columns.length - 2} className="px-3 py-2.5 text-xs font-semibold text-(--muted)">
+                        {isAvailable ? "Disponible para jugar y completar el cupo" : "Disponible si alguien se cae"}
+                      </td>
+                      {teamsAssigned ? <td className="px-3 py-2.5 text-center text-xs text-(--muted)">—</td> : null}
+                      {isAdmin ? (
+                        <td className="px-3 py-2.5 text-center">
+                          {onOpenDetails ? <button type="button" onClick={() => onOpenDetails(row.id)} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14]" title={`Editar ${playerName}`}><Pencil size={15} /></button> : null}
+                        </td>
+                      ) : null}
+                    </tr>
+                  );
+                })}
+                {benchRows.length > 0 ? (
+                  <tr className="border-b border-(--border) bg-white/[0.02]">
+                    <td colSpan={totalCols} className="px-3 py-1.5 text-xs font-black uppercase tracking-wide text-(--muted)">Banca acumulada: {benchRows.map((row) => row.name).join(", ")}</td>
+                  </tr>
+                ) : null}
+              </>
+            ) : null}
+
+            {/* 3. SECCION: SIN RESPUESTA TODAVIA */}
             {showUnanswered ? (
               <>
                 {tab === "all" ? (
@@ -1836,7 +1893,7 @@ function UnifiedMatchRoster({
               </>
             ) : null}
 
-            {/* 3. SECCION: NO VAN */}
+            {/* 4. SECCION: NO VAN */}
             {showOut ? (
               <>
                 {tab === "all" ? (

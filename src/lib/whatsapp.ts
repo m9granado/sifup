@@ -42,7 +42,7 @@ ${match.location}:
 Jugadores:
 ${playerLines.join("\n")}
 
-${formatWaitlistSection("Lista de Espera de Galletas", galletas)}
+${formatGalletasSection(galletas, Math.max(squadTarget - official.length, 0))}
 
 ${formatWaitlistSection("Banca", bench)}
 
@@ -55,6 +55,13 @@ ${shortMatchUrl(match)}`;
 
 function formatWaitlistSection(title: string, rows: MatchPlayer[]) {
   return `${title}:\n${rows.map((row, index) => `${index + 1}- ${row.name}`).join("\n") || "-"}`;
+}
+
+function formatGalletasSection(rows: MatchPlayer[], openSlots: number) {
+  return `Lista de Espera de Galletas:\n${rows.map((row, index) => {
+    const role = index < openSlots ? "disponible para completar el cupo" : "respaldo si alguien se cae";
+    return `${index + 1}- ${row.name} (${role})`;
+  }).join("\n") || "-"}`;
 }
 
 export function pendingPaymentsMessage(match: Match, players: MatchPlayer[]) {
