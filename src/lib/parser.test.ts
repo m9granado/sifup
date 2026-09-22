@@ -73,3 +73,46 @@ test("matchSummaryMessage renders ordered call-up with 12 minimum slots", () => 
   assert.match(text, /No pueden\n- Mantelli\n- Cooper/);
   assert.match(text, /https:\/\/sifup\.vercel\.app\/m\/0707$/);
 });
+
+test("parseWhatsAppList keeps oficiales, galletas and banca as separate categories", () => {
+  const result = parseWhatsAppList(`Partidos 22 Septiembre 21 horas
+Club Sordos, Av. Jose Pedro Alessandri 1251, Nunoa:
+
+Jugadores Oficiales:
+1- Marcio
+2- Pitico
+3- Marcelo Calderon
+
+Lista de Espera de Galletas
+1- Mella
+2- Mario Quintana
+3- Jonathan
+
+Banca:
+4- Eduardo Loaiza
+
+No pueden:
+- Cooper
+- Daniel Nettle`, 3500);
+
+  assert.deepEqual(result.players.filter((p) => p.attendanceStatus === "confirmed").map((p) => p.name), ["Marcio", "Pitico", "Marcelo Calderon"]);
+  assert.deepEqual(result.players.filter((p) => p.attendanceStatus === "waitlist").map((p) => [p.name, p.note]), [
+    ["Mella", "Lista de espera de galletas"],
+    ["Mario Quintana", "Lista de espera de galletas"],
+    ["Jonathan", "Lista de espera de galletas"],
+    ["Eduardo Loaiza", "Banca"],
+  ]);
+  assert.deepEqual(result.players.filter((p) => p.attendanceStatus === "out").map((p) => p.name), ["Cooper", "Daniel Nettle"]);
+});
+
+test("matchSummaryMessage renders categorized waiting lists", () => {
+  const parsed = parseWhatsAppList(`22 Septiembre 21 horas\nClub Sordos:\nJugadores Oficiales:\n1- Marcio\nLista de Espera de Galletas:\n1- Mella\nBanca:\n2- Eduardo Loaiza`);
+  const text = matchSummaryMessage({
+    id: "match-categories", date: parsed.match.date, time: parsed.match.time, location: parsed.match.location,
+    status: "confirmed", totalCost: 0, weekLabel: "", monthKey: "2026-09", courtCost: 0, courtPrepaid: false,
+    notes: "", matchFormat: "clasico", createdAt: "", updatedAt: "",
+  }, parsed.players.map((player, index) => ({ ...player, id: `row-${index}`, matchId: "match-categories", createdAt: "", updatedAt: "" })), [], []);
+  assert.match(text, /Jugadores:\n1- Marcio/);
+  assert.match(text, /Lista de Espera de Galletas:\n1- Mella/);
+  assert.match(text, /Banca:\n1- Eduardo Loaiza/);
+});

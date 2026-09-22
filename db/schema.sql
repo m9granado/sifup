@@ -90,6 +90,7 @@ create table if not exists match_results (
 );
 
 alter table matches add column if not exists match_format text not null default 'clasico' check (match_format in ('clasico', 'rey_de_la_cancha'));
+alter table matches add column if not exists squad_target integer not null default 12 check (squad_target in (12, 14));
 
 create table if not exists match_teams (
   id text primary key,

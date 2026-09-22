@@ -22,6 +22,7 @@ export type Match = {
   courtPrepaid: boolean;
   notes: string;
   matchFormat: MatchFormat;
+  squadTarget?: 12 | 14;
   createdAt: string;
   updatedAt: string;
 };

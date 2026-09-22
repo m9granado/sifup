@@ -89,10 +89,17 @@ export function parseWhatsAppList(input: string, amountDue = 4000): ParsedWhatsA
   if (!matchInfo.time) errors.push("No se pudo detectar la hora del partido.");
 
   const players: ParsedWhatsAppList["players"] = [];
-  let currentSection: "confirmed" | "out" = "confirmed";
+  let currentSection: "confirmed" | "waitlist" | "out" = "confirmed";
+  let waitlistLabel = "";
 
   for (const line of lines) {
     if (headerSet.has(line)) continue;
+    const section = parseSection(line);
+    if (section) {
+      currentSection = section.status;
+      waitlistLabel = section.label;
+      continue;
+    }
     if (isOutSection(line)) {
       currentSection = "out";
       continue;
@@ -118,7 +125,7 @@ export function parseWhatsAppList(input: string, amountDue = 4000): ParsedWhatsA
       paymentStatus: currentSection === "out" ? "paid" : paymentStatus,
       amountDue: currentSection === "out" ? 0 : amountDue,
       amountPaid: currentSection === "out" || paymentStatus !== "paid" ? 0 : amountDue,
-      note: currentSection === "out" ? "No puede" : note,
+      note: currentSection === "out" ? "No puede" : currentSection === "waitlist" ? waitlistLabel : note,
       team: "none" as const,
       whatsappOrder: Number(orderMatch?.[1] ?? order),
       goals: 0,
@@ -142,6 +149,17 @@ export function parseWhatsAppList(input: string, amountDue = 4000): ParsedWhatsA
 
 function isOutSection(line: string) {
   return /^no\s+pueden\s*:?\s*$/i.test(normalize(line));
+}
+
+function parseSection(line: string): { status: "confirmed" | "waitlist" | "out"; label: string } | undefined {
+  const clean = normalize(line).replace(/\s*:\s*$/, "").trim();
+  if (/^no\s+pueden$/.test(clean)) return { status: "out", label: "No puede" };
+  if (/^banca$/.test(clean)) return { status: "waitlist", label: "Banca" };
+  if (/^(lista\s+de\s+espera\s+de\s+galletas|galletas)$/.test(clean)) {
+    return { status: "waitlist", label: "Lista de espera de galletas" };
+  }
+  if (/^jugadores(?:\s+oficiales)?$/.test(clean)) return { status: "confirmed", label: "" };
+  return undefined;
 }
 
 function isListItem(line: string) {

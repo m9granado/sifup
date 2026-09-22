@@ -804,7 +804,7 @@ export function MatchesPage({ initialData }: InitialDataProps) {
                         </div>
                       </div>
                       <div className="mt-3 text-sm font-bold text-(--muted)">
-                        <span>{summary.confirmedCount}/{SQUAD_TARGET} jugadores</span>
+                        <span>{summary.confirmedCount}/{match.squadTarget ?? SQUAD_TARGET} jugadores</span>
                       </div>
                     </div>
                   )}
@@ -1286,7 +1286,7 @@ function UnifiedMatchRoster({
   const [sort, setSort] = useState<{ key: MatchPlayerSortKey; direction: "asc" | "desc" }>({ key: "order", direction: "asc" });
 
   const isRoyal = match.matchFormat === "rey_de_la_cancha";
-  const squadTarget = isRoyal ? ROYAL_SQUAD_TARGET : SQUAD_TARGET;
+  const squadTarget = isRoyal ? ROYAL_SQUAD_TARGET : (match.squadTarget ?? SQUAD_TARGET);
   const teamsAssigned = hasTeamsAssigned(rows);
 
   const confirmedRows = useMemo(() => {
@@ -2288,7 +2288,8 @@ function MatchHero({
   const pointsA = teamRankingTotal(rows, players, standings, "A");
   const pointsB = teamRankingTotal(rows, players, standings, "B");
   const confirmed = summary.confirmedCount;
-  const missing = Math.max((isRoyal ? ROYAL_SQUAD_TARGET : SQUAD_TARGET) - confirmed, 0);
+  const squadTarget = isRoyal ? ROYAL_SQUAD_TARGET : (match.squadTarget ?? SQUAD_TARGET);
+  const missing = Math.max(squadTarget - confirmed, 0);
 
   return (
     <section className="overflow-hidden rounded-xl border border-(--border) bg-(--panel) shadow-(--shadow)">
@@ -2344,7 +2345,7 @@ function MatchHero({
           <div className="mt-6">
             <div className={`rounded-lg border p-4 ${missing > 0 ? "border-(--gold)/45 bg-(--gold)/12" : "border-(--green)/45 bg-(--green)/12"}`}>
               <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Jugadores confirmados</p>
-              <p className={`mt-2 text-5xl font-black leading-none ${missing > 0 ? "text-(--gold)" : "text-(--green)"}`}>{confirmed}/{SQUAD_TARGET}</p>
+              <p className={`mt-2 text-5xl font-black leading-none ${missing > 0 ? "text-(--gold)" : "text-(--green)"}`}>{confirmed}/{squadTarget}</p>
               <p className="mt-1 text-sm font-bold text-(--muted)">{missing > 0 ? `faltan ${missing} jugadores` : "plantel completo"}</p>
             </div>
           </div>
@@ -2768,7 +2769,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const [rows, setRows] = useState(() => data.matchPlayers.filter((row) => row.matchId === id));
   const [winner, setWinner] = useState<MatchResult["winner"]>(result?.winner ?? "draw");
   const [resultNotes, setResultNotes] = useState(result?.notes ?? "");
-  const [editingMatch, setEditingMatch] = useState<Pick<Match, "date" | "time" | "location" | "matchFormat"> | null>(null);
+  const [editingMatch, setEditingMatch] = useState<Pick<Match, "date" | "time" | "location" | "matchFormat" | "squadTarget"> | null>(null);
   const [error, setError] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [showAddPlayer, setShowAddPlayer] = useState(false);
@@ -3013,7 +3014,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         standings={standings}
         isAdmin={isAdmin}
         onSave={save}
-        onEdit={() => setEditingMatch({ date: currentMatch.date, time: currentMatch.time, location: currentMatch.location, matchFormat: currentMatch.matchFormat })}
+        onEdit={() => setEditingMatch({ date: currentMatch.date, time: currentMatch.time, location: currentMatch.location, matchFormat: currentMatch.matchFormat, squadTarget: currentMatch.squadTarget ?? 12 })}
         isPending={isPending}
         previous={previous}
         next={next}
@@ -3044,6 +3045,17 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
               <Input label="Hora" type="time" value={editingMatch.time} onChange={(time) => setEditingMatch({ ...editingMatch, time })} />
             </div>
             <Input label="Ubicacion" value={editingMatch.location} onChange={(location) => setEditingMatch({ ...editingMatch, location })} />
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-(--muted)">Cupo de jugadores</p>
+              <div className="inline-flex rounded-md border border-(--border) bg-white/[0.04] p-1 text-sm font-bold">
+                {[12, 14].map((target) => (
+                  <button key={target} type="button" onClick={() => setEditingMatch({ ...editingMatch, squadTarget: target as 12 | 14 })} className={`rounded px-3 py-1.5 transition ${editingMatch.squadTarget === target ? "bg-(--green) text-black" : "text-(--muted) hover:text-white"}`}>
+                    {target} jugadores
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-(--muted)">La banca queda acumulada; este cupo solo define cuándo se completa el plantel.</p>
+            </div>
             <div className="space-y-1">
               <p className="text-sm font-medium text-(--muted)">Formato</p>
               <div className="inline-flex rounded-md border border-(--border) bg-white/[0.04] p-1 text-sm font-bold">
