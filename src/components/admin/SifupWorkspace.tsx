@@ -1265,6 +1265,7 @@ function UnifiedMatchRoster({
   onAddPlayer,
   onQuickConfirmPlayer,
   onQuickMarkPlayerOut,
+  onQuickSetAttendanceStatus,
   onSetAttendanceStatus,
 }: {
   rows: MatchPlayer[];
@@ -1282,6 +1283,7 @@ function UnifiedMatchRoster({
   onAddPlayer?: () => void;
   onQuickConfirmPlayer?: (player: Player) => void;
   onQuickMarkPlayerOut?: (player: Player) => void;
+  onQuickSetAttendanceStatus?: (player: Player, status: MatchPlayer["attendanceStatus"]) => void;
   onSetAttendanceStatus?: (rowId: string, status: MatchPlayer["attendanceStatus"]) => void;
 }) {
   const [tab, setTab] = useState<FilterTab>("all");
@@ -1867,6 +1869,17 @@ function UnifiedMatchRoster({
                                   <span className="hidden xl:inline">Voy</span>
                                 </button>
                               ) : null}
+                              {!item.isMonthly && onQuickSetAttendanceStatus ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onQuickSetAttendanceStatus(item.player, "waitlist")}
+                                  className="inline-flex items-center gap-1 rounded bg-(--gold)/15 px-2 py-1 text-xs font-bold text-(--gold) hover:bg-(--gold)/25 transition"
+                                  title={`Marcar a ${item.player.name} como abierto/disponible`}
+                                >
+                                  <span className="hidden xl:inline">Abierto</span>
+                                  <span className="xl:hidden">Disp.</span>
+                                </button>
+                              ) : null}
                               {onQuickMarkPlayerOut ? (
                                 <button
                                   type="button"
@@ -2055,6 +2068,7 @@ function TeamAssignmentBoard({
   onAddPlayer,
   onQuickConfirmPlayer,
   onQuickMarkPlayerOut,
+  onQuickSetAttendanceStatus,
   onSetAttendanceStatus,
 }: {
   rows: MatchPlayer[];
@@ -2071,6 +2085,7 @@ function TeamAssignmentBoard({
   onAddPlayer: () => void;
   onQuickConfirmPlayer: (player: Player) => void;
   onQuickMarkPlayerOut: (player: Player) => void;
+  onQuickSetAttendanceStatus: (player: Player, status: MatchPlayer["attendanceStatus"]) => void;
   onSetAttendanceStatus: (rowId: string, status: MatchPlayer["attendanceStatus"]) => void;
 }) {
   return (
@@ -2090,6 +2105,7 @@ function TeamAssignmentBoard({
       onAddPlayer={onAddPlayer}
       onQuickConfirmPlayer={onQuickConfirmPlayer}
       onQuickMarkPlayerOut={onQuickMarkPlayerOut}
+      onQuickSetAttendanceStatus={onQuickSetAttendanceStatus}
       onSetAttendanceStatus={onSetAttendanceStatus}
     />
   );
@@ -2991,6 +3007,24 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
     persistRows(nextRows);
   }
 
+  function quickSetAttendanceStatus(player: Player, status: AttendanceStatus) {
+    const existing = rows.find((r) => matchRowBelongsToPlayer(r, player, data.players));
+    const now = new Date().toISOString();
+    const nextRows = existing
+      ? rows.map((row) => (
+          row.id === existing.id
+            ? {
+                ...row,
+                attendanceStatus: status,
+                team: status === "out" ? "none" as Team : row.team,
+                updatedAt: now,
+              }
+            : row
+        ))
+      : [...rows, { ...buildMatchPlayerRow(player), attendanceStatus: status, updatedAt: now }];
+    persistRows(nextRows);
+  }
+
   function addExistingPlayer(player: Player) {
     persistRows([...rows, buildMatchPlayerRow(player)]);
     setShowAddPlayer(false);
@@ -3236,6 +3270,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             onAssociate={setAssociatingRowId}
             onQuickConfirmPlayer={quickConfirmPlayer}
             onQuickMarkPlayerOut={quickMarkPlayerOut}
+            onQuickSetAttendanceStatus={quickSetAttendanceStatus}
             onSetAttendanceStatus={setAttendanceStatus}
           />
         ) : (
