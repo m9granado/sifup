@@ -22,13 +22,16 @@ function sortRowsMonthlyFirst(rows: MatchPlayer[], players: Player[], monthKey: 
 
 export function matchSummaryMessage(match: Match, rows: MatchPlayer[], players: Player[], monthlyPayments: MonthlyPayment[]) {
   const confirmed = sortRowsMonthlyFirst(rows.filter((row) => row.attendanceStatus === "confirmed"), players, match.monthKey, monthlyPayments);
+  const squadTarget = match.squadTarget ?? MINIMUM_PLAYERS;
+  const official = confirmed.slice(0, squadTarget);
+  const overflow = confirmed.slice(squadTarget).map((row) => ({ ...row, note: "Banca" }));
   const waitlist = sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "waitlist"));
   const galletas = waitlist.filter((row) => !row.note.toLowerCase().includes("banca"));
-  const bench = waitlist.filter((row) => row.note.toLowerCase().includes("banca"));
+  const bench = [...waitlist.filter((row) => row.note.toLowerCase().includes("banca")), ...overflow];
   const out = sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "out"));
-  const officialCount = waitlist.length > 0 ? confirmed.length : Math.max(match.squadTarget ?? MINIMUM_PLAYERS, confirmed.length);
+  const officialCount = waitlist.length > 0 || overflow.length > 0 ? official.length : Math.max(squadTarget, official.length);
   const playerLines = Array.from({ length: officialCount }, (_, index) => {
-    const player = confirmed[index];
+    const player = official[index];
     return `${index + 1}- ${player?.name ?? ""}`;
   });
   const outLines = out.length > 0 ? out.map((player) => `- ${player.name}`) : ["-"];

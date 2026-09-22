@@ -41,6 +41,7 @@ export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MA
     courtPrepaid: existing?.courtPrepaid ?? true,
     notes: existing?.notes || "Importado desde WhatsApp por MCP.",
     matchFormat: existing?.matchFormat ?? "clasico",
+    squadTarget: existing?.squadTarget ?? 12,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
@@ -85,6 +86,20 @@ export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MA
       createdAt: now,
       updatedAt: now,
     });
+  }
+
+  // The configured squad size is authoritative even when the WhatsApp
+  // message labels every row as "official". Overflow is retained as bench
+  // so it remains visible and can move into the squad later.
+  let officialCount = 0;
+  for (const row of rows) {
+    if (row.attendanceStatus !== "confirmed") continue;
+    officialCount += 1;
+    if (officialCount > (match.squadTarget ?? 12)) {
+      row.attendanceStatus = "waitlist";
+      row.note = "Banca";
+      row.team = "none";
+    }
   }
 
   await saveMatchWithPlayers(match, rows);

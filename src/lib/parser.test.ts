@@ -116,3 +116,29 @@ test("matchSummaryMessage renders categorized waiting lists", () => {
   assert.match(text, /Lista de Espera de Galletas:\n1- Mella/);
   assert.match(text, /Banca:\n1- Eduardo Loaiza/);
 });
+
+test("matchSummaryMessage keeps overflow officials in Banca", () => {
+  const rows = Array.from({ length: 14 }, (_, index) => ({
+    id: `row-${index + 1}`,
+    matchId: "match-overflow",
+    name: `Jugador ${index + 1}`,
+    phone: "",
+    attendanceStatus: "confirmed" as const,
+    paymentStatus: "unpaid" as const,
+    amountDue: 5000,
+    amountPaid: 0,
+    note: "",
+    team: "none" as const,
+    whatsappOrder: index + 1,
+    goals: 0,
+    createdAt: "",
+    updatedAt: "",
+  }));
+  const text = matchSummaryMessage({
+    id: "match-overflow", date: "2026-09-22", time: "21:00", location: "Club Sordos",
+    status: "confirmed", totalCost: 35000, weekLabel: "", monthKey: "2026-09", courtCost: 0,
+    courtPrepaid: false, notes: "", matchFormat: "clasico", squadTarget: 12, createdAt: "", updatedAt: "",
+  }, rows, [], []);
+  assert.match(text, /12- Jugador 12/);
+  assert.match(text, /Banca:\n1- Jugador 13\n2- Jugador 14/);
+});
