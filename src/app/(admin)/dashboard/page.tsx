@@ -123,7 +123,8 @@ export default async function Page() {
   const nextMatch = upcomingMatch(data.matches, now);
   const nextMatchRows = nextMatch ? sortByWhatsappOrder(data.matchPlayers.filter((row) => row.matchId === nextMatch.id && row.attendanceStatus === "confirmed")) : [];
   const nextMatchSummary = summarizeMatch(nextMatchRows);
-  const nextMatchMissing = Math.max(SQUAD_TARGET - nextMatchSummary.confirmedCount, 0);
+  const nextMatchTarget = nextMatch?.squadTarget ?? SQUAD_TARGET;
+  const nextMatchMissing = Math.max(nextMatchTarget - nextMatchSummary.confirmedCount, 0);
 
   const resultItems: ResultWithMatch[] = data.results.flatMap((result) => {
     const match = data.matches.find((item) => item.id === result.matchId);
@@ -183,11 +184,11 @@ export default async function Page() {
                     <div className="relative grid gap-5 lg:grid-cols-[minmax(0,1fr)_220px] lg:items-end">
                       <div className="max-w-2xl">
                         <p className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black uppercase tracking-[0.24em] ${nextMatchMissing > 0 ? "border-(--red)/40 bg-(--red)/18 text-(--red)" : "border-(--green)/40 bg-(--green)/18 text-(--green)"}`}>
-                          {nextMatchMissing > 0 ? `Falta para ${SQUAD_TARGET}` : "Plantel listo"}
+                          {nextMatchMissing > 0 ? `Falta para ${nextMatchTarget}` : "Plantel listo"}
                         </p>
                         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-5">
                           <p className={`text-7xl font-black leading-none sm:text-8xl ${nextMatchMissing > 0 ? "text-(--red)" : "text-(--green)"}`}>
-                            {nextMatchMissing > 0 ? nextMatchMissing : SQUAD_TARGET}
+                            {nextMatchMissing > 0 ? nextMatchMissing : nextMatchTarget}
                           </p>
                           <div className="pb-1">
                             <p className={`text-3xl font-black uppercase leading-none sm:text-5xl ${nextMatchMissing > 0 ? "text-(--red)" : "text-(--green)"}`}>
@@ -206,7 +207,7 @@ export default async function Page() {
                         <p className="text-[11px] font-black uppercase tracking-[0.24em] text-white/55">Confirmados</p>
                         <p className="text-4xl font-black leading-none text-white sm:text-5xl">
                           {nextMatchSummary.confirmedCount}
-                          <span className="ml-1 text-xl text-white/45">/ {SQUAD_TARGET}</span>
+                          <span className="ml-1 text-xl text-white/45">/ {nextMatchTarget}</span>
                         </p>
                         <p className="text-xs font-bold uppercase tracking-wide text-white/55">
                           {nextMatchMissing > 0 ? "objetivo de cancha" : "plantel completo"}

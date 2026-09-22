@@ -56,7 +56,7 @@ type PlayerStanding = {
   draws: number;
   losses: number;
 };
-type TeamAssignableRow = Pick<MatchPlayer, "attendanceStatus" | "name" | "playerId" | "team" | "whatsappOrder">;
+type TeamAssignableRow = Pick<MatchPlayer, "attendanceStatus" | "name" | "playerId" | "team" | "whatsappOrder"> & { id?: string };
 type RankedTeamRow<T extends TeamAssignableRow> = {
   row: T;
   index: number;
@@ -264,14 +264,16 @@ function buildRankedTeamRows<T extends TeamAssignableRow>(rows: T[], players: Pl
   return [...rankedGoalkeepers, ...rankedFieldPlayers];
 }
 
-function applyBalancedTeams<T extends TeamAssignableRow>(rows: T[], players: Player[], standings: Map<string, PlayerStanding>) {
+function applyBalancedTeams<T extends TeamAssignableRow>(rows: T[], players: Player[], standings: Map<string, PlayerStanding>, playableRowIds?: Set<string>) {
   const assignments = new Map<number, Team>();
   buildRankedTeamRows(rows, players, standings).forEach((item) => {
     assignments.set(item.index, item.suggestedTeam);
   });
   return rows.map((row, index) => ({
     ...row,
-    team: row.attendanceStatus === "confirmed" ? assignments.get(index) ?? "none" : "none",
+    team: (row.attendanceStatus === "confirmed" || (row.attendanceStatus === "waitlist" && Boolean(row.id && (!playableRowIds || playableRowIds.has(row.id)))))
+      ? assignments.get(index) ?? "none"
+      : "none",
   }));
 }
 
@@ -804,7 +806,7 @@ export function MatchesPage({ initialData }: InitialDataProps) {
                         </div>
                       </div>
                       <div className="mt-3 text-sm font-bold text-(--muted)">
-                        <span>{summary.confirmedCount}/{SQUAD_TARGET} jugadores</span>
+                        <span>{summary.confirmedCount}/{match.squadTarget ?? SQUAD_TARGET} jugadores</span>
                       </div>
                     </div>
                   )}
@@ -1286,7 +1288,7 @@ function UnifiedMatchRoster({
   const [sort, setSort] = useState<{ key: MatchPlayerSortKey; direction: "asc" | "desc" }>({ key: "order", direction: "asc" });
 
   const isRoyal = match.matchFormat === "rey_de_la_cancha";
-  const squadTarget = isRoyal ? ROYAL_SQUAD_TARGET : SQUAD_TARGET;
+  const squadTarget = isRoyal ? ROYAL_SQUAD_TARGET : (match.squadTarget ?? SQUAD_TARGET);
   const teamsAssigned = hasTeamsAssigned(rows);
 
   const confirmedRows = useMemo(() => {
@@ -1305,6 +1307,12 @@ function UnifiedMatchRoster({
   const outRows = useMemo(() => {
     return sortRowsWithMonthlyLast(rows.filter((row) => row.attendanceStatus === "out"), players, match.monthKey, monthlyPayments);
   }, [rows, players, match.monthKey, monthlyPayments]);
+
+  const waitlistRows = useMemo(() => {
+    return sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "waitlist"));
+  }, [rows]);
+  const galletaRows = waitlistRows.filter((row) => !row.note.toLowerCase().includes("banca"));
+  const benchRows = waitlistRows.filter((row) => row.note.toLowerCase().includes("banca"));
 
   const unansweredItems = useMemo(() => {
     return players
@@ -1336,6 +1344,7 @@ function UnifiedMatchRoster({
 
   const confirmedCount = confirmedRows.length;
   const missing = Math.max(squadTarget - confirmedCount, 0);
+  const openSlots = Math.max(squadTarget - confirmedCount, 0);
 
   const sortedConfirmed = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -1693,7 +1702,57 @@ function UnifiedMatchRoster({
               </>
             ) : null}
 
-            {/* 2. SECCION: SIN RESPUESTA TODAVIA */}
+            {/* 2. SECCION: GALLETAS Y BANCA */}
+            {tab === "all" && waitlistRows.length > 0 ? (
+              <>
+                <tr className="border-b border-(--border) bg-(--gold)/10">
+                  <td colSpan={totalCols} className="px-3 py-1.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-(--gold)">
+                        <span>🍪 Galletas disponibles ({galletaRows.length})</span>
+                        <span className="text-[11px] font-semibold text-(--muted)">
+                          · {openSlots > 0 ? `${Math.min(openSlots, galletaRows.length)} completa${Math.min(openSlots, galletaRows.length) === 1 ? "" : "n"} el cupo de ${squadTarget}` : "respaldo si alguien se cae"}
+                        </span>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+                {galletaRows.map((row, index) => {
+                  const player = playerForMatchRow(row, players);
+                  const playerName = player?.name ?? row.name;
+                  const isAvailable = index < openSlots;
+                  return (
+                    <tr key={row.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04] transition">
+                      <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">🍪</td>
+                      <td className="px-3 py-2.5 font-bold text-white">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {player ? <Link href={`/players/${player.id}`} className="hover:underline">{playerName}</Link> : <span>{playerName}</span>}
+                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide ${isAvailable ? "bg-(--green)/15 text-(--green)" : "bg-white/[0.08] text-(--muted)"}`}>
+                            {isAvailable ? `Completa ${squadTarget}` : "Respaldo"}
+                          </span>
+                        </div>
+                      </td>
+                      <td colSpan={columns.length - 2} className="px-3 py-2.5 text-xs font-semibold text-(--muted)">
+                        {isAvailable ? "Disponible para jugar y completar el cupo" : "Disponible si alguien se cae"}
+                      </td>
+                      {teamsAssigned ? <td className="px-3 py-2.5 text-center text-xs text-(--muted)">—</td> : null}
+                      {isAdmin ? (
+                        <td className="px-3 py-2.5 text-center">
+                          {onOpenDetails ? <button type="button" onClick={() => onOpenDetails(row.id)} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14]" title={`Editar ${playerName}`}><Pencil size={15} /></button> : null}
+                        </td>
+                      ) : null}
+                    </tr>
+                  );
+                })}
+                {benchRows.length > 0 ? (
+                  <tr className="border-b border-(--border) bg-white/[0.02]">
+                    <td colSpan={totalCols} className="px-3 py-1.5 text-xs font-black uppercase tracking-wide text-(--muted)">Banca acumulada: {benchRows.map((row) => row.name).join(", ")}</td>
+                  </tr>
+                ) : null}
+              </>
+            ) : null}
+
+            {/* 3. SECCION: SIN RESPUESTA TODAVIA */}
             {showUnanswered ? (
               <>
                 {tab === "all" ? (
@@ -1836,7 +1895,7 @@ function UnifiedMatchRoster({
               </>
             ) : null}
 
-            {/* 3. SECCION: NO VAN */}
+            {/* 4. SECCION: NO VAN */}
             {showOut ? (
               <>
                 {tab === "all" ? (
@@ -2288,7 +2347,8 @@ function MatchHero({
   const pointsA = teamRankingTotal(rows, players, standings, "A");
   const pointsB = teamRankingTotal(rows, players, standings, "B");
   const confirmed = summary.confirmedCount;
-  const missing = Math.max((isRoyal ? ROYAL_SQUAD_TARGET : SQUAD_TARGET) - confirmed, 0);
+  const squadTarget = isRoyal ? ROYAL_SQUAD_TARGET : (match.squadTarget ?? SQUAD_TARGET);
+  const missing = Math.max(squadTarget - confirmed, 0);
 
   return (
     <section className="overflow-hidden rounded-xl border border-(--border) bg-(--panel) shadow-(--shadow)">
@@ -2344,7 +2404,7 @@ function MatchHero({
           <div className="mt-6">
             <div className={`rounded-lg border p-4 ${missing > 0 ? "border-(--gold)/45 bg-(--gold)/12" : "border-(--green)/45 bg-(--green)/12"}`}>
               <p className="text-[11px] font-black uppercase tracking-wide text-(--muted)">Jugadores confirmados</p>
-              <p className={`mt-2 text-5xl font-black leading-none ${missing > 0 ? "text-(--gold)" : "text-(--green)"}`}>{confirmed}/{SQUAD_TARGET}</p>
+              <p className={`mt-2 text-5xl font-black leading-none ${missing > 0 ? "text-(--gold)" : "text-(--green)"}`}>{confirmed}/{squadTarget}</p>
               <p className="mt-1 text-sm font-bold text-(--muted)">{missing > 0 ? `faltan ${missing} jugadores` : "plantel completo"}</p>
             </div>
           </div>
@@ -2768,7 +2828,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const [rows, setRows] = useState(() => data.matchPlayers.filter((row) => row.matchId === id));
   const [winner, setWinner] = useState<MatchResult["winner"]>(result?.winner ?? "draw");
   const [resultNotes, setResultNotes] = useState(result?.notes ?? "");
-  const [editingMatch, setEditingMatch] = useState<Pick<Match, "date" | "time" | "location" | "matchFormat"> | null>(null);
+  const [editingMatch, setEditingMatch] = useState<Pick<Match, "date" | "time" | "location" | "matchFormat" | "squadTarget"> | null>(null);
   const [error, setError] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [showAddPlayer, setShowAddPlayer] = useState(false);
@@ -3013,7 +3073,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         standings={standings}
         isAdmin={isAdmin}
         onSave={save}
-        onEdit={() => setEditingMatch({ date: currentMatch.date, time: currentMatch.time, location: currentMatch.location, matchFormat: currentMatch.matchFormat })}
+        onEdit={() => setEditingMatch({ date: currentMatch.date, time: currentMatch.time, location: currentMatch.location, matchFormat: currentMatch.matchFormat, squadTarget: currentMatch.squadTarget ?? 12 })}
         isPending={isPending}
         previous={previous}
         next={next}
@@ -3044,6 +3104,17 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
               <Input label="Hora" type="time" value={editingMatch.time} onChange={(time) => setEditingMatch({ ...editingMatch, time })} />
             </div>
             <Input label="Ubicacion" value={editingMatch.location} onChange={(location) => setEditingMatch({ ...editingMatch, location })} />
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-(--muted)">Cupo de jugadores</p>
+              <div className="inline-flex rounded-md border border-(--border) bg-white/[0.04] p-1 text-sm font-bold">
+                {[12, 14].map((target) => (
+                  <button key={target} type="button" onClick={() => setEditingMatch({ ...editingMatch, squadTarget: target as 12 | 14 })} className={`rounded px-3 py-1.5 transition ${editingMatch.squadTarget === target ? "bg-(--green) text-black" : "text-(--muted) hover:text-white"}`}>
+                    {target} jugadores
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-(--muted)">La banca queda acumulada; este cupo solo define cuándo se completa el plantel.</p>
+            </div>
             <div className="space-y-1">
               <p className="text-sm font-medium text-(--muted)">Formato</p>
               <div className="inline-flex rounded-md border border-(--border) bg-white/[0.04] p-1 text-sm font-bold">
@@ -5287,9 +5358,15 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
   }
 
   const confirmedRows = rows.filter((r) => r.attendanceStatus === "confirmed");
-  const teamA = confirmedRows.filter((row) => row.team === "A");
-  const teamB = confirmedRows.filter((row) => row.team === "B");
-  const unassigned = confirmedRows.filter((row) => row.team !== "A" && row.team !== "B");
+  const squadTarget = currentMatch.squadTarget ?? SQUAD_TARGET;
+  const openSlots = Math.max(squadTarget - confirmedRows.length, 0);
+  const galletaRows = sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "waitlist" && !row.note.toLowerCase().includes("banca")));
+  const playableGalletas = galletaRows.slice(0, openSlots);
+  const playableRowIds = new Set(playableGalletas.map((row) => row.id));
+  const teamRows = [...confirmedRows, ...playableGalletas];
+  const teamA = teamRows.filter((row) => row.team === "A");
+  const teamB = teamRows.filter((row) => row.team === "B");
+  const unassigned = teamRows.filter((row) => row.team !== "A" && row.team !== "B");
 
   const pointsA = teamA.reduce((sum, row) => sum + (standingForMatchRow(row, data.players, standings)?.points ?? 0), 0);
   const pointsB = teamB.reduce((sum, row) => sum + (standingForMatchRow(row, data.players, standings)?.points ?? 0), 0);
@@ -5310,15 +5387,20 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
   }
 
   function resetBalancedTeams() {
-    setRows((current) => applyBalancedTeams(current, data.players, standings));
+    setRows((current) => applyBalancedTeams(current, data.players, standings, playableRowIds));
   }
 
   function save() {
     setError("");
+    const nextRows = rows.map((row) => (
+      playableRowIds.has(row.id) && row.team !== "none"
+        ? { ...row, attendanceStatus: "confirmed" as AttendanceStatus, note: row.note.includes("Lista de espera") ? "galleta incorporada" : row.note, updatedAt: new Date().toISOString() }
+        : row
+    ));
     startTransition(async () => {
       try {
-        await saveMatchDetailAction(currentMatch.id, rows);
-        commit({ ...data, matchPlayers: data.matchPlayers.map((item) => rows.find((r) => r.id === item.id) ?? item) });
+        await saveMatchDetailAction(currentMatch.id, nextRows);
+        commit({ ...data, matchPlayers: data.matchPlayers.map((item) => nextRows.find((r) => r.id === item.id) ?? item) });
         router.push(`/matches/${currentMatch.id}`);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Error al guardar equipos.");
@@ -5336,9 +5418,9 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
             <Link href={`/matches/${currentMatch.id}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
               Volver al partido
             </Link>
-            <Button onClick={save} disabled={isPending}>
-              <Save size={16} />
-              Guardar equipos
+              <Button onClick={save} disabled={isPending}>
+                <Save size={16} />
+                Guardar y cerrar lista
             </Button>
           </div>
         }
@@ -5349,7 +5431,7 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-(--border) bg-white/[0.04] px-3 py-2">
           <p className={`text-xs font-bold ${pointsDifference === 0 ? "text-(--green)" : "text-(--muted)"}`}>
-            {pointsDifference === 0 ? "Equipos equilibrados" : `Diferencia: ${pointsDifference} pts`}
+            {pointsDifference === 0 ? "Equipos equilibrados" : `Diferencia: ${pointsDifference} pts`} · {teamRows.length}/{squadTarget} para jugar
           </p>
           <Button variant="secondary" onClick={resetBalancedTeams} disabled={isPending} className="h-8 px-2.5 text-xs">
             <Sparkles size={14} />
@@ -5397,6 +5479,18 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
             </div>
           </Card>
         </div>
+        {galletaRows.length > playableGalletas.length ? (
+          <Card className="border-(--gold)/30 bg-(--gold)/5 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-sm font-bold text-(--gold)">Galletas de respaldo</h2>
+              <span className="text-xs font-black text-(--muted)">{galletaRows.length - playableGalletas.length} disponibles</span>
+            </div>
+            <p className="text-xs text-(--muted)">El plantel ya tiene el cupo completo; quedan fuera de los equipos hasta que alguien se caiga o cambies el cupo.</p>
+            <div className="flex flex-wrap gap-2">
+              {galletaRows.slice(playableGalletas.length).map((row) => <span key={row.id} className="rounded-md border border-(--gold)/30 bg-(--gold)/10 px-2.5 py-1.5 text-sm font-bold text-white">🍪 {row.name}</span>)}
+            </div>
+          </Card>
+        ) : null}
       </div>
     </>
   );

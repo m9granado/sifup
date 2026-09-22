@@ -41,6 +41,7 @@ type MatchRow = {
   court_prepaid: boolean;
   notes: string;
   match_format: Match["matchFormat"];
+  squad_target: 12 | 14;
   created_at: Date | string;
   updated_at: Date | string;
 };
@@ -170,6 +171,7 @@ export async function getSifupData(): Promise<SifupData> {
       courtPrepaid: row.court_prepaid,
       notes: row.notes,
       matchFormat: row.match_format,
+      squadTarget: row.squad_target,
       createdAt: iso(row.created_at),
       updatedAt: iso(row.updated_at),
     })),
@@ -288,8 +290,8 @@ export async function saveMatchWithPlayers(match: Match, players: MatchPlayer[],
   const sql = requireDatabase();
   await sql.begin(async (tx) => {
     await tx`
-      insert into matches (id, match_date, match_time, location, status, total_cost, week_label, month_key, court_cost, court_prepaid, notes, match_format, created_at, updated_at)
-      values (${match.id}, ${match.date}, ${match.time}, ${match.location}, ${match.status}, ${match.totalCost}, ${match.weekLabel}, ${match.monthKey}, ${match.courtCost}, ${match.courtPrepaid}, ${match.notes}, ${match.matchFormat}, ${match.createdAt}, ${match.updatedAt})
+      insert into matches (id, match_date, match_time, location, status, total_cost, week_label, month_key, court_cost, court_prepaid, notes, match_format, squad_target, created_at, updated_at)
+      values (${match.id}, ${match.date}, ${match.time}, ${match.location}, ${match.status}, ${match.totalCost}, ${match.weekLabel}, ${match.monthKey}, ${match.courtCost}, ${match.courtPrepaid}, ${match.notes}, ${match.matchFormat}, ${match.squadTarget ?? 12}, ${match.createdAt}, ${match.updatedAt})
       on conflict (id) do update set
         match_date = excluded.match_date,
         match_time = excluded.match_time,
@@ -302,6 +304,7 @@ export async function saveMatchWithPlayers(match: Match, players: MatchPlayer[],
         court_prepaid = excluded.court_prepaid,
         notes = excluded.notes,
         match_format = excluded.match_format,
+        squad_target = excluded.squad_target,
         updated_at = excluded.updated_at
     `;
     if (teams && teams.length > 0) {
