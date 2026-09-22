@@ -5371,14 +5371,29 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
   const pointsA = teamA.reduce((sum, row) => sum + (standingForMatchRow(row, data.players, standings)?.points ?? 0), 0);
   const pointsB = teamB.reduce((sum, row) => sum + (standingForMatchRow(row, data.players, standings)?.points ?? 0), 0);
   const pointsDifference = Math.abs(pointsA - pointsB);
-  // El orden operativo del plantel es el numerado en WhatsApp, no el ranking.
-  // El ranking se mantiene visible en cada fila como dato de apoyo.
-  const sortByWhatsapp = (teamRows: MatchPlayer[]) => [...teamRows].sort((left, right) => (
-    whatsappOrderFor(left) - whatsappOrderFor(right) || left.name.localeCompare(right.name, "es")
-  ));
-  const sortedTeamA = sortByWhatsapp(teamA);
-  const sortedTeamB = sortByWhatsapp(teamB);
-  const sortedUnassigned = sortByWhatsapp(unassigned);
+  // Orden operativo: primero el ranking mensual y las galletas siempre al final.
+  // Dentro de cada bloque conservamos desempates estables por puntos y número de WhatsApp.
+  const sortByMonthlyRankingThenGalleta = (teamRows: MatchPlayer[]) => [...teamRows].sort((left, right) => {
+    const leftIsGalleta = left.attendanceStatus === "waitlist";
+    const rightIsGalleta = right.attendanceStatus === "waitlist";
+    if (leftIsGalleta !== rightIsGalleta) return leftIsGalleta ? 1 : -1;
+
+    if (leftIsGalleta && rightIsGalleta) {
+      return whatsappOrderFor(left) - whatsappOrderFor(right) || left.name.localeCompare(right.name, "es");
+    }
+
+    const leftStanding = standingForMatchRow(left, data.players, standings);
+    const rightStanding = standingForMatchRow(right, data.players, standings);
+    const leftRank = leftStanding?.rank ?? Number.MAX_SAFE_INTEGER;
+    const rightRank = rightStanding?.rank ?? Number.MAX_SAFE_INTEGER;
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    return (rightStanding?.points ?? -1) - (leftStanding?.points ?? -1)
+      || whatsappOrderFor(left) - whatsappOrderFor(right)
+      || left.name.localeCompare(right.name, "es");
+  });
+  const sortedTeamA = sortByMonthlyRankingThenGalleta(teamA);
+  const sortedTeamB = sortByMonthlyRankingThenGalleta(teamB);
+  const sortedUnassigned = sortByMonthlyRankingThenGalleta(unassigned);
 
   function handleTeamChange(rowId: string, team: Team) {
     setRows((current) =>
