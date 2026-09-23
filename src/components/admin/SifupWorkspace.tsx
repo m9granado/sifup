@@ -2379,6 +2379,8 @@ function MatchHero({
   const upcoming = matchIsUpcoming(match);
   const isRoyal = match.matchFormat === "rey_de_la_cancha";
   const showResult = Boolean(result && !upcoming);
+  const royalClosed = isRoyal && matchTeams.length === 3 && matchTeams.every((team) => team.finalRank);
+  const resultPending = !upcoming && (isRoyal ? !royalClosed : !result);
   const teamA = rows.filter((row) => row.team === "A" && row.attendanceStatus === "confirmed");
   const teamB = rows.filter((row) => row.team === "B" && row.attendanceStatus === "confirmed");
   const pointsA = teamRankingTotal(rows, players, standings, "A");
@@ -2397,7 +2399,7 @@ function MatchHero({
             <div className="min-w-0">
               <div className="label-row mb-3">
                 <span>SIFUP</span>
-                <strong>{upcoming ? "Partido por jugar" : showResult ? "Resultado cerrado" : "Partido"}</strong>
+                <strong>{upcoming ? "Partido por jugar" : resultPending ? "Resultado pendiente" : "Resultado cerrado"}</strong>
               </div>
               <h1 className="max-w-3xl text-4xl font-black uppercase leading-none text-white sm:text-6xl">{upcoming ? matchCountdownLabel(match) : (match.weekLabel || match.date)}</h1>
               <div className="mt-4 flex flex-wrap gap-3 text-sm font-bold">
@@ -2452,7 +2454,7 @@ function MatchHero({
           <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
             <div className="rounded-lg border border-(--red)/35 bg-(--red)/10 p-4">
               <p className="text-sm font-black uppercase tracking-wide text-(--red)">Equipo Rojo</p>
-              <p className={`mt-2 text-2xl font-black leading-none ${showResult && result?.winner === "A" ? "text-(--red)" : "text-white"}`}>{showResult ? (result?.winner === "A" ? "Ganador" : result?.winner === "draw" ? "Empate" : "") : teamA.length}</p>
+              <p className={`mt-2 text-2xl font-black leading-none ${showResult && result?.winner === "A" ? "text-(--red)" : "text-white"}`}>{showResult ? (result?.winner === "A" ? "Ganador" : result?.winner === "draw" ? "Empate" : "Perdió") : teamA.length}</p>
               <p className="mt-1 text-xs font-bold uppercase text-(--muted)">{showResult ? "resultado final" : `jugadores · ${pointsA} pts`}</p>
             </div>
             <div className="grid place-items-center">
@@ -2460,7 +2462,7 @@ function MatchHero({
             </div>
             <div className="rounded-lg border border-(--gold)/45 bg-(--gold)/10 p-4 lg:text-right">
               <p className="text-sm font-black uppercase tracking-wide text-(--gold)">Equipo Amarillo</p>
-              <p className={`mt-2 text-2xl font-black leading-none ${showResult && result?.winner === "B" ? "text-(--gold)" : "text-white"}`}>{showResult ? (result?.winner === "B" ? "Ganador" : result?.winner === "draw" ? "Empate" : "") : teamB.length}</p>
+              <p className={`mt-2 text-2xl font-black leading-none ${showResult && result?.winner === "B" ? "text-(--gold)" : "text-white"}`}>{showResult ? (result?.winner === "B" ? "Ganador" : result?.winner === "draw" ? "Empate" : "Perdió") : teamB.length}</p>
               <p className="mt-1 text-xs font-bold uppercase text-(--muted)">{showResult ? "resultado final" : `jugadores · ${pointsB} pts`}</p>
             </div>
           </div>
@@ -2468,6 +2470,58 @@ function MatchHero({
         </div>
       </div>
     </section>
+  );
+}
+
+function MatchPaymentsSection({ rows }: { rows: MatchPlayer[] }) {
+  const confirmedRows = sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "confirmed"));
+  const summary = summarizeMatch(rows);
+
+  return (
+    <Card className="mt-4 space-y-3">
+      <div>
+        <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Plantel</p>
+        <h2 className="mt-1 text-xl font-black text-white">Pagos del partido</h2>
+      </div>
+      {confirmedRows.length === 0 ? (
+        <p className="text-sm text-(--muted)">Todavía no hay jugadores confirmados para este partido.</p>
+      ) : (
+        <>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Stat label="Pagado" value={summary.paidCount} tone="green" />
+            <Stat label="Prometido" value={summary.promisedCount} tone="gold" />
+            <Stat label="No pagado" value={summary.unpaidCount} tone="red" />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Stat label="Recaudado" value={formatCurrency(summary.totalCollected)} />
+            <Stat label="Esperado" value={formatCurrency(summary.totalExpected)} />
+            <Stat label="Pendiente" value={formatCurrency(summary.pendingAmount)} tone={summary.pendingAmount > 0 ? "gold" : "default"} />
+          </div>
+          <div className="overflow-x-auto rounded-lg border border-(--border)">
+            <table className="w-full min-w-[420px] text-sm">
+              <thead className="border-b border-(--border) bg-white/[0.04] text-[10px] font-black uppercase tracking-wide text-(--muted)">
+                <tr>
+                  <th className="px-3 py-2 text-left">Jugador</th>
+                  <th className="px-3 py-2 text-center">Estado</th>
+                  <th className="px-3 py-2 text-right">Debe</th>
+                  <th className="px-3 py-2 text-right">Pagado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {confirmedRows.map((row) => (
+                  <tr key={row.id} className="border-b border-(--border) last:border-0">
+                    <td className="px-3 py-2 font-medium text-white">{row.name}</td>
+                    <td className="px-3 py-2 text-center"><PaymentBadge status={row.paymentStatus} /></td>
+                    <td className="px-3 py-2 text-right text-(--muted)">{formatCurrency(row.amountDue)}</td>
+                    <td className="px-3 py-2 text-right text-white">{formatCurrency(row.amountPaid)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Card>
   );
 }
 
@@ -3224,28 +3278,60 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       {!isRoyal && !matchIsUpcoming(currentMatch) ? (
         <div className="mt-4">
           {result ? (
+            <Card className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 text-(--gold)">
+                    <Trophy size={16} aria-hidden="true" />
+                    <p className="text-xs font-black uppercase tracking-wide">Partido terminado</p>
+                  </div>
+                  <p className={`mt-1 text-xl font-black ${result.winner === "A" ? "text-(--red)" : result.winner === "B" ? "text-(--gold)" : "text-white"}`}>
+                    {result.winner === "draw" ? "Empate" : `Ganó el equipo ${teamLabel(result.winner)}`}
+                  </p>
+                </div>
+                {isAdmin ? (
+                  <Button variant="secondary" onClick={() => setShowResultModal(true)}>
+                    <Pencil size={16} />
+                    Editar
+                  </Button>
+                ) : null}
+              </div>
+              {result.winner !== "draw" ? (
+                (() => {
+                  const winners = rows.filter((row) => row.team === result.winner && row.attendanceStatus === "confirmed");
+                  return winners.length > 0 ? (
+                    <div className={`rounded-lg border p-3 ${result.winner === "A" ? "border-(--red)/45 bg-(--red)/12" : "border-(--gold)/45 bg-(--gold)/12"}`}>
+                      <p className={`mb-2 text-xs font-black uppercase tracking-wide ${result.winner === "A" ? "text-(--red)" : "text-(--gold)"}`}>Jugadores ganadores</p>
+                      <div className="flex flex-wrap gap-2">
+                        {winners.map((w) => (
+                          <span key={w.id} className={`inline-flex items-center rounded-md px-3 py-1.5 text-sm font-black text-(--bg-deep) ${result.winner === "A" ? "bg-(--red)" : "bg-(--gold)"}`}>
+                            {w.name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null;
+                })()
+              ) : null}
+            </Card>
+          ) : (
             <Card className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Resultado final</p>
-                <p className={`mt-1 text-xl font-black ${result.winner === "A" ? "text-(--red)" : result.winner === "B" ? "text-(--gold)" : "text-white"}`}>
-                  {result.winner === "draw" ? "Empate" : `Ganó el equipo ${teamLabel(result.winner)}`}
-                </p>
+                <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Partido terminado</p>
+                <p className="mt-1 text-xl font-black text-(--gold)">Resultado pendiente</p>
               </div>
               {isAdmin ? (
-                <Button variant="secondary" onClick={() => setShowResultModal(true)}>
-                  <Pencil size={16} />
-                  Editar
+                <Button onClick={() => setShowResultModal(true)}>
+                  <Trophy size={16} />
+                  Registrar resultado
                 </Button>
               ) : null}
             </Card>
-          ) : isAdmin ? (
-            <Button onClick={() => setShowResultModal(true)}>
-              <Trophy size={16} />
-              Registrar resultado
-            </Button>
-          ) : null}
+          )}
         </div>
       ) : null}
+
+      {isAdmin ? <MatchPaymentsSection rows={rows} /> : null}
 
       <Card className="mt-4 space-y-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
