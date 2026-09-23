@@ -75,7 +75,8 @@ export function pendingPaymentsMessage(match: Match, players: MatchPlayer[]) {
 export function teamsMessage(match: Match, players: MatchPlayer[]) {
   const teamA = sortByWhatsappOrder(players.filter((player) => player.team === "A"));
   const teamB = sortByWhatsappOrder(players.filter((player) => player.team === "B"));
-  return `SIFUP - Equipos ${match.date}\n\nEquipo Rojo:\n${teamA.map((player) => `- #${whatsappOrderFor(player)} ${player.name}`).join("\n") || "- Por asignar"}\n\nEquipo Amarillo:\n${teamB.map((player) => `- #${whatsappOrderFor(player)} ${player.name}`).join("\n") || "- Por asignar"}`;
+  const playerLabel = (player: MatchPlayer) => `${player.attendanceStatus === "waitlist" || player.note.toLowerCase().includes("galleta") ? "🍪 " : ""}#${whatsappOrderFor(player)} ${player.name}`;
+  return `SIFUP - Equipos ${match.date}\n\nEquipo Rojo:\n${teamA.map((player) => `- ${playerLabel(player)}`).join("\n") || "- Por asignar"}\n\nEquipo Amarillo:\n${teamB.map((player) => `- ${playerLabel(player)}`).join("\n") || "- Por asignar"}`;
 }
 
 export function royalTeamsMessage(match: Match, teams: MatchTeam[], players: MatchPlayer[]) {

@@ -187,6 +187,19 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
         <Stat label="Saldo del mes" value={formatCurrency(saldoDelMes)} tone={saldoDelMes >= 0 ? "green" : "red"} icon={<Scale size={18} />} highlight />
       </div>
 
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="rounded-lg border border-(--gold)/30 bg-(--gold)/10 px-4 py-3">
+          <p className="text-xs font-black uppercase tracking-wide text-(--gold)">🍪 Ingresos por galletas</p>
+          <p className="mt-1 text-xl font-black text-white">{formatCurrency(ingresosGalleta)}</p>
+          <p className="text-xs text-(--muted)">Pagado en partidos del mes</p>
+        </div>
+        <div className="rounded-lg border border-(--red)/30 bg-(--red)/10 px-4 py-3">
+          <p className="text-xs font-black uppercase tracking-wide text-(--red)">🍪 Galletas pendientes</p>
+          <p className="mt-1 text-xl font-black text-white">{formatCurrency(galletaPending)}</p>
+          <p className="text-xs text-(--muted)">Saldo pendiente por cobrar</p>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="space-y-3">
           <div className="flex items-center justify-between gap-2">
@@ -254,6 +267,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
                   return (
                     <tr key={entry.key} className="border-t border-(--border)">
                       <td className="whitespace-nowrap px-2 py-1.5">
+                        <span className="mr-1" aria-label="Galleta">🍪</span>
                         {entry.playerId ? (
                           <Link href={`/players/${entry.playerId}`} className="font-semibold text-white hover:text-(--cyan) hover:underline">{entry.name}</Link>
                         ) : (
