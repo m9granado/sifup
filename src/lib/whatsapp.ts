@@ -41,50 +41,50 @@ export function matchSummaryMessage(match: Match, rows: MatchPlayer[], players: 
   const monthName = monthNames[matchDate.getMonth()] ?? "Septiembre";
   const timeFormatted = match.time.length <= 2 ? `${match.time.padStart(2, "0")}:00` : match.time.slice(0, 5);
 
-  const header = `⚽ *SIFUP · Fútbol de ${dayOfWeek.toLowerCase()}*`;
+  const header = `*SIFUP · Fútbol de ${dayOfWeek.toLowerCase()}*`;
   const dateTime = `📅 ${dayOfWeek} ${dayNum} ${monthName} · 🕘 ${timeFormatted} hrs`;
-  const location = `📍 ${match.location}`;
-  const court = match.courtPrepaid ? "💰 Cancha pagada ✅" : `💰 Cancha: ${formatCurrency(match.courtCost)}`;
+  const location = match.location;
 
   const slotCount = Math.max(squadTarget, official.length);
   const playerLines = Array.from({ length: slotCount }, (_, index) => {
     const player = official[index];
     const num = String(index + 1).padStart(2, " ");
-    if (!player) return `${num} · `;
-    const isPaid = player.paymentStatus === "paid";
-    return `${num} · ${player.name}${isPaid ? " ✅" : ""}`;
+    if (!player) return `${num}· `;
+    const isGalleta = !isMonthlyRow(player, players, match.monthKey, monthlyPayments);
+    return `${num}· ${player.name}${isGalleta ? " 🍪" : ""}`;
   });
 
-  let galletasBlock = "🍪 *Galletas abiertas:* -";
-  if (galletas.length > 0) {
-    const lines = galletas.map((row, index) => `${index + 1} · ${row.name} 🍪`);
-    galletasBlock = `🍪 *Galletas abiertas*\n${lines.join("\n")}`;
-  }
+  const MIN_SLOTS = 3;
+  const benchSlots = Math.max(bench.length, MIN_SLOTS);
+  const benchLines = Array.from({ length: benchSlots }, (_, index) => {
+    const row = bench[index];
+    return row ? `${index + 1}· ${row.name}` : `${index + 1}.`;
+  });
+  const benchBlock = `*Banca* 🪑🪑🪑\n${benchLines.join("\n")}`;
 
-  let benchBlock = "🪑 *Banca:* -";
-  if (bench.length > 0) {
-    const lines = bench.map((row, index) => `${index + 1} · ${row.name}`);
-    benchBlock = `🪑 *Banca*\n${lines.join("\n")}`;
-  }
+  const outSlots = Math.max(out.length, MIN_SLOTS);
+  const outLines = Array.from({ length: outSlots }, (_, index) => {
+    const row = out[index];
+    return row ? `${index + 1}· ${row.name}` : `${index + 1}.`;
+  });
+  const outBlock = `❌ *No pueden:*\n${outLines.join("\n")}`;
 
-  let outBlock = "❌ *No pueden:* -";
-  if (out.length > 0) {
-    const lines = out.map((row) => `- ${row.name}`);
-    outBlock = `❌ *No pueden:*\n${lines.join("\n")}`;
-  }
+  const galletasBlock = galletas.length > 0
+    ? `🍪 *Galletas abiertas*\n${galletas.map((row, index) => `${index + 1}· ${row.name} 🍪`).join("\n")}\n\n`
+    : "";
 
   return `${header}
 ${dateTime}
 ${location}
-${court}
 
 *Jugadores (${Math.min(confirmed.length, squadTarget)}/${squadTarget})*
 ${playerLines.join("\n")}
 
-${galletasBlock}
+${galletasBlock}${benchBlock}
 
-${benchBlock}
+
 ${outBlock}
+
 
 🔗 Ver partido:
 ${shortMatchUrl(match)}`;
