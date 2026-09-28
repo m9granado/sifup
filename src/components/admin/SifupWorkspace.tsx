@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, Cookie, MapPin, Medal, MessageCircle, Pencil, Plus, RotateCcw, Save, Search, Share, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
+import { downloadTeamsChallengeImage } from "@/lib/teams-image";
 import {
   clearMatchFinalStandingAction,
   createMatchAction,
@@ -2476,6 +2477,104 @@ function RoyalHeroTeams({ teams, rows, players, standings }: { teams: MatchTeam[
   );
 }
 
+function TeamsMatchupCard({ match, rows, players, standings }: { match: Match; rows: MatchPlayer[]; players: Player[]; standings: Map<string, PlayerStanding> }) {
+  const [isExporting, setIsExporting] = useState(false);
+  const teamA = rows.filter((row) => row.team === "A" && row.attendanceStatus === "confirmed");
+  const teamB = rows.filter((row) => row.team === "B" && row.attendanceStatus === "confirmed");
+  const pointsA = teamRankingTotal(rows, players, standings, "A");
+  const pointsB = teamRankingTotal(rows, players, standings, "B");
+
+  async function handleExport() {
+    setIsExporting(true);
+    try {
+      await downloadTeamsChallengeImage(
+        {
+          matchLabel: match.weekLabel || match.date,
+          location: match.location,
+          teamAName: "Equipo Rojo",
+          teamBName: "Equipo Amarillo",
+          teamAPlayers: teamA.map((row) => ({
+            name: playerForMatchRow(row, players)?.name ?? row.name,
+            isGoalkeeper: playerForMatchRow(row, players)?.isGoalkeeper === true,
+          })),
+          teamBPlayers: teamB.map((row) => ({
+            name: playerForMatchRow(row, players)?.name ?? row.name,
+            isGoalkeeper: playerForMatchRow(row, players)?.isGoalkeeper === true,
+          })),
+          pointsA,
+          pointsB,
+        },
+        `sifup-equipos-${match.date}.jpg`,
+      );
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
+  return (
+    <Card className="mt-4 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-black text-white">Equipos Definidos</h2>
+        <Button variant="secondary" onClick={handleExport} disabled={isExporting}>
+          <Share size={16} />
+          {isExporting ? "Generando..." : "Descargar imagen"}
+        </Button>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
+        <div className="rounded-lg border border-(--red)/35 bg-(--red)/10 p-4">
+          <p className="text-sm font-black uppercase tracking-wide text-(--red)">Equipo Rojo</p>
+          <p className="mt-2 text-4xl font-black leading-none text-white">{teamA.length}</p>
+          <p className="mt-1 text-xs font-bold uppercase text-(--muted)">jugadores · {pointsA} pts</p>
+        </div>
+        <div className="grid place-items-center">
+          <span className="rounded-full border border-white/15 bg-white/[0.08] px-4 py-2 text-sm font-black text-white">VS</span>
+        </div>
+        <div className="rounded-lg border border-(--gold)/45 bg-(--gold)/10 p-4 lg:text-right">
+          <p className="text-sm font-black uppercase tracking-wide text-(--gold)">Equipo Amarillo</p>
+          <p className="mt-2 text-4xl font-black leading-none text-white">{teamB.length}</p>
+          <p className="mt-1 text-xs font-bold uppercase text-(--muted)">jugadores · {pointsB} pts</p>
+        </div>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2 rounded-md border border-(--red)/35 bg-(--red)/5 p-3">
+          <ul className="space-y-1.5">
+            {teamA.map((row) => {
+              const isArq = playerForMatchRow(row, players)?.isGoalkeeper === true;
+              return (
+                <li key={row.id} className="flex items-center gap-1.5 text-sm text-white">
+                  • {row.name}
+                  {isArq ? (
+                    <span className="inline-flex items-center gap-0.5 rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black uppercase tracking-wider text-amber-500" title="Arquero">
+                      🧤 ARQ
+                    </span>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+        <div className="space-y-2 rounded-md border border-(--gold)/35 bg-(--gold)/5 p-3">
+          <ul className="space-y-1.5">
+            {teamB.map((row) => {
+              const isArq = playerForMatchRow(row, players)?.isGoalkeeper === true;
+              return (
+                <li key={row.id} className="flex items-center gap-1.5 text-sm text-white">
+                  • {row.name}
+                  {isArq ? (
+                    <span className="inline-flex items-center gap-0.5 rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black uppercase tracking-wider text-amber-500" title="Arquero">
+                      🧤 ARQ
+                    </span>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function MatchHero({
   match,
   rows,
@@ -3445,6 +3544,10 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: equipos y resultado son solo lectura." /> : null}
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
+      {!isRoyal && hasTeamsAssigned(rows) ? (
+        <TeamsMatchupCard match={currentMatch} rows={rows} players={data.players} standings={standings} />
+      ) : null}
+
       {isRoyal ? (
         <RoyalNightPanel
           matchId={currentMatch.id}
@@ -3645,51 +3748,6 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         <CopyBlock title="Resumen de equipos" text={isRoyal ? royalTeamsMessage(currentMatch, matchTeams, rows) : teamsMessage(currentMatch, rows)} />
         <CopyBlock title="Resumen del partido" text={matchSummaryMessage(currentMatch, rows, data.players, data.monthlyPayments)} />
       </div>
-
-      {/* Equipos informativos al final */}
-      {!isRoyal && hasTeamsAssigned(rows) ? (
-        <Card className="mt-4 space-y-3">
-          <h2 className="font-bold text-white text-lg">Equipos Definidos</h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2 rounded-md border border-(--red)/35 bg-(--red)/5 p-3">
-              <p className="text-sm font-bold text-(--red)">Equipo Rojo ({rows.filter(r => r.team === "A" && r.attendanceStatus === "confirmed").length}) - {rows.filter(r => r.team === "A" && r.attendanceStatus === "confirmed").reduce((sum, r) => sum + (standingForMatchRow(r, data.players, standings)?.points ?? 0), 0)} pts</p>
-              <ul className="space-y-1.5">
-                {rows.filter(r => r.team === "A" && r.attendanceStatus === "confirmed").map((r) => {
-                  const isArq = playerForMatchRow(r, data.players)?.isGoalkeeper === true;
-                  return (
-                    <li key={r.id} className="text-sm text-white flex items-center gap-1.5">
-                      • {r.name}
-                      {isArq ? (
-                        <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider gap-0.5" title="Arquero">
-                          🧤 ARQ
-                        </span>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-            <div className="space-y-2 rounded-md border border-(--gold)/35 bg-(--gold)/5 p-3">
-              <p className="text-sm font-bold text-(--gold)">Equipo Amarillo ({rows.filter(r => r.team === "B" && r.attendanceStatus === "confirmed").length}) - {rows.filter(r => r.team === "B" && r.attendanceStatus === "confirmed").reduce((sum, r) => sum + (standingForMatchRow(r, data.players, standings)?.points ?? 0), 0)} pts</p>
-              <ul className="space-y-1.5">
-                {rows.filter(r => r.team === "B" && r.attendanceStatus === "confirmed").map((r) => {
-                  const isArq = playerForMatchRow(r, data.players)?.isGoalkeeper === true;
-                  return (
-                    <li key={r.id} className="text-sm text-white flex items-center gap-1.5">
-                      • {r.name}
-                      {isArq ? (
-                        <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-500 uppercase tracking-wider gap-0.5" title="Arquero">
-                          🧤 ARQ
-                        </span>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          </div>
-        </Card>
-      ) : null}
 
       {editingIndex !== null ? (
         <PlayerDetailModal
