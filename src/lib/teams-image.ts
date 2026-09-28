@@ -11,9 +11,14 @@ const COLORS = {
   gold: "#facc15",
   goldSoft: "rgba(250,204,21,0.14)",
   goldLine: "rgba(250,204,21,0.35)",
+  green: "#10b981",
+  formDraw: "rgba(255,255,255,0.35)",
+  formHollow: "rgba(255,255,255,0.28)",
 };
 
-type TeamImagePlayer = { name: string; isGoalkeeper: boolean };
+export type FormResult = "win" | "draw" | "loss" | "none";
+
+type TeamImagePlayer = { name: string; isGoalkeeper: boolean; points: number; form: FormResult[] };
 
 export type TeamsImageInput = {
   matchLabel: string;
@@ -88,18 +93,49 @@ function drawTeamPanel(
   ctx.lineTo(x + w - pad, y + 226);
   ctx.stroke();
 
-  ctx.textAlign = "left";
-  ctx.font = "700 28px 'Segoe UI', Arial, sans-serif";
+  const dotRadius = 5;
+  const dotSpacing = 16;
+  const dotsRightEdge = x + w - pad;
+  const dotsBlockWidth = 4 * dotSpacing + dotRadius * 2;
+  const pointsRightEdge = dotsRightEdge - dotsBlockWidth - 16;
+  const nameLeft = x + pad + 24;
+  const nameMaxWidth = pointsRightEdge - 50 - nameLeft;
+
   const listTop = y + 226 + 40;
   players.forEach((player, index) => {
     const rowY = listTop + index * rowHeight;
+
+    ctx.textAlign = "left";
     ctx.fillStyle = accent;
     ctx.beginPath();
     ctx.arc(x + pad + 6, rowY - 9, 5, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = COLORS.white;
+    ctx.font = "700 28px 'Segoe UI', Arial, sans-serif";
     const label = player.isGoalkeeper ? `${player.name}  🧤` : player.name;
-    ctx.fillText(truncateText(ctx, label, w - pad * 2 - 26), x + pad + 24, rowY);
+    ctx.fillText(truncateText(ctx, label, nameMaxWidth), nameLeft, rowY);
+
+    ctx.textAlign = "right";
+    ctx.fillStyle = COLORS.muted;
+    ctx.font = "800 24px 'Segoe UI', Arial, sans-serif";
+    ctx.fillText(`${player.points} pts`, pointsRightEdge, rowY);
+
+    player.form.forEach((res, i) => {
+      const centerX = dotsRightEdge - dotRadius - (player.form.length - 1 - i) * dotSpacing;
+      const centerY = rowY - 9;
+      if (res === "none") {
+        ctx.strokeStyle = COLORS.formHollow;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, dotRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        return;
+      }
+      ctx.fillStyle = res === "win" ? COLORS.green : res === "loss" ? COLORS.red : COLORS.formDraw;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, dotRadius, 0, Math.PI * 2);
+      ctx.fill();
+    });
   });
 }
 

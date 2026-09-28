@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, Cookie, MapPin, Medal, MessageCircle, Pencil, Plus, RotateCcw, Save, Search, Share, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
-import { downloadTeamsChallengeImage } from "@/lib/teams-image";
+import { downloadTeamsChallengeImage, type FormResult } from "@/lib/teams-image";
 import {
   clearMatchFinalStandingAction,
   createMatchAction,
@@ -2488,7 +2488,25 @@ function matchImageDateLabel(match: Match) {
   return `${weekday} ${parsed.getDate()} ${month} · ${timeFormatted} hrs`;
 }
 
-function TeamsMatchupCard({ match, rows, players, standings }: { match: Match; rows: MatchPlayer[]; players: Player[]; standings: Map<string, PlayerStanding> }) {
+function playerFormForImage(row: MatchPlayer, data: SifupData): FormResult[] {
+  const player = playerForMatchRow(row, data.players);
+  const playerId = player?.id ?? row.playerId;
+  const playerName = player?.name ?? row.name;
+  const recentMatches = rankingMatches(data.matches, data.results, data.matchTeams);
+  return recentMatches.map((match) => {
+    const mp = data.matchPlayers.find(
+      (item) => item.matchId === match.id && (item.playerId === playerId || item.name === playerName) && item.attendanceStatus === "confirmed",
+    );
+    if (!mp || mp.team === "none") return "none";
+    const result = data.results.find((r) => r.matchId === match.id);
+    if (!result) return "none";
+    if (result.winner === "draw") return "draw";
+    return result.winner === mp.team ? "win" : "loss";
+  });
+}
+
+function TeamsMatchupCard({ match, rows, data, standings }: { match: Match; rows: MatchPlayer[]; data: SifupData; standings: Map<string, PlayerStanding> }) {
+  const players = data.players;
   const [isExporting, setIsExporting] = useState(false);
   const teamA = rows.filter((row) => row.team === "A" && row.attendanceStatus === "confirmed");
   const teamB = rows.filter((row) => row.team === "B" && row.attendanceStatus === "confirmed");
@@ -2507,10 +2525,14 @@ function TeamsMatchupCard({ match, rows, players, standings }: { match: Match; r
           teamAPlayers: teamA.map((row) => ({
             name: playerForMatchRow(row, players)?.name ?? row.name,
             isGoalkeeper: playerForMatchRow(row, players)?.isGoalkeeper === true,
+            points: standingForMatchRow(row, players, standings)?.points ?? 0,
+            form: playerFormForImage(row, data),
           })),
           teamBPlayers: teamB.map((row) => ({
             name: playerForMatchRow(row, players)?.name ?? row.name,
             isGoalkeeper: playerForMatchRow(row, players)?.isGoalkeeper === true,
+            points: standingForMatchRow(row, players, standings)?.points ?? 0,
+            form: playerFormForImage(row, data),
           })),
           pointsA,
           pointsB,
@@ -3556,7 +3578,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
       {!isRoyal && hasTeamsAssigned(rows) ? (
-        <TeamsMatchupCard match={currentMatch} rows={rows} players={data.players} standings={standings} />
+        <TeamsMatchupCard match={currentMatch} rows={rows} data={data} standings={standings} />
       ) : null}
 
       {isRoyal ? (
