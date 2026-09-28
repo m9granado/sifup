@@ -148,9 +148,9 @@ export async function addPlayerToMatch(input: AddPlayerToMatchInput) {
     return { ...payload, note: `${already.name} ya estaba en la lista del partido.` };
   }
 
-  const attendanceStatus = input.attendanceStatus ?? "confirmed";
-  const out = attendanceStatus === "out";
   const monthly = known ? isPlayerMonthlyForMonth(known.id, match.monthKey, data.players, data.monthlyPayments) : false;
+  const attendanceStatus = input.attendanceStatus ?? (monthly ? "confirmed" : "waitlist");
+  const out = attendanceStatus === "out";
   const amountDue = input.amountDue ?? PER_MATCH_AMOUNT;
   const now = new Date().toISOString();
   const newRow: MatchPlayer = {

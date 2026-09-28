@@ -1512,7 +1512,7 @@ function UnifiedMatchRoster({
               {confirmedCount}/{squadTarget} · {missing > 0 ? `faltan ${missing}` : "completo"}
             </p>
           </div>
-          <div className="inline-flex rounded-lg border border-(--border) bg-white/[0.03] p-1 text-xs font-bold">
+          <div className="flex max-w-full flex-wrap rounded-lg border border-(--border) bg-white/[0.03] p-1 text-xs font-bold">
             {tabs.map((t) => {
               const active = tab === t.key;
               return (

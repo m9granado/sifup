@@ -85,7 +85,7 @@ function createServer() {
         matchId: z.string().optional().describe("ID del partido. Si se omite, se usa el proximo partido."),
         date: z.string().optional().describe("Fecha YYYY-MM-DD del partido si no se entrega matchId."),
         phone: z.string().optional().describe("Telefono del jugador (opcional)."),
-        attendanceStatus: z.enum(["confirmed", "maybe", "out", "waitlist"]).optional().describe("Estado de asistencia. Default: confirmed."),
+        attendanceStatus: z.enum(["confirmed", "maybe", "out", "waitlist"]).optional().describe("Estado de asistencia. Por defecto: confirmed para mensuales, waitlist (galleta abierta) para no mensuales; un estado explícito prevalece."),
         team: z.enum(["A", "B", "none"]).optional().describe("Equipo: A (Rojo), B (Amarillo) o none. Default: none."),
         amountDue: z.number().int().positive().optional().describe(`Monto a cobrar si no es mensual. Default: ${PER_MATCH_AMOUNT}.`),
       },
