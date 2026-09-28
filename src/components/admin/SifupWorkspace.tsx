@@ -2477,6 +2477,17 @@ function RoyalHeroTeams({ teams, rows, players, standings }: { teams: MatchTeam[
   );
 }
 
+const WEEKDAY_NAMES_FULL = ["Domingo", "Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"];
+const MONTH_NAMES_FULL = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+
+function matchImageDateLabel(match: Match) {
+  const parsed = new Date(`${match.date}T12:00:00`);
+  const weekday = WEEKDAY_NAMES_FULL[parsed.getDay()] ?? "";
+  const month = MONTH_NAMES_FULL[parsed.getMonth()] ?? "";
+  const timeFormatted = match.time.length <= 2 ? `${match.time.padStart(2, "0")}:00` : match.time.slice(0, 5);
+  return `${weekday} ${parsed.getDate()} ${month} · ${timeFormatted} hrs`;
+}
+
 function TeamsMatchupCard({ match, rows, players, standings }: { match: Match; rows: MatchPlayer[]; players: Player[]; standings: Map<string, PlayerStanding> }) {
   const [isExporting, setIsExporting] = useState(false);
   const teamA = rows.filter((row) => row.team === "A" && row.attendanceStatus === "confirmed");
@@ -2489,7 +2500,7 @@ function TeamsMatchupCard({ match, rows, players, standings }: { match: Match; r
     try {
       await downloadTeamsChallengeImage(
         {
-          matchLabel: match.weekLabel || match.date,
+          matchLabel: matchImageDateLabel(match),
           location: match.location,
           teamAName: "Equipo Rojo",
           teamBName: "Equipo Amarillo",
@@ -2673,7 +2684,7 @@ function MatchHero({
 
           {isRoyal ? (
             <RoyalHeroTeams teams={matchTeams} rows={rows} players={players} standings={standings} />
-          ) : hasTeamsAssigned(rows) || showResult ? (
+          ) : showResult ? (
           <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
             <div className="rounded-lg border border-(--red)/35 bg-(--red)/10 p-4">
               <p className="text-sm font-black uppercase tracking-wide text-(--red)">Equipo Rojo</p>
