@@ -2508,8 +2508,10 @@ function playerFormForImage(row: MatchPlayer, data: SifupData): FormResult[] {
 function TeamsMatchupCard({ match, rows, data, standings }: { match: Match; rows: MatchPlayer[]; data: SifupData; standings: Map<string, PlayerStanding> }) {
   const players = data.players;
   const [isExporting, setIsExporting] = useState(false);
-  const teamA = rows.filter((row) => row.team === "A" && row.attendanceStatus === "confirmed");
-  const teamB = rows.filter((row) => row.team === "B" && row.attendanceStatus === "confirmed");
+  const byPointsDesc = (a: MatchPlayer, b: MatchPlayer) =>
+    (standingForMatchRow(b, players, standings)?.points ?? 0) - (standingForMatchRow(a, players, standings)?.points ?? 0);
+  const teamA = rows.filter((row) => row.team === "A" && row.attendanceStatus === "confirmed").sort(byPointsDesc);
+  const teamB = rows.filter((row) => row.team === "B" && row.attendanceStatus === "confirmed").sort(byPointsDesc);
   const pointsA = teamRankingTotal(rows, players, standings, "A");
   const pointsB = teamRankingTotal(rows, players, standings, "B");
 
