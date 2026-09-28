@@ -1565,7 +1565,13 @@ function UnifiedMatchRoster({
   onQuickSetAttendanceStatus?: (player: Player, status: MatchPlayer["attendanceStatus"]) => void;
   onSetAttendanceStatus?: (rowId: string, status: MatchPlayer["attendanceStatus"]) => void;
 }) {
-  const [tab, setTab] = useState<FilterTab>("all");
+  const isLocked = match.status === "roster_locked";
+  const [tab, setTab] = useState<FilterTab>(() => (isLocked ? "confirmed" : "all"));
+  const [prevIsLocked, setPrevIsLocked] = useState(isLocked);
+  if (isLocked !== prevIsLocked) {
+    setPrevIsLocked(isLocked);
+    setTab(isLocked ? "confirmed" : "all");
+  }
   const [search, setSearch] = useState("");
   const [showAllUnanswered, setShowAllUnanswered] = useState(false);
   const [sort, setSort] = useState<{ key: MatchPlayerSortKey; direction: "asc" | "desc" }>({ key: "order", direction: "asc" });
@@ -1957,7 +1963,7 @@ function UnifiedMatchRoster({
                         currentStatus={row.attendanceStatus}
                         whatsappUrl={whatsapp}
                         onOpenDetails={onOpenDetails ? () => onOpenDetails(row.id, player) : undefined}
-                        onSetStatus={onSetAttendanceStatus ? (status) => onSetAttendanceStatus(row.id, status) : undefined}
+                        onSetStatus={isLocked ? undefined : (onSetAttendanceStatus ? (status) => onSetAttendanceStatus(row.id, status) : undefined)}
                         onAssociate={!player && onAssociate ? () => onAssociate(row.id) : undefined}
                       />
                     );
@@ -2015,7 +2021,7 @@ function UnifiedMatchRoster({
                         currentStatus={row.attendanceStatus}
                         whatsappUrl={whatsapp}
                         onOpenDetails={onOpenDetails ? () => onOpenDetails(row.id, player) : undefined}
-                        onSetStatus={onSetAttendanceStatus ? (status) => onSetAttendanceStatus(row.id, status) : undefined}
+                        onSetStatus={isLocked ? undefined : (onSetAttendanceStatus ? (status) => onSetAttendanceStatus(row.id, status) : undefined)}
                         onAssociate={!player && onAssociate ? () => onAssociate(row.id) : undefined}
                         onRemove={onRemove ? () => onRemove(row.id) : undefined}
                       />
@@ -2072,7 +2078,7 @@ function UnifiedMatchRoster({
                         currentStatus={row.attendanceStatus}
                         whatsappUrl={whatsapp}
                         onOpenDetails={onOpenDetails ? () => onOpenDetails(row.id, player) : undefined}
-                        onSetStatus={onSetAttendanceStatus ? (status) => onSetAttendanceStatus(row.id, status) : undefined}
+                        onSetStatus={isLocked ? undefined : (onSetAttendanceStatus ? (status) => onSetAttendanceStatus(row.id, status) : undefined)}
                         onAssociate={!player && onAssociate ? () => onAssociate(row.id) : undefined}
                         onRemove={onRemove ? () => onRemove(row.id) : undefined}
                       />
@@ -2128,7 +2134,7 @@ function UnifiedMatchRoster({
                         currentStatus={existingRow?.attendanceStatus}
                         whatsappUrl={whatsapp}
                         onOpenDetails={onOpenDetails ? () => onOpenDetails(existingRow?.id, item.player) : undefined}
-                        onSetStatus={(status) => {
+                        onSetStatus={isLocked ? undefined : (status) => {
                           if (existingRow && onSetAttendanceStatus) {
                             onSetAttendanceStatus(existingRow.id, status);
                           } else if (onQuickSetAttendanceStatus) {
@@ -2553,17 +2559,6 @@ function MatchHero({
                   <ChevronRight size={16} />
                 </Link>
               ) : null}
-              {match.status === "roster_locked" ? (
-                <Link href={`/matches/${match.id}/teams`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
-                  <Users size={16} />
-                  Equipos
-                </Link>
-              ) : (
-                <span title="Disponible al cerrar la lista" className="inline-flex h-10 cursor-not-allowed items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.02] px-3 text-sm font-semibold text-(--muted) opacity-50">
-                  <Users size={16} />
-                  Equipos
-                </span>
-              )}
               {isAdmin ? <Button variant="secondary" onClick={onEdit}><Pencil size={16} />Editar partido</Button> : null}
               {isAdmin ? <Button onClick={onSave} disabled={isPending}><Save size={16} />Guardar</Button> : null}
             </div>
@@ -2929,29 +2924,11 @@ function RoyalNightPanel({
       .catch((err) => setError(err instanceof Error ? err.message : "No se pudo cerrar la noche."));
   }
 
-  const match = data.matches.find((m) => m.id === matchId);
-  const isRosterLocked = match?.status === "roster_locked";
-
   return (
     <Card className="mt-4 space-y-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Rey de la Cancha</p>
-          <h2 className="mt-1 text-xl font-black text-white">Equipos</h2>
-        </div>
-        {isAdmin ? (
-          isRosterLocked ? (
-            <Link href={`/matches/${matchId}/teams`} className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
-              <Users size={16} />
-              Administrar equipos
-            </Link>
-          ) : (
-            <span title="Disponible al cerrar la lista" className="inline-flex h-9 cursor-not-allowed items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.02] px-3 text-sm font-semibold text-(--muted) opacity-50">
-              <Users size={16} />
-              Administrar equipos
-            </span>
-          )
-        ) : null}
+      <div>
+        <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Rey de la Cancha</p>
+        <h2 className="mt-1 text-xl font-black text-white">Equipos</h2>
       </div>
       <RoyalTeamRoster teams={teams} rows={rows} players={players} standings={standings} isAdmin={false} onRenameTeam={() => {}} onAssignTeam={() => {}} />
 
@@ -3356,6 +3333,24 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
     });
   }
 
+  function reopenRoster() {
+    if (!confirm("¿Reabrir la lista? Los jugadores confirmados podran volver a modificar su asistencia.")) return;
+    startTransition(async () => {
+      try {
+        await updateMatchAction({ matchId: currentMatch.id, status: "confirmed" });
+        const updatedMatch: Match = {
+          ...currentMatch,
+          status: "confirmed",
+          updatedAt: new Date().toISOString(),
+        };
+        commit(upsertMatch(data, updatedMatch));
+        setError("");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo reabrir la lista.");
+      }
+    });
+  }
+
   function save() {
     startTransition(async () => {
       try {
@@ -3581,16 +3576,30 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
           <div>
             <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Plantel</p>
             <h2 className="mt-1 text-xl font-black text-white">{isAdmin ? "Jugadores y asistencia" : "Plantel y asistencia"}</h2>
+            {isAdmin && currentMatch.status === "roster_locked" ? (
+              <p className="mt-1 text-xs text-(--muted)">Lista cerrada, edicion de asistencia bloqueada. Usa &quot;Reabrir lista&quot; para volver a modificarla.</p>
+            ) : null}
           </div>
           {isAdmin && currentMatch.status !== "played" ? (
             currentMatch.status === "roster_locked" ? (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 rounded-md border border-(--green)/30 bg-(--green)/15 px-3 py-1.5 text-xs font-bold text-(--green)">
                   <Check size={14} />
                   Lista cerrada ({squadTarget} jugadores)
                 </span>
+                <Link
+                  href={`/matches/${currentMatch.id}/teams`}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]"
+                >
+                  <Users size={16} />
+                  Armar equipos
+                </Link>
                 <Button variant="secondary" onClick={lockRoster} disabled={isPending} title="Volver a verificar cupo y cerrar lista">
                   Re-cerrar lista
+                </Button>
+                <Button variant="secondary" onClick={reopenRoster} disabled={isPending} title="Reabrir lista para volver a editar asistencia">
+                  <RotateCcw size={16} />
+                  Reabrir lista
                 </Button>
               </div>
             ) : (
