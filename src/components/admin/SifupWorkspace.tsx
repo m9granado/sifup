@@ -2555,58 +2555,92 @@ function TeamsMatchupCard({ match, rows, data, standings }: { match: Match; rows
           {isExporting ? "Generando..." : "Descargar imagen"}
         </Button>
       </div>
-      <div className="grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
-        <div className="rounded-lg border border-(--red)/35 bg-(--red)/10 p-4">
-          <p className="text-sm font-black uppercase tracking-wide text-(--red)">Equipo Rojo</p>
-          <p className="mt-2 text-4xl font-black leading-none text-white">{teamA.length}</p>
-          <p className="mt-1 text-xs font-bold uppercase text-(--muted)">jugadores · {pointsA} pts</p>
-        </div>
-        <div className="grid place-items-center">
+      <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr] lg:items-stretch">
+        <TeamMatchupPanel accentVar="--red" name="Equipo Rojo" count={teamA.length} points={pointsA} rows={teamA} players={players} standings={standings} data={data} />
+        <div className="flex items-center justify-center">
           <span className="rounded-full border border-white/15 bg-white/[0.08] px-4 py-2 text-sm font-black text-white">VS</span>
         </div>
-        <div className="rounded-lg border border-(--gold)/45 bg-(--gold)/10 p-4 lg:text-right">
-          <p className="text-sm font-black uppercase tracking-wide text-(--gold)">Equipo Amarillo</p>
-          <p className="mt-2 text-4xl font-black leading-none text-white">{teamB.length}</p>
-          <p className="mt-1 text-xs font-bold uppercase text-(--muted)">jugadores · {pointsB} pts</p>
-        </div>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2 rounded-md border border-(--red)/35 bg-(--red)/5 p-3">
-          <ul className="space-y-1.5">
-            {teamA.map((row) => {
-              const isArq = playerForMatchRow(row, players)?.isGoalkeeper === true;
-              return (
-                <li key={row.id} className="flex items-center gap-1.5 text-sm text-white">
-                  • {row.name}
-                  {isArq ? (
-                    <span className="inline-flex items-center gap-0.5 rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black uppercase tracking-wider text-amber-500" title="Arquero">
-                      🧤 ARQ
-                    </span>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-        <div className="space-y-2 rounded-md border border-(--gold)/35 bg-(--gold)/5 p-3">
-          <ul className="space-y-1.5">
-            {teamB.map((row) => {
-              const isArq = playerForMatchRow(row, players)?.isGoalkeeper === true;
-              return (
-                <li key={row.id} className="flex items-center gap-1.5 text-sm text-white">
-                  • {row.name}
-                  {isArq ? (
-                    <span className="inline-flex items-center gap-0.5 rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black uppercase tracking-wider text-amber-500" title="Arquero">
-                      🧤 ARQ
-                    </span>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        </div>
+        <TeamMatchupPanel accentVar="--gold" name="Equipo Amarillo" count={teamB.length} points={pointsB} rows={teamB} players={players} standings={standings} data={data} />
       </div>
     </Card>
+  );
+}
+
+function TeamMatchupPanel({
+  accentVar,
+  name,
+  count,
+  points,
+  rows,
+  players,
+  standings,
+  data,
+}: {
+  accentVar: "--red" | "--gold";
+  name: string;
+  count: number;
+  points: number;
+  rows: MatchPlayer[];
+  players: Player[];
+  standings: Map<string, PlayerStanding>;
+  data: SifupData;
+}) {
+  const borderClass = accentVar === "--red" ? "border-(--red)/35" : "border-(--gold)/45";
+  const bgClass = accentVar === "--red" ? "bg-(--red)/10" : "bg-(--gold)/10";
+  const textClass = accentVar === "--red" ? "text-(--red)" : "text-(--gold)";
+  const dotClass = accentVar === "--red" ? "bg-(--red)" : "bg-(--gold)";
+  const dividerClass = accentVar === "--red" ? "border-(--red)/25" : "border-(--gold)/25";
+
+  return (
+    <div className={`rounded-lg border ${borderClass} ${bgClass} p-4`}>
+      <p className={`text-sm font-black uppercase tracking-wide ${textClass}`}>{name}</p>
+      <p className="mt-2 text-4xl font-black leading-none text-white">{count}</p>
+      <p className="mt-1 text-xs font-bold uppercase text-(--muted)">jugadores · {points} pts</p>
+      <div className={`mt-4 space-y-2.5 border-t pt-3 ${dividerClass}`}>
+        {rows.map((row) => {
+          const isArq = playerForMatchRow(row, players)?.isGoalkeeper === true;
+          const form = playerFormForImage(row, data);
+          return (
+            <div key={row.id} className="flex items-center justify-between gap-2">
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} />
+                <span className="truncate text-sm font-bold text-white">{row.name}</span>
+                {isArq ? (
+                  <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black uppercase tracking-wider text-amber-500" title="Arquero">
+                    🧤
+                  </span>
+                ) : null}
+              </span>
+              <span className="flex shrink-0 items-center gap-2">
+                <span className="text-xs font-bold text-(--muted)">{standingForMatchRow(row, players, standings)?.points ?? 0} pts</span>
+                <FormDots form={form} />
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FormDots({ form }: { form: FormResult[] }) {
+  return (
+    <span className="flex items-center gap-1" aria-hidden="true">
+      {form.map((res, index) => (
+        <span
+          key={index}
+          className={
+            res === "win"
+              ? "h-2.5 w-2.5 rounded-full bg-(--green)"
+              : res === "loss"
+                ? "h-2.5 w-2.5 rounded-full bg-(--red)"
+                : res === "draw"
+                  ? "h-2.5 w-2.5 rounded-full bg-white/35"
+                  : "h-2.5 w-2.5 rounded-full border border-white/30"
+          }
+        />
+      ))}
+    </span>
   );
 }
 
