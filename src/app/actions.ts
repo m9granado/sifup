@@ -24,6 +24,7 @@ import {
   updateMatchGameScore,
   mergePlayers as repositoryMergePlayers,
 } from "@/lib/repository";
+import { updateMatch, type UpdateMatchInput } from "@/lib/sifup-service";
 import type { ClubExpense, Match, MatchGame, MatchPlayer, MatchResult, MatchTeam, MonthlyPayment, Player } from "@/lib/types";
 
 export type LoginState = { error: string };
@@ -127,6 +128,13 @@ export async function saveMatchAction(match: Match, rows: MatchPlayer[], teams?:
   await requirePermission("matches");
   await saveMatchWithPlayers(match, rows, teams);
   revalidateAdminViews(match.id);
+}
+
+export async function updateMatchAction(input: UpdateMatchInput) {
+  await requirePermission("matches");
+  const result = await updateMatch(input);
+  revalidateAdminViews(result.match.id);
+  return result;
 }
 
 export async function saveMatchTeamsAction(matchId: string, teams: MatchTeam[]) {

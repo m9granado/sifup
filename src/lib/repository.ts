@@ -288,6 +288,7 @@ function requireDatabase() {
 
 export async function saveMatchWithPlayers(match: Match, players: MatchPlayer[], teams?: MatchTeam[]) {
   const sql = requireDatabase();
+  const now = new Date().toISOString();
   await sql.begin(async (tx) => {
     await tx`
       insert into matches (id, match_date, match_time, location, status, total_cost, week_label, month_key, court_cost, court_prepaid, notes, match_format, squad_target, created_at, updated_at)
@@ -324,7 +325,7 @@ export async function saveMatchWithPlayers(match: Match, players: MatchPlayer[],
     for (const row of players) {
       await tx`
         insert into match_players (id, match_id, player_id, name, phone, attendance_status, payment_status, amount_due, amount_paid, note, team, team_id, whatsapp_order, goals, created_at, updated_at)
-        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.phone}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue}, ${row.amountPaid}, ${row.note}, ${row.team}, ${row.teamId ?? null}, ${row.whatsappOrder}, ${row.goals ?? null}, ${row.createdAt}, ${row.updatedAt})
+        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.phone ?? ""}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue ?? 0}, ${row.amountPaid ?? 0}, ${row.note ?? ""}, ${row.team ?? "none"}, ${row.teamId ?? null}, ${row.whatsappOrder ?? null}, ${row.goals ?? null}, ${row.createdAt ?? now}, ${row.updatedAt ?? now})
       `;
     }
   });
@@ -360,7 +361,7 @@ export async function saveMatchPlayers(matchId: string, players: MatchPlayer[], 
     for (const row of players) {
       await tx`
         insert into match_players (id, match_id, player_id, name, phone, attendance_status, payment_status, amount_due, amount_paid, note, team, team_id, whatsapp_order, goals, created_at, updated_at)
-        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.phone}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue}, ${row.amountPaid}, ${row.note}, ${row.team}, ${row.teamId ?? null}, ${row.whatsappOrder}, ${row.goals ?? null}, ${row.createdAt}, ${row.updatedAt})
+        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.phone ?? ""}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue ?? 0}, ${row.amountPaid ?? 0}, ${row.note ?? ""}, ${row.team ?? "none"}, ${row.teamId ?? null}, ${row.whatsappOrder ?? null}, ${row.goals ?? null}, ${row.createdAt ?? now}, ${row.updatedAt ?? now})
       `;
     }
     await tx`update matches set updated_at = ${now} where id = ${matchId}`;

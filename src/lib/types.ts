@@ -1,4 +1,4 @@
-export type MatchStatus = "open" | "confirmed" | "played" | "closed";
+export type MatchStatus = "open" | "confirmed" | "played" | "roster_locked";
 export type AttendanceStatus = "confirmed" | "maybe" | "out" | "waitlist" | "banca" | "galleta";
 export type PaymentStatus = "paid" | "unpaid" | "promised";
 export type PaymentPlan = "monthly" | "perMatch";

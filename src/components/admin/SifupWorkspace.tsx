@@ -18,6 +18,7 @@ import {
   setMatchFinalStandingAction,
   startMatchGameAction,
   updateMatchGameScoreAction,
+  updateMatchAction,
   mergePlayersAction,
   savePlayerLoginAction,
   removePlayerLoginAction,
@@ -66,6 +67,11 @@ type RankedTeamRow<T extends TeamAssignableRow> = {
 
 function useSifupData(initialData: SifupData) {
   const [data, setData] = useState<SifupData>(initialData);
+  const [prevInitialData, setPrevInitialData] = useState(initialData);
+  if (initialData !== prevInitialData) {
+    setPrevInitialData(initialData);
+    setData(initialData);
+  }
   return { data, commit: setData };
 }
 
@@ -132,7 +138,7 @@ function teamLabel(team: Team) {
 }
 
 function matchStatusLabel(status: string) {
-  return { open: "Abierto", confirmed: "Confirmado", played: "Jugado", closed: "Cerrado" }[status] ?? status;
+  return { open: "Abierto", confirmed: "Confirmado", played: "Jugado", roster_locked: "Lista cerrada" }[status] ?? status;
 }
 
 function playerForMatchRow(row: Pick<MatchPlayer, "playerId" | "name">, players: Player[]) {
@@ -365,6 +371,15 @@ function sortRowsWithMonthlyLast(rows: MatchPlayer[], players: Player[], monthKe
   });
 }
 
+function sortRowsMonthlyFirst(rows: MatchPlayer[], players: Player[], monthKey: string, monthlyPayments: MonthlyPayment[]) {
+  return [...rows].sort((a, b) => {
+    const monthlyA = isMonthlyMatchRow(a, players, monthKey, monthlyPayments) ? 0 : 1;
+    const monthlyB = isMonthlyMatchRow(b, players, monthKey, monthlyPayments) ? 0 : 1;
+    if (monthlyA !== monthlyB) return monthlyA - monthlyB;
+    return whatsappOrderFor(a) - whatsappOrderFor(b) || a.name.localeCompare(b.name);
+  });
+}
+
 export function PageTitle({ title, description, action }: { title: string; description?: string; action?: React.ReactNode }) {
   return (
     <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -388,6 +403,7 @@ export function Button({
   variant = "primary",
   className = "",
   disabled,
+  title,
 }: {
   children: React.ReactNode;
   onClick?: () => void | Promise<void>;
@@ -395,6 +411,7 @@ export function Button({
   variant?: "primary" | "secondary" | "danger";
   className?: string;
   disabled?: boolean;
+  title?: string;
 }) {
   const variants = {
     primary: "bg-(--green) text-(--bg-deep) hover:bg-(--green-dark) hover:text-white border-(--green)",
@@ -406,6 +423,7 @@ export function Button({
       type={type}
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className={`inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md border px-3 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${variants[variant]} ${className}`}
     >
       {children}
@@ -729,7 +747,7 @@ export function MatchesPage({ initialData }: InitialDataProps) {
         {(() => {
           const today = new Date().toISOString().slice(0, 10);
           const nextId = [...data.matches]
-            .filter((match) => match.date >= today && match.status !== "played" && match.status !== "closed")
+            .filter((match) => match.date >= today && match.status !== "played" && match.status !== "roster_locked")
             .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))[0]?.id;
           const sortedMatches = [...data.matches].sort((a, b) => b.date.localeCompare(a.date));
           return sortedMatches.map((match) => {
@@ -1238,7 +1256,7 @@ function EditableRows({
 }
 
 type MatchPlayerSortKey = "order" | "name" | "rank" | "points" | "played" | "wins" | "draws" | "losses" | "team";
-type FilterTab = "all" | "confirmed" | "unanswered" | "out";
+type FilterTab = "all" | "confirmed" | "waitlist" | "out" | "unanswered";
 
 type UnansweredPlayerItem = {
   player: Player;
@@ -1248,6 +1266,251 @@ type UnansweredPlayerItem = {
   isMonthly: boolean;
   priorityScore: number;
 };
+
+function AttendanceStatusButtonGroup({
+  currentStatus,
+  isConfirmedSection,
+  onSelect,
+}: {
+  currentStatus?: string;
+  isConfirmedSection: boolean;
+  onSelect: (status: AttendanceStatus) => void;
+}) {
+  const isWaitlist = currentStatus === "waitlist" || currentStatus === "galleta" || currentStatus === "banca";
+  const isConfirmed = currentStatus === "confirmed";
+  const isOut = currentStatus === "out";
+  const isMaybe = currentStatus === "maybe";
+
+  return (
+    <div className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-black/40 p-1 shadow-inner">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onSelect("waitlist");
+        }}
+        className={`cursor-pointer inline-flex items-center justify-center rounded-md px-2 py-1 text-xs font-black transition-all active:scale-95 ${
+          isWaitlist
+            ? "bg-(--gold) text-black shadow-md ring-2 ring-(--gold)/50"
+            : "border border-white/10 bg-white/[0.04] text-(--gold) hover:bg-(--gold)/20 hover:border-(--gold)/40"
+        }`}
+        title="Abierto / en espera / galleta"
+      >
+        Abierto
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onSelect("confirmed");
+        }}
+        className={`cursor-pointer inline-flex items-center justify-center rounded-md px-2 py-1 text-xs font-black transition-all active:scale-95 ${
+          isConfirmed
+            ? "bg-(--green) text-black shadow-md ring-2 ring-(--green)/50"
+            : "border border-white/10 bg-white/[0.04] text-(--green) hover:bg-(--green)/20 hover:border-(--green)/40"
+        }`}
+        title="Sí voy (confirmar asistencia)"
+      >
+        Sí voy
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onSelect("out");
+        }}
+        className={`cursor-pointer inline-flex items-center justify-center rounded-md px-2 py-1 text-xs font-black transition-all active:scale-95 ${
+          isOut
+            ? "bg-(--red) text-white shadow-md ring-2 ring-(--red)/50"
+            : "border border-white/10 bg-white/[0.04] text-(--red) hover:bg-(--red)/20 hover:border-(--red)/40"
+        }`}
+        title="No voy (baja)"
+      >
+        No voy
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onSelect("maybe");
+        }}
+        className={`cursor-pointer inline-flex items-center justify-center rounded-md px-2 py-1 text-xs font-black transition-all active:scale-95 ${
+          isMaybe
+            ? "bg-amber-400 text-black shadow-md ring-2 ring-amber-400/50"
+            : "border border-white/10 bg-white/[0.04] text-amber-300 hover:bg-amber-400/20 hover:border-amber-400/40"
+        }`}
+        title="Sin respuesta"
+      >
+        Sin resp.
+      </button>
+    </div>
+  );
+}
+
+function UnifiedRosterRow({
+  order,
+  name,
+  player,
+  row,
+  standing,
+  isMonthly,
+  isArq,
+  team,
+  teamsAssigned,
+  isAdmin,
+  isConfirmedSection,
+  currentStatus,
+  whatsappUrl,
+  onOpenDetails,
+  onSetStatus,
+  onAssociate,
+  onRemove,
+}: {
+  order: string;
+  name: string;
+  player?: Player;
+  row?: MatchPlayer;
+  standing?: PlayerStanding;
+  isMonthly: boolean;
+  isArq: boolean;
+  team?: Team;
+  teamsAssigned: boolean;
+  isAdmin: boolean;
+  isConfirmedSection: boolean;
+  currentStatus?: string;
+  whatsappUrl?: string;
+  onOpenDetails?: () => void;
+  onSetStatus?: (status: AttendanceStatus) => void;
+  onAssociate?: () => void;
+  onRemove?: () => void;
+}) {
+  const isOut = currentStatus === "out";
+
+  return (
+    <tr className={`border-b border-(--border) last:border-0 hover:bg-white/[0.04] transition ${isOut ? "opacity-75" : ""}`}>
+      <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">
+        {order}
+      </td>
+      <td className="px-3 py-2.5 font-bold text-white">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {player ? (
+            <Link
+              href={`/players/${player.id}`}
+              className={`hover:underline ${isOut ? "line-through text-(--muted)" : ""}`}
+            >
+              {name}
+            </Link>
+          ) : (
+            <span className={isOut ? "line-through text-(--muted)" : ""}>{name}</span>
+          )}
+          {isArq ? (
+            <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-400 uppercase tracking-wider">
+              🧤 ARQ
+            </span>
+          ) : null}
+          {isMonthly ? (
+            <span className="inline-flex items-center rounded bg-(--cyan)/15 px-1 py-0.5 text-[8px] font-black text-(--cyan) uppercase tracking-wider">
+              Mensual
+            </span>
+          ) : (
+            <span
+              title="Invitado (galleta)"
+              aria-label="Invitado (galleta)"
+              className="inline-flex items-center text-(--gold)"
+            >
+              <Cookie size={14} className="shrink-0" />
+            </span>
+          )}
+        </div>
+      </td>
+      <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">
+        {standing ? `#${standing.rank} · ${standing.played} PJ` : "Sin ranking"}
+      </td>
+      <td className={`px-3 py-2.5 text-center font-black ${isOut ? "text-(--muted)" : "text-(--gold)"}`}>
+        {standing?.points ?? "—"}
+      </td>
+      <td className={`px-3 py-2.5 text-center font-bold ${isOut ? "text-(--muted)" : "text-white"}`}>
+        {standing?.played ?? "—"}
+      </td>
+      <td className={`hidden md:table-cell px-3 py-2.5 text-center font-bold ${isOut ? "text-(--muted)" : "text-(--green)"}`}>
+        {standing?.wins ?? "—"}
+      </td>
+      <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--muted)">
+        {standing?.draws ?? "—"}
+      </td>
+      <td className={`hidden md:table-cell px-3 py-2.5 text-center font-bold ${isOut ? "text-(--muted)" : "text-(--red)"}`}>
+        {standing?.losses ?? "—"}
+      </td>
+      {teamsAssigned ? (
+        <td className={`px-3 py-2.5 text-center text-xs font-bold ${team === "A" ? "text-(--red)" : team === "B" ? "text-(--gold)" : "text-(--muted)"}`}>
+          {team === "A" ? "Rojo" : team === "B" ? "Amarillo" : "—"}
+        </td>
+      ) : null}
+      {isAdmin ? (
+        <td className="px-3 py-2.5 text-center">
+          {onSetStatus ? (
+            <AttendanceStatusButtonGroup
+              currentStatus={currentStatus}
+              isConfirmedSection={isConfirmedSection}
+              onSelect={onSetStatus}
+            />
+          ) : null}
+        </td>
+      ) : null}
+      {isAdmin ? (
+        <td className="px-3 py-2.5 text-center">
+          <div className="flex items-center justify-center gap-1">
+            {onOpenDetails ? (
+              <button
+                type="button"
+                onClick={onOpenDetails}
+                className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14] transition cursor-pointer"
+                title={`Editar ${name}`}
+              >
+                <Pencil size={15} />
+              </button>
+            ) : null}
+            {whatsappUrl ? (
+              <a
+                href={whatsappUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15 transition"
+                title={`WhatsApp ${name}`}
+              >
+                <MessageCircle size={15} />
+              </a>
+            ) : null}
+            {!player && onAssociate ? (
+              <button
+                type="button"
+                onClick={onAssociate}
+                className="rounded-md p-1.5 text-(--cyan) hover:bg-(--cyan)/15 transition"
+                title="Asociar a jugador existente"
+              >
+                <UserPlus size={15} />
+              </button>
+            ) : null}
+            {row && onRemove ? (
+              <button
+                type="button"
+                onClick={onRemove}
+                className="rounded-md p-1.5 text-(--red) hover:bg-(--red)/15 transition"
+                title={`Quitar a ${name} del partido`}
+              >
+                <UserMinus size={15} />
+              </button>
+            ) : null}
+          </div>
+        </td>
+      ) : null}
+    </tr>
+  );
+}
 
 function UnifiedMatchRoster({
   rows,
@@ -1275,7 +1538,7 @@ function UnifiedMatchRoster({
   match: Match;
   monthlyPayments: MonthlyPayment[];
   isAdmin: boolean;
-  onOpenDetails?: (rowId: string) => void;
+  onOpenDetails?: (rowId?: string, player?: Player) => void;
   onMarkOut?: (rowId: string) => void;
   onRejoin?: (rowId: string) => void;
   onRemove?: (rowId: string) => void;
@@ -1315,8 +1578,6 @@ function UnifiedMatchRoster({
   const waitlistRows = useMemo(() => {
     return sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "waitlist" || row.attendanceStatus === "galleta" || row.attendanceStatus === "banca"));
   }, [rows]);
-  const galletaRows = waitlistRows.filter((row) => row.attendanceStatus === "galleta" || (row.attendanceStatus === "waitlist" && !row.note.toLowerCase().includes("banca")));
-  const benchRows = waitlistRows.filter((row) => row.attendanceStatus === "banca" || (row.attendanceStatus === "waitlist" && row.note.toLowerCase().includes("banca")));
 
   const unansweredItems = useMemo(() => {
     return players
@@ -1470,6 +1731,42 @@ function UnifiedMatchRoster({
     });
   }, [outRows, players, standings, sort, search]);
 
+  const sortedWaitlist = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const list = waitlistRows.filter((r) => {
+      if (!query) return true;
+      const p = playerForMatchRow(r, players);
+      return r.name.toLowerCase().includes(query) || (p?.nickname?.toLowerCase().includes(query) ?? false);
+    });
+
+    if (sort.key === "order") {
+      return [...list].sort((a, b) => (sort.direction === "asc" ? 1 : -1) * (whatsappOrderFor(a) - whatsappOrderFor(b) || a.name.localeCompare(b.name)));
+    }
+
+    return [...list].sort((left, right) => {
+      const leftPlayer = playerForMatchRow(left, players);
+      const rightPlayer = playerForMatchRow(right, players);
+      const leftStanding = standingForMatchRow(left, players, standings);
+      const rightStanding = standingForMatchRow(right, players, standings);
+
+      const value = (row: MatchPlayer, player: Player | undefined, standing: PlayerStanding | undefined) => {
+        if (sort.key === "name") return player?.name ?? row.name;
+        if (sort.key === "team") return "";
+        if (sort.key === "rank") return standing?.rank ?? Number.POSITIVE_INFINITY;
+        return standing?.[sort.key as "points" | "played" | "wins" | "draws" | "losses"] ?? -1;
+      };
+
+      const leftVal = value(left, leftPlayer, leftStanding);
+      const rightVal = value(right, rightPlayer, rightStanding);
+      const comparison = typeof leftVal === "string" && typeof rightVal === "string"
+        ? leftVal.localeCompare(rightVal, "es")
+        : Number(leftVal) - Number(rightVal);
+
+      if (comparison !== 0) return sort.direction === "asc" ? comparison : -comparison;
+      return (leftStanding?.rank ?? Number.POSITIVE_INFINITY) - (rightStanding?.rank ?? Number.POSITIVE_INFINITY);
+    });
+  }, [waitlistRows, players, standings, sort, search]);
+
   const toggleSort = (key: MatchPlayerSortKey) => {
     setSort((current) => ({
       key,
@@ -1478,10 +1775,11 @@ function UnifiedMatchRoster({
   };
 
   const tabs: { key: FilterTab; label: string; count: number; colorClass: string }[] = [
-    { key: "all", label: "Todos", count: confirmedCount + unansweredItems.length + outRows.length, colorClass: "bg-white/10 text-white" },
+    { key: "all", label: "Todos", count: confirmedCount + waitlistRows.length + outRows.length + unansweredItems.length, colorClass: "bg-white/10 text-white" },
     { key: "confirmed", label: "Confirmados", count: confirmedCount, colorClass: "bg-(--green)/20 text-(--green)" },
+    { key: "waitlist", label: "En espera", count: waitlistRows.length, colorClass: "bg-(--gold)/20 text-(--gold)" },
+    { key: "out", label: "No pueden", count: outRows.length, colorClass: "bg-(--red)/20 text-(--red)" },
     { key: "unanswered", label: "Sin respuesta", count: unansweredItems.length, colorClass: "bg-amber-500/20 text-amber-300" },
-    { key: "out", label: "No van", count: outRows.length, colorClass: "bg-(--red)/20 text-(--red)" },
   ];
 
   const columns: { key: MatchPlayerSortKey; label: string; className?: string; hideOnMobile?: boolean }[] = [
@@ -1496,10 +1794,11 @@ function UnifiedMatchRoster({
   ];
 
   const showConfirmed = tab === "all" || tab === "confirmed";
-  const showUnanswered = tab === "all" || tab === "unanswered";
+  const showWaitlist = tab === "all" || tab === "waitlist";
   const showOut = tab === "all" || tab === "out";
+  const showUnanswered = tab === "all" || tab === "unanswered";
 
-  const totalCols = columns.length + (teamsAssigned ? 1 : 0) + (isAdmin ? 1 : 0);
+  const totalCols = columns.length + (teamsAssigned ? 1 : 0) + (isAdmin ? 2 : 0);
 
   return (
     <div className="space-y-4">
@@ -1586,11 +1885,12 @@ function UnifiedMatchRoster({
                   </button>
                 </th>
               ) : null}
-              {isAdmin ? <th className="px-3 py-2 text-center">Acciones</th> : null}
+              {isAdmin ? <th className="px-3 py-2 text-center">Estado</th> : null}
+              {isAdmin ? <th className="px-3 py-2 text-center">Gestion</th> : null}
             </tr>
           </thead>
           <tbody>
-            {/* 1. SECCION: CONFIRMADOS */}
+            {/* 1. SECCION: 1) Confirmado */}
             {showConfirmed ? (
               <>
                 {tab === "all" ? (
@@ -1598,7 +1898,7 @@ function UnifiedMatchRoster({
                     <td colSpan={totalCols} className="px-3 py-1.5">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-(--green)">
-                          <span>🟢 Confirmados ({sortedConfirmed.length} / {squadTarget})</span>
+                          <span>1) Confirmado ({sortedConfirmed.length} / {squadTarget})</span>
                           {missing > 0 ? (
                             <span className="text-[11px] font-semibold text-(--muted)">· faltan {missing} para completar cupo</span>
                           ) : (
@@ -1625,162 +1925,148 @@ function UnifiedMatchRoster({
                     const whatsapp = whatsappHref(row.phone || player?.phone || "");
 
                     return (
-                      <tr key={row.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04] transition">
-                        <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">
-                          #{confirmedOrderMap.get(row.id) ?? index + 1}
-                        </td>
-                        <td className="px-3 py-2.5 font-bold text-white">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            {player ? (
-                              <Link href={`/players/${player.id}`} className="hover:underline">
-                                {playerName}
-                              </Link>
-                            ) : (
-                              <span>{playerName}</span>
-                            )}
-                            {isArq ? (
-                              <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-400 uppercase tracking-wider">
-                                🧤 ARQ
-                              </span>
-                            ) : null}
-                            {isMonthly ? (
-                              <span className="inline-flex items-center rounded bg-(--cyan)/15 px-1 py-0.5 text-[8px] font-black text-(--cyan) uppercase tracking-wider">
-                                Mensual
-                              </span>
-                            ) : (
-                              <span
-                                title="Invitado (galleta)"
-                                aria-label="Invitado (galleta)"
-                                className="inline-flex items-center text-(--gold)"
-                              >
-                                <Cookie size={14} className="shrink-0" />
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">
-                          {standing ? `#${standing.rank} · ${standing.played} PJ` : "Sin ranking"}
-                        </td>
-                        <td className="px-3 py-2.5 text-center font-black text-(--gold)">
-                          {standing?.points ?? "—"}
-                        </td>
-                        <td className="px-3 py-2.5 text-center font-bold text-white">
-                          {standing?.played ?? "—"}
-                        </td>
-                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--green)">
-                          {standing?.wins ?? "—"}
-                        </td>
-                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--muted)">
-                          {standing?.draws ?? "—"}
-                        </td>
-                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--red)">
-                          {standing?.losses ?? "—"}
-                        </td>
-                        {teamsAssigned ? (
-                          <td className={`px-3 py-2.5 text-center text-xs font-bold ${row.team === "A" ? "text-(--red)" : row.team === "B" ? "text-(--gold)" : "text-(--muted)"}`}>
-                            {row.team === "A" ? "Rojo" : row.team === "B" ? "Amarillo" : "Sin asignar"}
-                          </td>
-                        ) : null}
-                        {isAdmin ? (
-                          <td className="px-3 py-2.5 text-center">
-                            <div className="flex items-center justify-center gap-1">
-                              {whatsapp ? (
-                                <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15 transition" title={`WhatsApp ${playerName}`}>
-                                  <MessageCircle size={15} />
-                                </a>
-                              ) : null}
-                              {onOpenDetails ? (
-                                <button type="button" onClick={() => onOpenDetails(row.id)} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14] transition" title={`Editar ${playerName}`}>
-                                  <Pencil size={15} />
-                                </button>
-                              ) : null}
-                              {!isMonthly && row.attendanceStatus !== "confirmed" && onSetAttendanceStatus ? (
-                                <div className="flex items-center gap-1 rounded-md border border-(--gold)/25 bg-(--gold)/5 px-1 py-0.5">
-                                  <button type="button" onClick={() => onSetAttendanceStatus(row.id, "waitlist")} className="rounded px-1.5 py-1 text-[10px] font-black text-(--gold) hover:bg-(--gold)/15" title="Galleta abierta / disponible">Abierto</button>
-                                  <button type="button" onClick={() => onSetAttendanceStatus(row.id, "confirmed")} className="rounded px-1.5 py-1 text-[10px] font-black text-(--green) hover:bg-(--green)/15" title="Confirmar que la galleta sí va">Sí voy</button>
-                                  <button type="button" onClick={() => onSetAttendanceStatus(row.id, "out")} className="rounded px-1.5 py-1 text-[10px] font-black text-(--red) hover:bg-(--red)/15" title="Marcar que la galleta no va">No voy</button>
-                                  <button type="button" onClick={() => onSetAttendanceStatus(row.id, "maybe")} className="rounded px-1.5 py-1 text-[10px] font-black text-amber-300 hover:bg-amber-500/15" title="Dejar la galleta sin respuesta">Sin resp.</button>
-                                </div>
-                              ) : null}
-                              {onMarkOut ? (
-                                <button type="button" onClick={() => onMarkOut(row.id)} className="rounded-md p-1.5 text-(--red) hover:bg-(--red)/15 transition" title={`Marcar que ${playerName} no puede jugar`}>
-                                  <X size={15} />
-                                </button>
-                              ) : null}
-                              {!player && onAssociate ? (
-                                <button type="button" onClick={() => onAssociate(row.id)} className="rounded-md p-1.5 text-(--cyan) hover:bg-(--cyan)/15 transition" title="Asociar a jugador existente">
-                                  <UserPlus size={15} />
-                                </button>
-                              ) : null}
-                            </div>
-                          </td>
-                        ) : null}
-                      </tr>
+                      <UnifiedRosterRow
+                        key={row.id}
+                        order={`#${confirmedOrderMap.get(row.id) ?? index + 1}`}
+                        name={playerName}
+                        player={player}
+                        row={row}
+                        standing={standing}
+                        isMonthly={isMonthly}
+                        isArq={isArq}
+                        team={row.team}
+                        teamsAssigned={teamsAssigned}
+                        isAdmin={isAdmin}
+                        isConfirmedSection={true}
+                        currentStatus={row.attendanceStatus}
+                        whatsappUrl={whatsapp}
+                        onOpenDetails={onOpenDetails ? () => onOpenDetails(row.id, player) : undefined}
+                        onSetStatus={onSetAttendanceStatus ? (status) => onSetAttendanceStatus(row.id, status) : undefined}
+                        onAssociate={!player && onAssociate ? () => onAssociate(row.id) : undefined}
+                      />
                     );
                   })
                 )}
               </>
             ) : null}
 
-            {/* 2. SECCION: GALLETAS Y BANCA */}
-            {tab === "all" && waitlistRows.length > 0 ? (
+            {/* 2. SECCION: 2) En espera */}
+            {showWaitlist ? (
               <>
-                <tr className="border-b border-(--border) bg-(--gold)/10">
-                  <td colSpan={totalCols} className="px-3 py-1.5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-(--gold)">
-                        <span>🍪 Galletas disponibles ({galletaRows.length})</span>
-                        <span className="text-[11px] font-semibold text-(--muted)">
-                          · {openSlots > 0 ? `${Math.min(openSlots, galletaRows.length)} completa${Math.min(openSlots, galletaRows.length) === 1 ? "" : "n"} el cupo de ${squadTarget}` : "respaldo si alguien se cae"}
-                        </span>
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-                {galletaRows.map((row, index) => {
-                  const player = playerForMatchRow(row, players);
-                  const playerName = player?.name ?? row.name;
-                  const isAvailable = index < openSlots;
-                  return (
-                    <tr key={row.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04] transition">
-                      <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">🍪</td>
-                      <td className="px-3 py-2.5 font-bold text-white">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {player ? <Link href={`/players/${player.id}`} className="hover:underline">{playerName}</Link> : <span>{playerName}</span>}
-                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide ${isAvailable ? "bg-(--green)/15 text-(--green)" : "bg-white/[0.08] text-(--muted)"}`}>
-                            {isAvailable ? `Completa ${squadTarget}` : "Respaldo"}
+                {tab === "all" ? (
+                  <tr className="border-b border-(--border) bg-(--gold)/10">
+                    <td colSpan={totalCols} className="px-3 py-1.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-(--gold)">
+                          <span>2) En espera ({sortedWaitlist.length})</span>
+                          <span className="text-[11px] font-semibold text-(--muted)">
+                            · {openSlots > 0 ? `${Math.min(openSlots, sortedWaitlist.length)} completa${Math.min(openSlots, sortedWaitlist.length) === 1 ? "" : "n"} el cupo de ${squadTarget}` : "respaldo si alguien se cae"}
                           </span>
                         </div>
-                      </td>
-                      <td colSpan={columns.length - 2} className="px-3 py-2.5 text-xs font-semibold text-(--muted)">
-                        {isAvailable ? "Disponible para jugar y completar el cupo" : "Disponible si alguien se cae"}
-                      </td>
-                      {teamsAssigned ? <td className="px-3 py-2.5 text-center text-xs text-(--muted)">—</td> : null}
-                      {isAdmin ? (
-                        <td className="px-3 py-2.5 text-center">
-                          {onSetAttendanceStatus ? (
-                            <div className="flex items-center gap-1 rounded-md border border-(--gold)/25 bg-(--gold)/5 px-1 py-0.5">
-                              <button type="button" onClick={() => onSetAttendanceStatus(row.id, "waitlist")} className="rounded px-1.5 py-1 text-[10px] font-black text-(--gold) hover:bg-(--gold)/15">Abierto</button>
-                              <button type="button" onClick={() => onSetAttendanceStatus(row.id, "confirmed")} className="rounded px-1.5 py-1 text-[10px] font-black text-(--green) hover:bg-(--green)/15">Sí voy</button>
-                              <button type="button" onClick={() => onSetAttendanceStatus(row.id, "out")} className="rounded px-1.5 py-1 text-[10px] font-black text-(--red) hover:bg-(--red)/15">No voy</button>
-                              <button type="button" onClick={() => onSetAttendanceStatus(row.id, "maybe")} className="rounded px-1.5 py-1 text-[10px] font-black text-amber-300 hover:bg-amber-500/15">Sin resp.</button>
-                            </div>
-                          ) : null}
-                          {onOpenDetails ? <button type="button" onClick={() => onOpenDetails(row.id)} className="rounded-md p-1.5 text-(--muted) hover:bg-white/[0.14]" title={`Editar ${playerName}`}><Pencil size={15} /></button> : null}
-                        </td>
-                      ) : null}
-                    </tr>
-                  );
-                })}
-                {benchRows.length > 0 ? (
-                  <tr className="border-b border-(--border) bg-white/[0.02]">
-                    <td colSpan={totalCols} className="px-3 py-1.5 text-xs font-black uppercase tracking-wide text-(--muted)">Banca acumulada: {benchRows.map((row) => row.name).join(", ")}</td>
+                      </div>
+                    </td>
                   </tr>
                 ) : null}
+                {sortedWaitlist.length === 0 ? (
+                  <tr className="border-b border-(--border)">
+                    <td colSpan={totalCols} className="py-4 text-center text-xs text-(--muted)">
+                      No hay jugadores en espera {search ? "que coincidan con la busqueda" : ""}.
+                    </td>
+                  </tr>
+                ) : (
+                  sortedWaitlist.map((row, index) => {
+                    const player = playerForMatchRow(row, players);
+                    const standing = standingForMatchRow(row, players, standings);
+                    const playerName = player?.name ?? row.name;
+                    const isMonthly = isMonthlyMatchRow(row, players, match.monthKey, monthlyPayments);
+                    const isArq = player?.isGoalkeeper === true;
+                    const whatsapp = whatsappHref(row.phone || player?.phone || "");
+
+                    return (
+                      <UnifiedRosterRow
+                        key={row.id}
+                        order={`#${index + 1}`}
+                        name={playerName}
+                        player={player}
+                        row={row}
+                        standing={standing}
+                        isMonthly={isMonthly}
+                        isArq={isArq}
+                        team={row.team}
+                        teamsAssigned={teamsAssigned}
+                        isAdmin={isAdmin}
+                        isConfirmedSection={false}
+                        currentStatus={row.attendanceStatus}
+                        whatsappUrl={whatsapp}
+                        onOpenDetails={onOpenDetails ? () => onOpenDetails(row.id, player) : undefined}
+                        onSetStatus={onSetAttendanceStatus ? (status) => onSetAttendanceStatus(row.id, status) : undefined}
+                        onAssociate={!player && onAssociate ? () => onAssociate(row.id) : undefined}
+                        onRemove={onRemove ? () => onRemove(row.id) : undefined}
+                      />
+                    );
+                  })
+                )}
               </>
             ) : null}
 
-            {/* 3. SECCION: SIN RESPUESTA TODAVIA */}
+            {/* 3. SECCION: 3) No pueden */}
+            {showOut ? (
+              <>
+                {tab === "all" ? (
+                  <tr className="border-b border-(--border) bg-(--red)/10">
+                    <td colSpan={totalCols} className="px-3 py-1.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-(--red)">
+                          <span>3) No pueden ({sortedOut.length})</span>
+                          <span className="text-[11px] font-semibold text-(--muted)">· bajas confirmadas para este partido</span>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                ) : null}
+                {sortedOut.length === 0 ? (
+                  <tr className="border-b border-(--border)">
+                    <td colSpan={totalCols} className="py-4 text-center text-xs text-(--muted)">
+                      No hay bajas registradas {search ? "que coincidan con la busqueda" : ""}.
+                    </td>
+                  </tr>
+                ) : (
+                  sortedOut.map((row) => {
+                    const player = playerForMatchRow(row, players);
+                    const standing = standingForMatchRow(row, players, standings);
+                    const playerName = player?.name ?? row.name;
+                    const isMonthly = isMonthlyMatchRow(row, players, match.monthKey, monthlyPayments);
+                    const isArq = player?.isGoalkeeper === true;
+                    const whatsapp = whatsappHref(row.phone || player?.phone || "");
+
+                    return (
+                      <UnifiedRosterRow
+                        key={row.id}
+                        order="—"
+                        name={playerName}
+                        player={player}
+                        row={row}
+                        standing={standing}
+                        isMonthly={isMonthly}
+                        isArq={isArq}
+                        team={row.team}
+                        teamsAssigned={teamsAssigned}
+                        isAdmin={isAdmin}
+                        isConfirmedSection={false}
+                        currentStatus={row.attendanceStatus}
+                        whatsappUrl={whatsapp}
+                        onOpenDetails={onOpenDetails ? () => onOpenDetails(row.id, player) : undefined}
+                        onSetStatus={onSetAttendanceStatus ? (status) => onSetAttendanceStatus(row.id, status) : undefined}
+                        onAssociate={!player && onAssociate ? () => onAssociate(row.id) : undefined}
+                        onRemove={onRemove ? () => onRemove(row.id) : undefined}
+                      />
+                    );
+                  })
+                )}
+              </>
+            ) : null}
+
+            {/* 4. SECCION: 4) Sin respuesta */}
             {showUnanswered ? (
               <>
                 {tab === "all" ? (
@@ -1788,7 +2074,7 @@ function UnifiedMatchRoster({
                     <td colSpan={totalCols} className="px-3 py-1.5">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-amber-400">
-                          <span>⏳ Sin respuesta ({sortedUnanswered.length})</span>
+                          <span>4) Sin respuesta ({sortedUnanswered.length})</span>
                           <span className="text-[11px] font-semibold text-(--muted)">· habituales priorizados por frecuencia de asistencia</span>
                         </div>
                       </div>
@@ -1807,110 +2093,33 @@ function UnifiedMatchRoster({
                     const isArq = item.player.isGoalkeeper;
                     const pingText = `Hola ${item.player.nickname || item.player.name.split(" ")[0]}! ¿Juegas este martes en el SIFUP? Avisame para anotarte en la lista.`;
                     const whatsapp = whatsappHref(item.player.phone, pingText);
+                    const existingRow = item.existingRow;
 
                     return (
-                      <tr key={item.player.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04] transition">
-                        <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)/60">
-                          —
-                        </td>
-                        <td className="px-3 py-2.5 font-bold text-white">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <Link href={`/players/${item.player.id}`} className="hover:underline">
-                              {item.player.name}
-                            </Link>
-                            {isArq ? (
-                              <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-400 uppercase tracking-wider">
-                                🧤 ARQ
-                              </span>
-                            ) : null}
-                            {item.isMonthly ? (
-                              <span className="inline-flex items-center rounded bg-(--cyan)/15 px-1 py-0.5 text-[8px] font-black text-(--cyan) uppercase tracking-wider">
-                                Mensual
-                              </span>
-                            ) : (
-                              <span
-                                title="Invitado (galleta)"
-                                aria-label="Invitado (galleta)"
-                                className="inline-flex items-center text-(--gold)"
-                              >
-                                <Cookie size={14} className="shrink-0" />
-                              </span>
-                            )}
-                            {item.totalPlayed >= 2 ? (
-                              <span className="inline-flex items-center rounded bg-white/[0.08] px-1 py-0.5 text-[9px] font-semibold text-(--muted)">
-                                {item.totalPlayed} PJ hist.
-                              </span>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">
-                          {standing ? `#${standing.rank} · ${standing.played} PJ` : "Sin ranking"}
-                        </td>
-                        <td className="px-3 py-2.5 text-center font-black text-(--gold)">
-                          {standing?.points ?? "—"}
-                        </td>
-                        <td className="px-3 py-2.5 text-center font-bold text-white">
-                          {item.totalPlayed}
-                        </td>
-                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--green)">
-                          {standing?.wins ?? "—"}
-                        </td>
-                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--muted)">
-                          {standing?.draws ?? "—"}
-                        </td>
-                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--red)">
-                          {standing?.losses ?? "—"}
-                        </td>
-                        {teamsAssigned ? (
-                          <td className="px-3 py-2.5 text-center text-xs text-(--muted)">
-                            —
-                          </td>
-                        ) : null}
-                        {isAdmin ? (
-                          <td className="px-3 py-2.5 text-center">
-                            <div className="flex items-center justify-center gap-1.5">
-                              {whatsapp ? (
-                                <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15 transition" title={`Consultar a ${item.player.name} por WhatsApp`}>
-                                  <MessageCircle size={15} />
-                                </a>
-                              ) : null}
-                              {onQuickConfirmPlayer ? (
-                                <button
-                                  type="button"
-                                  onClick={() => onQuickConfirmPlayer(item.player)}
-                                  className="inline-flex items-center gap-1 rounded bg-(--green)/15 px-2 py-1 text-xs font-bold text-(--green) hover:bg-(--green)/25 transition"
-                                  title={`Confirmar a ${item.player.name}`}
-                                >
-                                  <Check size={14} />
-                                  <span className="hidden xl:inline">Voy</span>
-                                </button>
-                              ) : null}
-                              {!item.isMonthly && onQuickSetAttendanceStatus ? (
-                                <button
-                                  type="button"
-                                  onClick={() => onQuickSetAttendanceStatus(item.player, "waitlist")}
-                                  className="inline-flex items-center gap-1 rounded bg-(--gold)/15 px-2 py-1 text-xs font-bold text-(--gold) hover:bg-(--gold)/25 transition"
-                                  title={`Marcar a ${item.player.name} como abierto/disponible`}
-                                >
-                                  <span className="hidden xl:inline">Abierto</span>
-                                  <span className="xl:hidden">Disp.</span>
-                                </button>
-                              ) : null}
-                              {onQuickMarkPlayerOut ? (
-                                <button
-                                  type="button"
-                                  onClick={() => onQuickMarkPlayerOut(item.player)}
-                                  className="inline-flex items-center gap-1 rounded bg-(--red)/15 px-2 py-1 text-xs font-bold text-(--red) hover:bg-(--red)/25 transition"
-                                  title={`Marcar que ${item.player.name} no va`}
-                                >
-                                  <X size={14} />
-                                  <span className="hidden xl:inline">No va</span>
-                                </button>
-                              ) : null}
-                            </div>
-                          </td>
-                        ) : null}
-                      </tr>
+                      <UnifiedRosterRow
+                        key={item.player.id}
+                        order="—"
+                        name={item.player.name}
+                        player={item.player}
+                        row={existingRow}
+                        standing={standing}
+                        isMonthly={item.isMonthly}
+                        isArq={isArq}
+                        team={existingRow?.team}
+                        teamsAssigned={teamsAssigned}
+                        isAdmin={isAdmin}
+                        isConfirmedSection={false}
+                        currentStatus={existingRow?.attendanceStatus}
+                        whatsappUrl={whatsapp}
+                        onOpenDetails={onOpenDetails ? () => onOpenDetails(existingRow?.id, item.player) : undefined}
+                        onSetStatus={(status) => {
+                          if (existingRow && onSetAttendanceStatus) {
+                            onSetAttendanceStatus(existingRow.id, status);
+                          } else if (onQuickSetAttendanceStatus) {
+                            onQuickSetAttendanceStatus(item.player, status);
+                          }
+                        }}
+                      />
                     );
                   })
                 )}
@@ -1939,135 +2148,6 @@ function UnifiedMatchRoster({
                     </td>
                   </tr>
                 ) : null}
-              </>
-            ) : null}
-
-            {/* 4. SECCION: NO VAN */}
-            {showOut ? (
-              <>
-                {tab === "all" ? (
-                  <tr className="border-b border-(--border) bg-(--red)/10">
-                    <td colSpan={totalCols} className="px-3 py-1.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-(--red)">
-                          <span>🔴 No van ({sortedOut.length})</span>
-                          <span className="text-[11px] font-semibold text-(--muted)">· bajas confirmadas para este partido</span>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                ) : null}
-                {sortedOut.length === 0 ? (
-                  <tr className="border-b border-(--border)">
-                    <td colSpan={totalCols} className="py-4 text-center text-xs text-(--muted)">
-                      No hay bajas registradas {search ? "que coincidan con la busqueda" : ""}.
-                    </td>
-                  </tr>
-                ) : (
-                  sortedOut.map((row) => {
-                    const player = playerForMatchRow(row, players);
-                    const standing = standingForMatchRow(row, players, standings);
-                    const playerName = player?.name ?? row.name;
-                    const isMonthly = isMonthlyMatchRow(row, players, match.monthKey, monthlyPayments);
-                    const isArq = player?.isGoalkeeper === true;
-                    const whatsapp = whatsappHref(row.phone || player?.phone || "");
-
-                    return (
-                      <tr key={row.id} className="border-b border-(--border) last:border-0 hover:bg-white/[0.04] transition opacity-75">
-                        <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)/60">
-                          —
-                        </td>
-                        <td className="px-3 py-2.5 font-bold text-white">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            {player ? (
-                              <Link href={`/players/${player.id}`} className="hover:underline line-through text-(--muted)">
-                                {playerName}
-                              </Link>
-                            ) : (
-                              <span className="line-through text-(--muted)">{playerName}</span>
-                            )}
-                            {isArq ? (
-                              <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-black text-amber-400 uppercase tracking-wider">
-                                🧤 ARQ
-                              </span>
-                            ) : null}
-                            {isMonthly ? (
-                              <span className="inline-flex items-center rounded bg-(--cyan)/15 px-1 py-0.5 text-[8px] font-black text-(--cyan) uppercase tracking-wider">
-                                Mensual
-                              </span>
-                            ) : (
-                              <span
-                                title="Invitado (galleta)"
-                                aria-label="Invitado (galleta)"
-                                className="inline-flex items-center text-(--gold)"
-                              >
-                                <Cookie size={14} className="shrink-0" />
-                              </span>
-                            )}
-                            {row.note ? (
-                              <span className="text-[10px] italic text-(--muted)">({row.note})</span>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">
-                          {standing ? `#${standing.rank} · ${standing.played} PJ` : "Sin ranking"}
-                        </td>
-                        <td className="px-3 py-2.5 text-center font-black text-(--muted)">
-                          {standing?.points ?? "—"}
-                        </td>
-                        <td className="px-3 py-2.5 text-center font-bold text-(--muted)">
-                          {standing?.played ?? "—"}
-                        </td>
-                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--muted)">
-                          {standing?.wins ?? "—"}
-                        </td>
-                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--muted)">
-                          {standing?.draws ?? "—"}
-                        </td>
-                        <td className="hidden md:table-cell px-3 py-2.5 text-center font-bold text-(--muted)">
-                          {standing?.losses ?? "—"}
-                        </td>
-                        {teamsAssigned ? (
-                          <td className="px-3 py-2.5 text-center text-xs text-(--muted)">
-                            —
-                          </td>
-                        ) : null}
-                        {isAdmin ? (
-                          <td className="px-3 py-2.5 text-center">
-                            <div className="flex items-center justify-center gap-1">
-                              {whatsapp ? (
-                                <a href={whatsapp} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-(--green) hover:bg-(--green)/15 transition" title={`WhatsApp ${playerName}`}>
-                                  <MessageCircle size={15} />
-                                </a>
-                              ) : null}
-                              {onRejoin ? (
-                                <button
-                                  type="button"
-                                  onClick={() => onRejoin(row.id)}
-                                  className="inline-flex items-center gap-1 rounded bg-(--green)/15 px-2 py-1 text-xs font-bold text-(--green) hover:bg-(--green)/25 transition"
-                                  title={`Reincorporar a ${playerName} como confirmado`}
-                                >
-                                  <RotateCcw size={14} />
-                                  <span className="hidden xl:inline">Reincorporar</span>
-                                </button>
-                              ) : null}
-                              {onRemove ? (
-                                <button
-                                  type="button"
-                                  onClick={() => onRemove(row.id)}
-                                  className="rounded-md p-1.5 text-(--red) hover:bg-(--red)/15 transition"
-                                  title={`Quitar a ${playerName} del partido`}
-                                >
-                                  <UserMinus size={15} />
-                                </button>
-                              ) : null}
-                            </div>
-                          </td>
-                        ) : null}
-                      </tr>
-                    );
-                  })
-                )}
               </>
             ) : null}
           </tbody>
@@ -2101,7 +2181,7 @@ function TeamAssignmentBoard({
   standings: Map<string, PlayerStanding>;
   match: Match;
   monthlyPayments: MonthlyPayment[];
-  onOpenDetails: (rowId: string) => void;
+  onOpenDetails: (rowId?: string, player?: Player) => void;
   onMarkOut: (rowId: string) => void;
   onRejoin: (rowId: string) => void;
   onRemove: (rowId: string) => void;
@@ -2457,10 +2537,17 @@ function MatchHero({
                   <ChevronRight size={16} />
                 </Link>
               ) : null}
-              <Link href={`/matches/${match.id}/teams`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
-                <Users size={16} />
-                Equipos
-              </Link>
+              {match.status === "roster_locked" ? (
+                <Link href={`/matches/${match.id}/teams`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
+                  <Users size={16} />
+                  Equipos
+                </Link>
+              ) : (
+                <span title="Disponible al cerrar la lista" className="inline-flex h-10 cursor-not-allowed items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.02] px-3 text-sm font-semibold text-(--muted) opacity-50">
+                  <Users size={16} />
+                  Equipos
+                </span>
+              )}
               {isAdmin ? <Button variant="secondary" onClick={onEdit}><Pencil size={16} />Editar partido</Button> : null}
               {isAdmin ? <Button onClick={onSave} disabled={isPending}><Save size={16} />Guardar</Button> : null}
             </div>
@@ -2499,7 +2586,14 @@ function MatchHero({
   );
 }
 
-function MatchPaymentsSection({ rows }: { rows: MatchPlayer[] }) {
+function MatchPaymentsSection({ rows, match }: { rows: MatchPlayer[]; match: Match }) {
+  const [now] = useState(() => Date.now());
+  const timeFormatted = match.time.length <= 2 ? `${match.time.padStart(2, "0")}:00` : match.time.slice(0, 5);
+  const matchStart = new Date(`${match.date}T${timeFormatted || "00:00"}`).getTime();
+  if (!isNaN(matchStart) && now < matchStart) {
+    return null;
+  }
+
   const confirmedRows = sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "confirmed"));
   const summary = summarizeMatch(rows);
 
@@ -2819,6 +2913,9 @@ function RoyalNightPanel({
       .catch((err) => setError(err instanceof Error ? err.message : "No se pudo cerrar la noche."));
   }
 
+  const match = data.matches.find((m) => m.id === matchId);
+  const isRosterLocked = match?.status === "roster_locked";
+
   return (
     <Card className="mt-4 space-y-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -2827,10 +2924,17 @@ function RoyalNightPanel({
           <h2 className="mt-1 text-xl font-black text-white">Equipos</h2>
         </div>
         {isAdmin ? (
-          <Link href={`/matches/${matchId}/teams`} className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
-            <Users size={16} />
-            Administrar equipos
-          </Link>
+          isRosterLocked ? (
+            <Link href={`/matches/${matchId}/teams`} className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
+              <Users size={16} />
+              Administrar equipos
+            </Link>
+          ) : (
+            <span title="Disponible al cerrar la lista" className="inline-flex h-9 cursor-not-allowed items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.02] px-3 text-sm font-semibold text-(--muted) opacity-50">
+              <Users size={16} />
+              Administrar equipos
+            </span>
+          )
         ) : null}
       </div>
       <RoyalTeamRoster teams={teams} rows={rows} players={players} standings={standings} isAdmin={false} onRenameTeam={() => {}} onAssignTeam={() => {}} />
@@ -2953,19 +3057,26 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const [showResultModal, setShowResultModal] = useState(false);
   const standings = useMemo(() => buildPlayerStandings(data), [data]);
 
+  const [prevRowsKey, setPrevRowsKey] = useState({ initialData, id });
+  if (prevRowsKey.initialData !== initialData || prevRowsKey.id !== id) {
+    setPrevRowsKey({ initialData, id });
+    setRows(initialData.matchPlayers.filter((row) => row.matchId === id));
+  }
+
   if (!match) return <PageTitle title="Partido no encontrado" description="No existe en la base de datos." />;
   const currentMatch = match;
   const isRoyal = currentMatch.matchFormat === "rey_de_la_cancha";
+  const squadTarget = isRoyal ? ROYAL_SQUAD_TARGET : (currentMatch.squadTarget ?? (currentMatch.matchFormat === "7x7" ? 14 : SQUAD_TARGET));
   const { previous, next } = adjacentMatches(data.matches, currentMatch.id);
   const matchTeams = data.matchTeams.filter((team) => team.matchId === currentMatch.id).sort((a, b) => a.seq - b.seq);
   const matchGames = data.matchGames.filter((game) => game.matchId === currentMatch.id);
 
   function persistRows(nextRows: MatchPlayer[]) {
     setRows(nextRows);
+    commit(replaceMatchPlayers(data, currentMatch.id, nextRows));
     startTransition(async () => {
       try {
         await saveMatchDetailAction(currentMatch.id, nextRows);
-        commit(replaceMatchPlayers(data, currentMatch.id, nextRows));
         setError("");
       } catch (err) {
         setError(err instanceof Error ? err.message : "No se pudo actualizar el partido.");
@@ -2994,15 +3105,21 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
 
   function setAttendanceStatus(rowId: string, status: AttendanceStatus) {
     const current = rows.find((row) => row.id === rowId);
-    const isGalleta = current && !isMonthlyMatchRow(current, data.players, currentMatch.monthKey, data.monthlyPayments);
-    if (isGalleta && current.attendanceStatus === "confirmed" && status !== "confirmed") return;
+    if (!current) return;
+    const now = new Date().toISOString();
+    const monthly = isMonthlyMatchRow(current, data.players, currentMatch.monthKey, data.monthlyPayments);
+    const nextOrder = Math.max(0, ...rows.map((r) => r.whatsappOrder || 0)) + 1;
+
     const nextRows = rows.map((row) => (
       row.id === rowId
         ? {
             ...row,
             attendanceStatus: status,
-            team: status === "out" ? "none" as Team : row.team,
-            updatedAt: new Date().toISOString(),
+            team: status === "out" ? ("none" as Team) : row.team,
+            paymentStatus: status === "out" ? ("paid" as PaymentStatus) : (monthly ? ("paid" as PaymentStatus) : row.paymentStatus),
+            amountDue: status === "out" ? 0 : (monthly ? 0 : (row.amountDue || PER_MATCH_AMOUNT)),
+            whatsappOrder: status === "out" ? 0 : (row.whatsappOrder || nextOrder),
+            updatedAt: now,
           }
         : row
     ));
@@ -3090,18 +3207,37 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   function quickSetAttendanceStatus(player: Player, status: AttendanceStatus) {
     const existing = rows.find((r) => matchRowBelongsToPlayer(r, player, data.players));
     const now = new Date().toISOString();
-    const nextRows = existing
-      ? rows.map((row) => (
-          row.id === existing.id
-            ? {
-                ...row,
-                attendanceStatus: status,
-                team: status === "out" ? "none" as Team : row.team,
-                updatedAt: now,
-              }
-            : row
-        ))
-      : [...rows, { ...buildMatchPlayerRow(player), attendanceStatus: status, updatedAt: now }];
+    const monthly = isPlayerMonthlyForMonth(player.id, currentMatch.monthKey, data.players, data.monthlyPayments);
+    const nextOrder = Math.max(0, ...rows.map((r) => r.whatsappOrder || 0)) + 1;
+
+    let nextRows: MatchPlayer[];
+    if (existing) {
+      nextRows = rows.map((row) => (
+        row.id === existing.id
+          ? {
+              ...row,
+              attendanceStatus: status,
+              team: status === "out" ? ("none" as Team) : row.team,
+              paymentStatus: status === "out" ? ("paid" as PaymentStatus) : (monthly ? ("paid" as PaymentStatus) : row.paymentStatus),
+              amountDue: status === "out" ? 0 : (monthly ? 0 : (row.amountDue || PER_MATCH_AMOUNT)),
+              whatsappOrder: status === "out" || status === "maybe" ? 0 : (row.whatsappOrder || nextOrder),
+              updatedAt: now,
+            }
+          : row
+      ));
+    } else {
+      const baseRow = buildMatchPlayerRow(player);
+      const newRow: MatchPlayer = {
+        ...baseRow,
+        attendanceStatus: status,
+        team: "none",
+        paymentStatus: status === "out" ? "paid" : baseRow.paymentStatus,
+        amountDue: status === "out" ? 0 : baseRow.amountDue,
+        whatsappOrder: status === "out" || status === "maybe" ? 0 : nextOrder,
+        updatedAt: now,
+      };
+      nextRows = [...rows, newRow];
+    }
     persistRows(nextRows);
   }
 
@@ -3137,6 +3273,71 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         setError("");
       })
       .catch((err) => setError(err instanceof Error ? err.message : "No se pudo asociar el jugador."));
+  }
+
+  function openDetails(rowId?: string, player?: Player) {
+    if (rowId) {
+      const idx = rows.findIndex((r) => r.id === rowId);
+      if (idx !== -1) {
+        setEditingIndex(idx);
+        return;
+      }
+    }
+    if (player) {
+      const existing = rows.find((r) => matchRowBelongsToPlayer(r, player, data.players));
+      if (existing) {
+        setEditingIndex(rows.indexOf(existing));
+        return;
+      }
+      const newRow: MatchPlayer = { ...buildMatchPlayerRow(player), attendanceStatus: "maybe" };
+      const nextRows = [...rows, newRow];
+      setRows(nextRows);
+      persistRows(nextRows);
+      setEditingIndex(nextRows.length - 1);
+    }
+  }
+
+  function lockRoster() {
+    const confirmed = sortRowsMonthlyFirst(rows.filter((r) => r.attendanceStatus === "confirmed"), data.players, currentMatch.monthKey, data.monthlyPayments);
+    const overflow = confirmed.slice(squadTarget);
+    const overflowIds = new Set(overflow.map((r) => r.id));
+
+    const nextRows = overflowIds.size > 0
+      ? rows.map((r) => {
+          if (overflowIds.has(r.id)) {
+            return {
+              ...r,
+              attendanceStatus: "banca" as AttendanceStatus,
+              team: "none" as Team,
+              updatedAt: new Date().toISOString(),
+            };
+          }
+          return r;
+        })
+      : rows;
+
+    startTransition(async () => {
+      try {
+        if (overflowIds.size > 0) {
+          await saveMatchDetailAction(currentMatch.id, nextRows);
+        }
+        await updateMatchAction({ matchId: currentMatch.id, status: "roster_locked" });
+        const updatedMatch: Match = {
+          ...currentMatch,
+          status: "roster_locked",
+          updatedAt: new Date().toISOString(),
+        };
+        let nextData = upsertMatch(data, updatedMatch);
+        if (overflowIds.size > 0) {
+          nextData = replaceMatchPlayers(nextData, currentMatch.id, nextRows);
+          setRows(nextRows);
+        }
+        commit(nextData);
+        setError("");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo cerrar la lista.");
+      }
+    });
   }
 
   function save() {
@@ -3357,7 +3558,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         </div>
       ) : null}
 
-      {isAdmin ? <MatchPaymentsSection rows={rows} /> : null}
+      {isAdmin ? <MatchPaymentsSection rows={rows} match={currentMatch} /> : null}
 
       <Card className="mt-4 space-y-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -3365,6 +3566,24 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Plantel</p>
             <h2 className="mt-1 text-xl font-black text-white">{isAdmin ? "Jugadores y asistencia" : "Plantel y asistencia"}</h2>
           </div>
+          {isAdmin && currentMatch.status !== "played" ? (
+            currentMatch.status === "roster_locked" ? (
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-md border border-(--green)/30 bg-(--green)/15 px-3 py-1.5 text-xs font-bold text-(--green)">
+                  <Check size={14} />
+                  Lista cerrada ({squadTarget} jugadores)
+                </span>
+                <Button variant="secondary" onClick={lockRoster} disabled={isPending} title="Volver a verificar cupo y cerrar lista">
+                  Re-cerrar lista
+                </Button>
+              </div>
+            ) : (
+              <Button onClick={lockRoster} disabled={isPending}>
+                <Shield size={16} />
+                Cerrar lista con {squadTarget} jugadores
+              </Button>
+            )
+          ) : null}
         </div>
         {isAdmin ? (
           <TeamAssignmentBoard
@@ -3374,7 +3593,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
             standings={standings}
             match={currentMatch}
             monthlyPayments={data.monthlyPayments}
-            onOpenDetails={(rowId) => setEditingIndex(rows.findIndex((row) => row.id === rowId))}
+            onOpenDetails={openDetails}
             onMarkOut={markRowAsOut}
             onRejoin={rejoinPlayer}
             onRemove={removeRow}
@@ -3452,9 +3671,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
           row={rows[editingIndex]}
           onClose={() => setEditingIndex(null)}
           onSave={(patch) => {
-            const current = rows[editingIndex];
-            const isConfirmedGalleta = !isMonthlyMatchRow(current, data.players, currentMatch.monthKey, data.monthlyPayments) && current.attendanceStatus === "confirmed";
-            updateRow(editingIndex, isConfirmedGalleta ? { ...patch, attendanceStatus: "confirmed" } : patch);
+            updateRow(editingIndex, patch);
             setEditingIndex(null);
           }}
           onAssociate={() => {
@@ -5448,6 +5665,7 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
 
   if (!match) return <PageTitle title="Partido no encontrado" description="No existe en la base de datos." />;
   const currentMatch = match;
+  const isLocked = currentMatch.status === "roster_locked";
 
   const standings = buildPlayerStandings(data);
 
@@ -5497,17 +5715,23 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
               <Link href={`/matches/${currentMatch.id}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
                 Volver al partido
               </Link>
-              <Button onClick={saveRoyalRoster} disabled={isPending}>
+              <Button onClick={saveRoyalRoster} disabled={isPending || !isLocked}>
                 <Save size={16} />
                 Guardar equipos
               </Button>
             </div>
           }
         />
+        {!isLocked ? (
+          <div className="mb-4 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm font-bold text-amber-400">
+            <Shield size={18} />
+            <span>La asignación de equipos está bloqueada. Debes cerrar la lista de jugadores primero desde la vista del partido.</span>
+          </div>
+        ) : null}
         {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-(--border) bg-white/[0.04] px-3 py-2">
           <p className="text-xs font-bold text-(--muted)">{unassignedRows.length > 0 ? `${unassignedRows.length} jugador(es) sin equipo` : "Todos los confirmados tienen equipo"}</p>
-          <Button variant="secondary" onClick={rebalanceRoyalTeams} disabled={isPending} className="h-8 px-2.5 text-xs">
+          <Button variant="secondary" onClick={rebalanceRoyalTeams} disabled={isPending || !isLocked} className="h-8 px-2.5 text-xs">
             <Sparkles size={14} />
             Autoasignar por Ranking
           </Button>
@@ -5526,8 +5750,9 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
                     </span>
                     <select
                       value=""
+                      disabled={!isLocked}
                       onChange={(event) => assignRoyalTeam(row.id, event.target.value)}
-                      className="rounded border border-white/10 bg-black/30 px-1 py-0.5 text-xs font-bold text-white outline-none"
+                      className={`rounded border border-white/10 bg-black/30 px-1 py-0.5 text-xs font-bold text-white outline-none ${!isLocked ? "opacity-50 cursor-not-allowed" : ""}`}
                     >
                       <option value="" disabled>Asignar a...</option>
                       {matchTeams.map((team) => (
@@ -5540,7 +5765,7 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
             </ul>
           </Card>
         ) : null}
-        <RoyalTeamRoster teams={matchTeams} rows={rows} players={data.players} standings={standings} isAdmin onRenameTeam={renameRoyalTeam} onAssignTeam={assignRoyalTeam} />
+        <RoyalTeamRoster teams={matchTeams} rows={rows} players={data.players} standings={standings} isAdmin={isLocked} onRenameTeam={renameRoyalTeam} onAssignTeam={assignRoyalTeam} />
       </>
     );
   }
@@ -5621,13 +5846,20 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
             <Link href={`/matches/${currentMatch.id}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-(--border) bg-white/[0.06] px-3 text-sm font-semibold text-white transition hover:bg-white/[0.12]">
               Volver al partido
             </Link>
-              <Button onClick={save} disabled={isPending}>
-                <Save size={16} />
-                Guardar y cerrar lista
+            <Button onClick={save} disabled={isPending || !isLocked}>
+              <Save size={16} />
+              Guardar y cerrar lista
             </Button>
           </div>
         }
       />
+
+      {!isLocked ? (
+        <div className="mb-4 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm font-bold text-amber-400">
+          <Shield size={18} />
+          <span>La asignación de equipos está bloqueada. Debes cerrar la lista de jugadores primero desde la vista del partido.</span>
+        </div>
+      ) : null}
 
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
@@ -5636,7 +5868,7 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
           <p className={`text-xs font-bold ${pointsDifference === 0 ? "text-(--green)" : "text-(--muted)"}`}>
             {pointsDifference === 0 ? "Equipos equilibrados" : `Diferencia: ${pointsDifference} pts`} · {teamRows.length}/{squadTarget} para jugar
           </p>
-          <Button variant="secondary" onClick={resetBalancedTeams} disabled={isPending} className="h-8 px-2.5 text-xs">
+          <Button variant="secondary" onClick={resetBalancedTeams} disabled={isPending || !isLocked} className="h-8 px-2.5 text-xs">
             <Sparkles size={14} />
             Equilibrar por Ranking
           </Button>
@@ -5650,7 +5882,7 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
             </div>
             <div className="space-y-1.5">
               {sortedTeamA.map((row) => (
-                <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} />
+                <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} disabled={!isLocked} />
               ))}
               {teamA.length === 0 ? <p className="text-sm text-(--muted) italic">Sin jugadores asignados</p> : null}
             </div>
@@ -5663,7 +5895,7 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
             </div>
             <div className="space-y-1.5">
               {sortedTeamB.map((row) => (
-                <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} />
+                <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} disabled={!isLocked} />
               ))}
               {teamB.length === 0 ? <p className="text-sm text-(--muted) italic">Sin jugadores asignados</p> : null}
             </div>
@@ -5676,7 +5908,7 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
             </div>
             <div className="space-y-1.5">
               {sortedUnassigned.map((row) => (
-                <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} />
+                <TeamSelectorRow key={row.id} row={row} onChange={(team) => handleTeamChange(row.id, team)} players={data.players} standings={standings} disabled={!isLocked} />
               ))}
               {unassigned.length === 0 ? <p className="rounded-md border border-(--green)/25 bg-(--green)/10 px-3 py-2 text-sm font-semibold text-(--green)">Todos los jugadores están asignados.</p> : null}
             </div>
@@ -5699,7 +5931,7 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
   );
 }
 
-function TeamSelectorRow({ row, onChange, players, standings }: { row: MatchPlayer; onChange: (team: Team) => void; players: Player[]; standings: Map<string, PlayerStanding> }) {
+function TeamSelectorRow({ row, onChange, players, standings, disabled }: { row: MatchPlayer; onChange: (team: Team) => void; players: Player[]; standings: Map<string, PlayerStanding>; disabled?: boolean }) {
   const player = playerForMatchRow(row, players);
   const isArq = player?.isGoalkeeper === true;
   const standing = standingForMatchRow(row, players, standings);
@@ -5721,31 +5953,34 @@ function TeamSelectorRow({ row, onChange, players, standings }: { row: MatchPlay
       <div className="flex shrink-0 items-center gap-1" role="group" aria-label={`Asignar equipo a ${row.name}`}>
         <button
           type="button"
+          disabled={disabled}
           onClick={() => onChange("A")}
           aria-pressed={row.team === "A"}
           aria-label="Mover a Equipo Rojo"
           title="Mover a Equipo Rojo"
-          className={`grid h-7 w-7 place-items-center rounded-full transition ${row.team === "A" ? "bg-(--red) ring-2 ring-(--red)/30 ring-offset-2 ring-offset-(--panel)" : "bg-(--red)/35 hover:bg-(--red)"}`}
+          className={`grid h-7 w-7 place-items-center rounded-full transition ${disabled ? "opacity-40 cursor-not-allowed pointer-events-none" : ""} ${row.team === "A" ? "bg-(--red) ring-2 ring-(--red)/30 ring-offset-2 ring-offset-(--panel)" : "bg-(--red)/35 hover:bg-(--red)"}`}
         >
           <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-white/90" />
         </button>
         <button
           type="button"
+          disabled={disabled}
           onClick={() => onChange("B")}
           aria-pressed={row.team === "B"}
           aria-label="Mover a Equipo Amarillo"
           title="Mover a Equipo Amarillo"
-          className={`grid h-7 w-7 place-items-center rounded-full transition ${row.team === "B" ? "bg-(--gold) ring-2 ring-(--gold)/30 ring-offset-2 ring-offset-(--panel)" : "bg-(--gold)/35 hover:bg-(--gold)"}`}
+          className={`grid h-7 w-7 place-items-center rounded-full transition ${disabled ? "opacity-40 cursor-not-allowed pointer-events-none" : ""} ${row.team === "B" ? "bg-(--gold) ring-2 ring-(--gold)/30 ring-offset-2 ring-offset-(--panel)" : "bg-(--gold)/35 hover:bg-(--gold)"}`}
         >
           <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-white/90" />
         </button>
         <button
           type="button"
+          disabled={disabled}
           onClick={() => onChange("none")}
           aria-pressed={row.team === "none"}
           aria-label="Quitar del equipo"
           title="Quitar del equipo"
-          className={`grid h-7 w-7 place-items-center rounded-full transition ${row.team === "none" ? "bg-white/35 ring-2 ring-white/20 ring-offset-2 ring-offset-(--panel)" : "bg-white/15 hover:bg-white/35"}`}
+          className={`grid h-7 w-7 place-items-center rounded-full transition ${disabled ? "opacity-40 cursor-not-allowed pointer-events-none" : ""} ${row.team === "none" ? "bg-white/35 ring-2 ring-white/20 ring-offset-2 ring-offset-(--panel)" : "bg-white/15 hover:bg-white/35"}`}
         >
           <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-white/90" />
         </button>

@@ -96,6 +96,9 @@ alter table matches add constraint matches_match_format_check check (match_forma
 alter table matches add column if not exists squad_target integer not null default 12;
 alter table matches drop constraint if exists matches_squad_target_check;
 
+alter table matches drop constraint if exists matches_status_check;
+alter table matches add constraint matches_status_check check (status in ('open', 'confirmed', 'played', 'roster_locked', 'closed'));
+
 alter table match_players drop constraint if exists match_players_attendance_status_check;
 alter table match_players add constraint match_players_attendance_status_check check (attendance_status in ('confirmed', 'maybe', 'out', 'waitlist', 'banca', 'galleta'));
 

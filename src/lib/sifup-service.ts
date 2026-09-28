@@ -978,6 +978,7 @@ export async function generateBalancedTeams(input: { matchId?: string; date?: st
 export type UpdateMatchInput = {
   matchId?: string;
   date?: string;
+  status?: Match["status"];
   matchFormat?: Match["matchFormat"];
   squadTarget?: number;
   notes?: string;
@@ -999,6 +1000,7 @@ export async function updateMatch(input: UpdateMatchInput) {
 
   const updatedMatch: Match = {
     ...match,
+    status: input.status ?? match.status,
     matchFormat,
     squadTarget,
     notes: input.notes !== undefined ? input.notes : match.notes,

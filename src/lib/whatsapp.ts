@@ -51,7 +51,7 @@ export function matchSummaryMessage(match: Match, rows: MatchPlayer[], players: 
     const player = official[index];
     const num = String(index + 1).padStart(2, " ");
     if (!player) return `${num} · `;
-    const isPaid = player.paymentStatus === "paid" || isMonthlyRow(player, players, match.monthKey, monthlyPayments);
+    const isPaid = player.paymentStatus === "paid";
     return `${num} · ${player.name}${isPaid ? " ✅" : ""}`;
   });
 
