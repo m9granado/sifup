@@ -103,14 +103,18 @@ export function upsertPlayer(data: SifupData, player: Player) {
 
 export function summarizeMatch(players: MatchPlayer[]) {
   const confirmed = players.filter((item) => item.attendanceStatus === "confirmed");
+  // Inconsistencia resuelta: unpaidCount, paidCount y promisedCount abarcan a todos los jugadores activos/no-out
+  // para que si pendingAmount > 0 (ej. galletas en lista de espera o banca con saldo pendiente),
+  // unpaidCount refleje de manera consistente la cantidad de jugadores que adeudan el monto.
+  const payablePlayers = players.filter((item) => item.attendanceStatus !== "out");
   return {
     confirmedCount: confirmed.length,
-    paidCount: confirmed.filter((item) => item.paymentStatus === "paid").length,
-    unpaidCount: confirmed.filter((item) => item.paymentStatus === "unpaid").length,
-    promisedCount: confirmed.filter((item) => item.paymentStatus === "promised").length,
-    totalExpected: players.reduce((sum, item) => sum + item.amountDue, 0),
-    totalCollected: players.reduce((sum, item) => sum + item.amountPaid, 0),
-    pendingAmount: players.reduce((sum, item) => sum + Math.max(item.amountDue - item.amountPaid, 0), 0),
+    paidCount: payablePlayers.filter((item) => item.paymentStatus === "paid").length,
+    unpaidCount: payablePlayers.filter((item) => item.paymentStatus === "unpaid" && (item.amountDue > item.amountPaid || item.amountDue > 0)).length,
+    promisedCount: payablePlayers.filter((item) => item.paymentStatus === "promised").length,
+    totalExpected: payablePlayers.reduce((sum, item) => sum + item.amountDue, 0),
+    totalCollected: payablePlayers.reduce((sum, item) => sum + item.amountPaid, 0),
+    pendingAmount: payablePlayers.reduce((sum, item) => sum + Math.max(item.amountDue - item.amountPaid, 0), 0),
   };
 }
 

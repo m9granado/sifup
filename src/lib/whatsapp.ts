@@ -21,47 +21,73 @@ function sortRowsMonthlyFirst(rows: MatchPlayer[], players: Player[], monthKey: 
 }
 
 export function matchSummaryMessage(match: Match, rows: MatchPlayer[], players: Player[], monthlyPayments: MonthlyPayment[]) {
+  const squadTarget = match.squadTarget ?? (match.matchFormat === "7x7" ? 14 : MINIMUM_PLAYERS);
   const confirmed = sortRowsMonthlyFirst(rows.filter((row) => row.attendanceStatus === "confirmed"), players, match.monthKey, monthlyPayments);
-  const squadTarget = match.squadTarget ?? MINIMUM_PLAYERS;
   const official = confirmed.slice(0, squadTarget);
-  const overflow = confirmed.slice(squadTarget).map((row) => ({ ...row, note: "Banca" }));
-  const waitlist = sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "waitlist"));
-  const galletas = waitlist.filter((row) => !row.note.toLowerCase().includes("banca"));
-  const bench = [...waitlist.filter((row) => row.note.toLowerCase().includes("banca")), ...overflow];
+  const overflow = confirmed.slice(squadTarget);
+
+  const galletas = sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "galleta" || (row.attendanceStatus === "waitlist" && !row.note.toLowerCase().includes("banca"))));
+  const bench = [
+    ...sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "banca" || (row.attendanceStatus === "waitlist" && row.note.toLowerCase().includes("banca")))),
+    ...overflow,
+  ];
   const out = sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "out"));
-  const officialCount = waitlist.length > 0 || overflow.length > 0 ? official.length : Math.max(squadTarget, official.length);
-  const playerLines = Array.from({ length: officialCount }, (_, index) => {
+
+  const matchDate = new Date(`${match.date}T12:00:00`);
+  const dayNames = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+  const rawDayOfWeek = dayNames[matchDate.getDay()] ?? "Martes";
+  const dayOfWeek = rawDayOfWeek.normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // "Martes", "Miercoles"
+  const dayNum = matchDate.getDate();
+  const monthName = monthNames[matchDate.getMonth()] ?? "Septiembre";
+  const timeFormatted = match.time.length <= 2 ? `${match.time.padStart(2, "0")}:00` : match.time.slice(0, 5);
+
+  const header = `⚽ *SIFUP · Fútbol de ${dayOfWeek.toLowerCase()}*`;
+  const dateTime = `📅 ${dayOfWeek} ${dayNum} ${monthName} · 🕘 ${timeFormatted} hrs`;
+  const location = `📍 ${match.location}`;
+  const court = match.courtPrepaid ? "💰 Cancha pagada ✅" : `💰 Cancha: ${formatCurrency(match.courtCost)}`;
+
+  const slotCount = Math.max(squadTarget, official.length);
+  const playerLines = Array.from({ length: slotCount }, (_, index) => {
     const player = official[index];
-    return `${index + 1}- ${player?.name ?? ""}`;
+    const num = String(index + 1).padStart(2, " ");
+    if (!player) return `${num} · `;
+    const isPaid = player.paymentStatus === "paid" || isMonthlyRow(player, players, match.monthKey, monthlyPayments);
+    return `${num} · ${player.name}${isPaid ? " ✅" : ""}`;
   });
-  const outLines = out.length > 0 ? out.map((player) => `- ${player.name}`) : ["-"];
 
-  return `Partidos ${formatMatchDate(match.date)} ${formatMatchTime(match.time)}
-${match.location}:
+  let galletasBlock = "🍪 *Galletas abiertas:* -";
+  if (galletas.length > 0) {
+    const lines = galletas.map((row, index) => `${index + 1} · ${row.name} 🍪`);
+    galletasBlock = `🍪 *Galletas abiertas*\n${lines.join("\n")}`;
+  }
 
-Jugadores:
+  let benchBlock = "🪑 *Banca:* -";
+  if (bench.length > 0) {
+    const lines = bench.map((row, index) => `${index + 1} · ${row.name}`);
+    benchBlock = `🪑 *Banca*\n${lines.join("\n")}`;
+  }
+
+  let outBlock = "❌ *No pueden:* -";
+  if (out.length > 0) {
+    const lines = out.map((row) => `- ${row.name}`);
+    outBlock = `❌ *No pueden:*\n${lines.join("\n")}`;
+  }
+
+  return `${header}
+${dateTime}
+${location}
+${court}
+
+*Jugadores (${Math.min(confirmed.length, squadTarget)}/${squadTarget})*
 ${playerLines.join("\n")}
 
-${formatGalletasSection(galletas, Math.max(squadTarget - official.length, 0))}
+${galletasBlock}
 
-${formatWaitlistSection("Banca", bench)}
+${benchBlock}
+${outBlock}
 
-No pueden
-${outLines.join("\n")}
-
-Ver partido:
+🔗 Ver partido:
 ${shortMatchUrl(match)}`;
-}
-
-function formatWaitlistSection(title: string, rows: MatchPlayer[]) {
-  return `${title}:\n${rows.map((row, index) => `${index + 1}- ${row.name}`).join("\n") || "-"}`;
-}
-
-function formatGalletasSection(rows: MatchPlayer[], openSlots: number) {
-  return `Galletas abiertas:\n${rows.map((row, index) => {
-    const role = index < openSlots ? "Abierto · puede completar el cupo" : "Abierto · respaldo si alguien se cae";
-    return `🍪 ${index + 1}- ${row.name} (${role})`;
-  }).join("\n") || "-"}`;
 }
 
 export function pendingPaymentsMessage(match: Match, players: MatchPlayer[]) {
@@ -75,7 +101,7 @@ export function pendingPaymentsMessage(match: Match, players: MatchPlayer[]) {
 export function teamsMessage(match: Match, players: MatchPlayer[]) {
   const teamA = sortByWhatsappOrder(players.filter((player) => player.team === "A"));
   const teamB = sortByWhatsappOrder(players.filter((player) => player.team === "B"));
-  const playerLabel = (player: MatchPlayer) => `${player.attendanceStatus === "waitlist" || player.note.toLowerCase().includes("galleta") ? "🍪 " : ""}#${whatsappOrderFor(player)} ${player.name}`;
+  const playerLabel = (player: MatchPlayer) => `${player.attendanceStatus === "galleta" || player.attendanceStatus === "waitlist" || player.note.toLowerCase().includes("galleta") ? "🍪 " : ""}#${whatsappOrderFor(player)} ${player.name}`;
   return `SIFUP - Equipos ${match.date}\n\nEquipo Rojo:\n${teamA.map((player) => `- ${playerLabel(player)}`).join("\n") || "- Por asignar"}\n\nEquipo Amarillo:\n${teamB.map((player) => `- ${playerLabel(player)}`).join("\n") || "- Por asignar"}`;
 }
 
@@ -105,17 +131,6 @@ function labelPayment(status: MatchPlayer["paymentStatus"]) {
   if (status === "paid") return "pagado";
   if (status === "promised") return "prometido";
   return "no pagado";
-}
-
-function formatMatchDate(date: string) {
-  const parsed = new Date(`${date}T00:00:00`);
-  const day = String(parsed.getDate()).padStart(2, "0");
-  return `${day} ${monthNames[parsed.getMonth()] ?? ""}`.trim();
-}
-
-function formatMatchTime(time: string) {
-  const [hour] = time.split(":");
-  return `${Number(hour)} horas`;
 }
 
 export function shortMatchCode(match: Match) {

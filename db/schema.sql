@@ -55,7 +55,7 @@ create table if not exists match_players (
   player_id text references players(id) on delete set null,
   name text not null,
   phone text not null default '',
-  attendance_status text not null check (attendance_status in ('confirmed', 'maybe', 'out', 'waitlist')),
+  attendance_status text not null check (attendance_status in ('confirmed', 'maybe', 'out', 'waitlist', 'banca', 'galleta')),
   payment_status text not null check (payment_status in ('paid', 'unpaid', 'promised')),
   amount_due integer not null default 0,
   amount_paid integer not null default 0,
@@ -89,8 +89,15 @@ create table if not exists match_results (
   notes text not null default ''
 );
 
-alter table matches add column if not exists match_format text not null default 'clasico' check (match_format in ('clasico', 'rey_de_la_cancha'));
-alter table matches add column if not exists squad_target integer not null default 12 check (squad_target in (12, 14));
+alter table matches add column if not exists match_format text not null default 'clasico';
+alter table matches drop constraint if exists matches_match_format_check;
+alter table matches add constraint matches_match_format_check check (match_format in ('clasico', 'rey_de_la_cancha', '7x7'));
+
+alter table matches add column if not exists squad_target integer not null default 12;
+alter table matches drop constraint if exists matches_squad_target_check;
+
+alter table match_players drop constraint if exists match_players_attendance_status_check;
+alter table match_players add constraint match_players_attendance_status_check check (attendance_status in ('confirmed', 'maybe', 'out', 'waitlist', 'banca', 'galleta'));
 
 create table if not exists match_teams (
   id text primary key,

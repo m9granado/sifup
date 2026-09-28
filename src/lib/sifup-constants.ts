@@ -49,4 +49,6 @@ export const ATTENDANCE_LABEL: Record<string, string> = {
   maybe: "Sin respuesta",
   out: "No voy",
   waitlist: "Abierto",
+  galleta: "Galleta abierta",
+  banca: "Banca",
 };

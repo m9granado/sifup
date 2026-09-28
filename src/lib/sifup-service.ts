@@ -3,8 +3,8 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 import { COURT_COST, MONTHLY_AMOUNT, PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "./sifup-constants";
 import { monthKey, weekLabel } from "./sifup-date";
-import { parseWhatsAppList } from "./parser";
-import { deleteMonthlyPayment, getSifupData, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment, savePlayer, mergePlayers as dbMergePlayers } from "./repository";
+import { cleanPlayerName, parseWhatsAppList } from "./parser";
+import { deleteMonthlyPayment, getSifupData, saveMatch, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment, savePlayer, mergePlayers as dbMergePlayers } from "./repository";
 import { isPlayerMonthlyForMonth, newId, newMatchId, newPlayerId, nextMatch, sortByWhatsappOrder, summarizeMatch } from "./store";
 import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, standingsMessage, teamsMessage } from "./whatsapp";
 import { calculateRankingRecord } from "./standings";
@@ -14,9 +14,15 @@ export type ImportWhatsAppMatchInput = {
   message: string;
   matchId?: string;
   amountDue?: number;
+  mode?: "merge" | "replace";
 };
 
-export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MATCH_AMOUNT }: ImportWhatsAppMatchInput) {
+export async function importWhatsAppMatch({
+  message,
+  matchId,
+  amountDue = PER_MATCH_AMOUNT,
+  mode = "merge",
+}: ImportWhatsAppMatchInput) {
   const parsed = parseWhatsAppList(message, amountDue);
   if (parsed.errors.length > 0) {
     throw new Error(parsed.errors.join(" "));
@@ -28,6 +34,15 @@ export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MA
     : data.matches.find((match) => match.date === parsed.match.date && match.time === parsed.match.time);
   const now = new Date().toISOString();
   const targetId = existing?.id ?? newMatchId(parsed.match.date, data.matches.map((match) => match.id));
+
+  const matchFormat = parsed.match.matchFormat ?? existing?.matchFormat ?? "clasico";
+  const squadTarget = parsed.match.squadTarget ?? existing?.squadTarget ?? (matchFormat === "7x7" ? 14 : 12);
+
+  // Modo no destructivo: no pisar notas manuales con placeholder por defecto
+  const existingNotes = existing?.notes?.trim() ?? "";
+  const isDefaultNote = existingNotes === "Importado desde WhatsApp." || existingNotes === "Importado desde WhatsApp por MCP.";
+  const preservedNotes = existingNotes && !isDefaultNote ? existingNotes : "Importado desde WhatsApp por MCP.";
+
   const match: Match = {
     id: targetId,
     date: parsed.match.date,
@@ -39,28 +54,44 @@ export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MA
     monthKey: existing?.monthKey || monthKey(parsed.match.date),
     courtCost: existing?.courtCost ?? COURT_COST,
     courtPrepaid: existing?.courtPrepaid ?? true,
-    notes: existing?.notes || "Importado desde WhatsApp por MCP.",
-    matchFormat: existing?.matchFormat ?? "clasico",
-    squadTarget: existing?.squadTarget ?? 12,
+    notes: preservedNotes,
+    matchFormat,
+    squadTarget,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
 
+  const existingRows = data.matchPlayers.filter((row) => row.matchId === targetId);
   const knownPlayers = [...data.players];
   const rows: MatchPlayer[] = [];
+  const addedPlayerIds = new Set<string>();
+  const addedNames = new Set<string>();
+  const ambiguities: string[] = [];
+
   for (const [index, row] of parsed.players.entries()) {
     const out = row.attendanceStatus === "out";
-    let player = findKnownPlayer(knownPlayers, row.name);
-    if (!player && !out) {
+
+    // 1. Limpieza de emojis y búsqueda unificada
+    const matchResult = resolvePlayerMatch(knownPlayers, row.name, data.matchPlayers);
+    let player = matchResult.player;
+
+    if (matchResult.isAmbiguous) {
+      ambiguities.push(
+        `Ambigüedad con '${row.name}': coincide con ${matchResult.candidates.map((c) => c.player.name).join(", ")}. Por favor verifica el jugador.`,
+      );
+    }
+
+    if (!player && !out && !matchResult.isAmbiguous) {
+      const cleanName = cleanPlayerName(row.name);
       const newPlayer: Player = {
-        id: newPlayerId(row.name.trim(), knownPlayers.map((item) => item.id)),
-        name: row.name.trim(),
-        nickname: row.name.trim().split(" ")[0],
+        id: newPlayerId(cleanName, knownPlayers.map((item) => item.id)),
+        name: cleanName,
+        nickname: cleanName.split(" ")[0],
         phone: row.phone,
         paymentPlan: "perMatch",
         skillLevel: 3,
         active: true,
-        shortName: row.name.trim().slice(0, 3).toUpperCase(),
+        shortName: cleanName.slice(0, 3).toUpperCase(),
         isGoalkeeper: false,
         createdAt: now,
         updatedAt: now,
@@ -69,34 +100,86 @@ export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MA
       knownPlayers.push(newPlayer);
       player = newPlayer;
     }
+
+    // Prevención de duplicados en el mismo partido (caso "Marcelo" -> Marcelo Calderon duplicado)
+    const normRowName = normalizeName(player?.name ?? row.name);
+    if ((player && addedPlayerIds.has(player.id)) || addedNames.has(normRowName)) {
+      continue;
+    }
+    if (player) addedPlayerIds.add(player.id);
+    addedNames.add(normRowName);
+
+    // Modo no destructivo (merge): preservar equipos y pagos previos si existen
+    const existingRow = mode === "merge"
+      ? existingRows.find((er) => (player && er.playerId === player.id) || normalizeName(er.name) === normRowName)
+      : undefined;
+
     const monthly = player ? isPlayerMonthlyForMonth(player.id, match.monthKey, data.players, data.monthlyPayments) : false;
+
+    let paymentStatus = out || monthly ? ("paid" as const) : row.paymentStatus;
+    let amountDue = out || monthly ? 0 : row.amountDue;
+    let amountPaid = out || monthly ? 0 : row.amountPaid;
+    let team = out ? ("none" as const) : row.team;
+    let note = out ? "No puede" : monthly && !row.note ? "mensualidad" : row.note;
+
+    if (existingRow && mode === "merge") {
+      if (existingRow.team !== "none" && team === "none") {
+        team = existingRow.team;
+      }
+      if (existingRow.paymentStatus === "paid" || existingRow.amountPaid > 0) {
+        paymentStatus = existingRow.paymentStatus;
+        amountPaid = existingRow.amountPaid;
+        amountDue = existingRow.amountDue;
+      }
+      if (existingRow.note && !note) {
+        note = existingRow.note;
+      }
+    }
+
     rows.push({
       ...row,
-      id: `${targetId}-player-${index + 1}`,
+      id: existingRow?.id ?? `${targetId}-player-${index + 1}`,
       matchId: targetId,
       playerId: player?.id,
       name: player?.name ?? row.name,
       phone: player?.phone ?? row.phone,
-      paymentStatus: out || monthly ? "paid" : row.paymentStatus,
-      amountDue: out || monthly ? 0 : row.amountDue,
-      amountPaid: out || monthly ? 0 : row.amountPaid,
-      note: out ? "No puede" : monthly && !row.note ? "mensualidad" : row.note,
-      team: out ? "none" : row.team,
+      paymentStatus,
+      amountDue,
+      amountPaid,
+      note,
+      team,
+      teamId: existingRow?.teamId,
       whatsappOrder: row.whatsappOrder || index + 1,
-      createdAt: now,
+      createdAt: existingRow?.createdAt ?? now,
       updatedAt: now,
     });
   }
 
+  // En modo merge, conservar también jugadores existentes en "No pueden" que no vengan en el mensaje
+  if (mode === "merge") {
+    for (const exRow of existingRows) {
+      if (exRow.attendanceStatus === "out") {
+        const norm = normalizeName(exRow.name);
+        if (!addedNames.has(norm) && (!exRow.playerId || !addedPlayerIds.has(exRow.playerId))) {
+          rows.push({
+            ...exRow,
+            updatedAt: now,
+          });
+          if (exRow.playerId) addedPlayerIds.add(exRow.playerId);
+          addedNames.add(norm);
+        }
+      }
+    }
+  }
+
   // The configured squad size is authoritative even when the WhatsApp
-  // message labels every row as "official". Overflow is retained as bench
-  // so it remains visible and can move into the squad later.
+  // message labels every row as "official". Overflow is retained as banca.
   let officialCount = 0;
   for (const row of rows) {
     if (row.attendanceStatus !== "confirmed") continue;
     officialCount += 1;
-    if (officialCount > (match.squadTarget ?? 12)) {
-      row.attendanceStatus = "waitlist";
+    if (officialCount > squadTarget) {
+      row.attendanceStatus = "banca";
       row.note = "Banca";
       row.team = "none";
     }
@@ -105,7 +188,11 @@ export async function importWhatsAppMatch({ message, matchId, amountDue = PER_MA
   await saveMatchWithPlayers(match, rows);
   revalidateSifupViews(match.id);
 
-  return buildMatchPayload(match, rows, data.results.find((result) => result.matchId === match.id), existing ? "updated" : "created", data.players, data.monthlyPayments);
+  const payload = buildMatchPayload(match, rows, data.results.find((result) => result.matchId === match.id), existing ? "updated" : "created", data.players, data.monthlyPayments);
+  return {
+    ...payload,
+    ambiguities: ambiguities.length > 0 ? ambiguities : undefined,
+  };
 }
 
 export async function getNextMatchSummary(input: { matchId?: string; date?: string } = {}) {
@@ -130,8 +217,8 @@ export type AddPlayerToMatchInput = {
 };
 
 export async function addPlayerToMatch(input: AddPlayerToMatchInput) {
-  const name = input.name?.trim();
-  if (!name) throw new Error("Falta el nombre del jugador.");
+  const cleanName = cleanPlayerName(input.name ?? "");
+  if (!cleanName) throw new Error("Falta el nombre del jugador.");
 
   const data = await getSifupData();
   const match = resolveMatch(data.matches, input);
@@ -139,31 +226,46 @@ export async function addPlayerToMatch(input: AddPlayerToMatchInput) {
 
   const currentRows = data.matchPlayers.filter((row) => row.matchId === match.id);
   const result = data.results.find((item) => item.matchId === match.id);
-  const known = findKnownPlayer(data.players, name);
+  const known = findKnownPlayer(data.players, cleanName, data.matchPlayers);
   const already = currentRows.find(
-    (row) => (known && row.playerId === known.id) || normalizeName(row.name) === normalizeName(name),
+    (row) => (known && row.playerId === known.id) || normalizeName(row.name) === normalizeName(cleanName),
   );
+
+  // Si ya existe en el partido, ACTUALIZAR la fila existente sin duplicar (Scope 4)
   if (already) {
-    const payload = buildMatchPayload(match, currentRows, result, "unchanged", data.players, data.monthlyPayments);
-    return { ...payload, note: `${already.name} ya estaba en la lista del partido.` };
+    const now = new Date().toISOString();
+    const updatedRow: MatchPlayer = {
+      ...already,
+      phone: input.phone ?? already.phone,
+      attendanceStatus: input.attendanceStatus ?? already.attendanceStatus,
+      team: input.team ?? already.team,
+      amountDue: input.amountDue !== undefined ? input.amountDue : already.amountDue,
+      updatedAt: now,
+    };
+    const nextRows = currentRows.map((r) => (r.id === already.id ? updatedRow : r));
+    await saveMatchPlayers(match.id, nextRows);
+    revalidateSifupViews(match.id);
+    const payload = buildMatchPayload(match, nextRows, result, "updated", data.players, data.monthlyPayments);
+    return { ...payload, note: `${already.name} ya estaba en la lista del partido y fue actualizado.` };
   }
 
   const monthly = known ? isPlayerMonthlyForMonth(known.id, match.monthKey, data.players, data.monthlyPayments) : false;
-  const attendanceStatus = input.attendanceStatus ?? (monthly ? "confirmed" : "waitlist");
+  // Criterio Scope 4: Por defecto confirmed para mensuales, galleta para no mensuales
+  const attendanceStatus = input.attendanceStatus ?? (monthly ? "confirmed" : "galleta");
   const out = attendanceStatus === "out";
-  const amountDue = input.amountDue ?? PER_MATCH_AMOUNT;
+  const amountDue = input.amountDue ?? (out || monthly ? 0 : PER_MATCH_AMOUNT);
   const now = new Date().toISOString();
   const newRow: MatchPlayer = {
     id: newId("mp"),
     matchId: match.id,
     playerId: known?.id,
-    name: known?.name ?? name,
+    name: known?.name ?? cleanName,
     phone: input.phone ?? known?.phone ?? "",
     attendanceStatus,
     paymentStatus: out || monthly ? "paid" : "unpaid",
     amountDue: out || monthly ? 0 : amountDue,
     amountPaid: 0,
-    note: out ? "No puede" : monthly ? "mensualidad" : "",
+    note: out ? "No puede" : monthly ? "mensualidad" : attendanceStatus === "galleta" ? "Galleta abierta" : "",
     team: out ? "none" : input.team ?? "none",
     whatsappOrder: Math.max(0, ...currentRows.map((row) => row.whatsappOrder || 0)) + 1,
     goals: 0,
@@ -497,36 +599,63 @@ function scorePlayerMatch(player: Player, target: string): { matchType: PlayerMa
   return null;
 }
 
-function findKnownPlayer(players: Player[], name: string) {
-  const rawTarget = normalizeName(name);
-  const target = rawTarget === "wictor" ? "victor" : rawTarget;
+export type PlayerMatchResult = {
+  player?: Player;
+  candidates: { player: Player; matchType: PlayerMatchType; score: number }[];
+  isAmbiguous: boolean;
+};
 
-  // Normalize aliases for Piti / Pituto / Cristopher
-  const pitiAliases = ["piti", "pituto", "cristopher"];
-  if (pitiAliases.includes(target)) {
-    const found = players.find((player) => {
-      const playerName = normalizeName(player.name);
-      const nickname = normalizeName(player.nickname);
-      return pitiAliases.includes(playerName) || pitiAliases.includes(nickname);
-    });
-    if (found) return found;
+export function resolvePlayerMatch(
+  players: Player[],
+  name: string,
+  allMatchPlayers?: MatchPlayer[]
+): PlayerMatchResult {
+  const clean = cleanPlayerName(name);
+  if (!clean) return { candidates: [], isAmbiguous: false };
+  const candidates = rankPlayerCandidates(players, clean);
+  if (candidates.length === 0) {
+    return { candidates: [], isAmbiguous: false };
   }
 
-  return players.find((player) => {
-    const playerName = normalizeName(player.name);
-    const nickname = normalizeName(player.nickname);
-    return (
-      target === playerName ||
-      target === nickname ||
-      (target.length >= 5 && playerName.startsWith(target)) ||
-      (playerName.length >= 5 && target.startsWith(playerName)) ||
-      (nickname.length >= 5 && target.includes(nickname))
-    );
-  });
+  const topScore = candidates[0].score;
+  if (topScore < 60) {
+    return { candidates: [], isAmbiguous: false };
+  }
+
+  const topCandidates = candidates.filter((c) => c.score === topScore);
+
+  if (topCandidates.length === 1) {
+    return { player: topCandidates[0].player, candidates, isAmbiguous: false };
+  }
+
+  // 1. Si alguno tiene coincidencia exacta
+  const exactMatches = topCandidates.filter((c) => c.matchType === "exact");
+  if (exactMatches.length === 1) {
+    return { player: exactMatches[0].player, candidates, isAmbiguous: false };
+  }
+
+  // 2. Si se dispone del histórico de partidos jugados (PJ), preferir al existente con más PJ
+  // (ej. caso "Juanjo" existente con 7 PJ)
+  if (allMatchPlayers && allMatchPlayers.length > 0) {
+    const pj = (pid: string) =>
+      allMatchPlayers.filter((mp) => mp.playerId === pid && mp.attendanceStatus === "confirmed").length;
+    const sorted = [...topCandidates].sort((a, b) => pj(b.player.id) - pj(a.player.id));
+    const pj0 = pj(sorted[0].player.id);
+    const pj1 = pj(sorted[1].player.id);
+    if (pj0 > pj1 && pj0 > 0) {
+      return { player: sorted[0].player, candidates, isAmbiguous: false };
+    }
+  }
+
+  return { candidates: topCandidates, isAmbiguous: true };
 }
 
-function normalizeName(value: string) {
-  return value
+export function findKnownPlayer(players: Player[], name: string, allMatchPlayers?: MatchPlayer[]): Player | undefined {
+  return resolvePlayerMatch(players, name, allMatchPlayers).player;
+}
+
+export function normalizeName(value: string) {
+  return cleanPlayerName(value)
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
@@ -845,4 +974,197 @@ export async function generateBalancedTeams(input: { matchId?: string; date?: st
     messages: { teams: teamsMessage(match, sorted) },
   };
 }
+
+export type UpdateMatchInput = {
+  matchId?: string;
+  date?: string;
+  matchFormat?: Match["matchFormat"];
+  squadTarget?: number;
+  notes?: string;
+  time?: string;
+  location?: string;
+  courtCost?: number;
+  courtPrepaid?: boolean;
+};
+
+export async function updateMatch(input: UpdateMatchInput) {
+  const data = await getSifupData();
+  const match = resolveMatch(data.matches, input);
+  if (!match) throw new Error("No hay partido para actualizar.");
+
+  const now = new Date().toISOString();
+  const matchFormat = input.matchFormat ?? match.matchFormat;
+  const defaultSquadTarget = matchFormat === "7x7" ? 14 : matchFormat === "rey_de_la_cancha" ? 18 : 12;
+  const squadTarget = input.squadTarget ?? (input.matchFormat ? defaultSquadTarget : match.squadTarget ?? defaultSquadTarget);
+
+  const updatedMatch: Match = {
+    ...match,
+    matchFormat,
+    squadTarget,
+    notes: input.notes !== undefined ? input.notes : match.notes,
+    time: input.time ?? match.time,
+    location: input.location ?? match.location,
+    courtCost: input.courtCost ?? match.courtCost,
+    courtPrepaid: input.courtPrepaid ?? match.courtPrepaid,
+    updatedAt: now,
+  };
+
+  await saveMatch(updatedMatch);
+  revalidateSifupViews(updatedMatch.id);
+
+  const rows = data.matchPlayers.filter((r) => r.matchId === match.id);
+  const result = data.results.find((r) => r.matchId === match.id);
+  return buildMatchPayload(updatedMatch, rows, result, "updated", data.players, data.monthlyPayments);
+}
+
+export type UpdateMatchPlayerInput = {
+  matchId?: string;
+  date?: string;
+  name?: string;
+  playerId?: string;
+  matchPlayerId?: string;
+  attendanceStatus?: AttendanceStatus;
+  team?: Team;
+  amountDue?: number;
+  amountPaid?: number;
+  paymentStatus?: MatchPlayer["paymentStatus"];
+  note?: string;
+};
+
+export async function updateMatchPlayer(input: UpdateMatchPlayerInput) {
+  const data = await getSifupData();
+  const match = resolveMatch(data.matches, input);
+  if (!match) throw new Error("No hay partido para actualizar.");
+
+  const rows = data.matchPlayers.filter((r) => r.matchId === match.id);
+  const targetRow = input.matchPlayerId
+    ? rows.find((r) => r.id === input.matchPlayerId)
+    : input.playerId
+      ? rows.find((r) => r.playerId === input.playerId)
+      : input.name
+        ? rows.find((r) => normalizeName(r.name) === normalizeName(input.name!))
+        : undefined;
+
+  if (!targetRow) throw new Error("Jugador no encontrado en el partido.");
+
+  const now = new Date().toISOString();
+  const newStatus = input.attendanceStatus ?? targetRow.attendanceStatus;
+  const isOut = newStatus === "out";
+
+  const updatedRow: MatchPlayer = {
+    ...targetRow,
+    attendanceStatus: newStatus,
+    team: isOut ? "none" : input.team ?? targetRow.team,
+    amountDue: isOut ? 0 : input.amountDue !== undefined ? input.amountDue : targetRow.amountDue,
+    amountPaid: isOut ? 0 : input.amountPaid !== undefined ? input.amountPaid : targetRow.amountPaid,
+    paymentStatus: isOut ? "paid" : input.paymentStatus ?? targetRow.paymentStatus,
+    note: isOut ? "No puede" : input.note !== undefined ? input.note : targetRow.note,
+    updatedAt: now,
+  };
+
+  const updatedRows = rows.map((r) => (r.id === targetRow.id ? updatedRow : r));
+  await saveMatchPlayers(match.id, updatedRows);
+  revalidateSifupViews(match.id);
+
+  const result = data.results.find((r) => r.matchId === match.id);
+  return {
+    status: "updated",
+    player: updatedRow.name,
+    row: publicMatchPlayer(updatedRow),
+    matchPayload: buildMatchPayload(match, updatedRows, result, "updated", data.players, data.monthlyPayments),
+  };
+}
+
+export type RemovePlayerFromMatchInput = {
+  matchId?: string;
+  date?: string;
+  name?: string;
+  playerId?: string;
+  matchPlayerId?: string;
+};
+
+export async function removePlayerFromMatch(input: RemovePlayerFromMatchInput) {
+  const data = await getSifupData();
+  const match = resolveMatch(data.matches, input);
+  if (!match) throw new Error("No hay partido para actualizar.");
+
+  const rows = data.matchPlayers.filter((r) => r.matchId === match.id);
+  const targetRow = input.matchPlayerId
+    ? rows.find((r) => r.id === input.matchPlayerId)
+    : input.playerId
+      ? rows.find((r) => r.playerId === input.playerId)
+      : input.name
+        ? rows.find((r) => normalizeName(r.name) === normalizeName(input.name!))
+        : undefined;
+
+  if (!targetRow) throw new Error("Jugador no encontrado en el partido.");
+
+  const remainingRows = rows.filter((r) => r.id !== targetRow.id);
+  await saveMatchPlayers(match.id, remainingRows);
+  revalidateSifupViews(match.id);
+
+  const result = data.results.find((r) => r.matchId === match.id);
+  return {
+    status: "removed",
+    player: targetRow.name,
+    remainingCount: remainingRows.length,
+    matchPayload: buildMatchPayload(match, remainingRows, result, "updated", data.players, data.monthlyPayments),
+  };
+}
+
+export async function deduplicateMatchPlayers(input: { matchId?: string; date?: string } = {}) {
+  const data = await getSifupData();
+  const match = resolveMatch(data.matches, input);
+  if (!match) throw new Error("No hay partido para actualizar.");
+
+  const rows = data.matchPlayers.filter((r) => r.matchId === match.id);
+  const deduplicatedRows: MatchPlayer[] = [];
+  let mergedCount = 0;
+
+  for (const row of rows) {
+    const norm = normalizeName(row.name);
+    const existingIndex = deduplicatedRows.findIndex(
+      (r) => (row.playerId && r.playerId === row.playerId) || normalizeName(r.name) === norm,
+    );
+
+    if (existingIndex >= 0) {
+      const existing = deduplicatedRows[existingIndex];
+      const combinedPaid = (existing.amountPaid || 0) + (row.amountPaid || 0);
+      const combinedDue = Math.max(existing.amountDue || 0, row.amountDue || 0);
+      const bestStatus: AttendanceStatus =
+        existing.attendanceStatus === "confirmed" || row.attendanceStatus === "confirmed"
+          ? "confirmed"
+          : existing.attendanceStatus !== "out"
+            ? existing.attendanceStatus
+            : row.attendanceStatus;
+      const bestTeam = existing.team !== "none" ? existing.team : row.team;
+
+      deduplicatedRows[existingIndex] = {
+        ...existing,
+        amountPaid: combinedPaid,
+        amountDue: combinedDue,
+        attendanceStatus: bestStatus,
+        team: bestTeam,
+        updatedAt: new Date().toISOString(),
+      };
+      mergedCount++;
+    } else {
+      deduplicatedRows.push(row);
+    }
+  }
+
+  if (mergedCount > 0) {
+    await saveMatchPlayers(match.id, deduplicatedRows);
+    revalidateSifupViews(match.id);
+  }
+
+  const result = data.results.find((r) => r.matchId === match.id);
+  return {
+    status: mergedCount > 0 ? "deduplicated" : "no_duplicates",
+    mergedCount,
+    totalPlayers: deduplicatedRows.length,
+    matchPayload: buildMatchPayload(match, deduplicatedRows, result, "updated", data.players, data.monthlyPayments),
+  };
+}
+
 

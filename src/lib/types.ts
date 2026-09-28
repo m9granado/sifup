@@ -1,10 +1,10 @@
 export type MatchStatus = "open" | "confirmed" | "played" | "closed";
-export type AttendanceStatus = "confirmed" | "maybe" | "out" | "waitlist";
+export type AttendanceStatus = "confirmed" | "maybe" | "out" | "waitlist" | "banca" | "galleta";
 export type PaymentStatus = "paid" | "unpaid" | "promised";
 export type PaymentPlan = "monthly" | "perMatch";
 export type Team = "A" | "B" | "none";
 export type Winner = "A" | "B" | "draw";
-export type MatchFormat = "clasico" | "rey_de_la_cancha";
+export type MatchFormat = "clasico" | "rey_de_la_cancha" | "7x7";
 export type MatchTeamColor = "red" | "gold" | "green" | "cyan";
 export type GameStatus = "in_progress" | "finished";
 export type GameEndReason = "goal_diff" | "time_limit";
@@ -22,7 +22,7 @@ export type Match = {
   courtPrepaid: boolean;
   notes: string;
   matchFormat: MatchFormat;
-  squadTarget?: 12 | 14;
+  squadTarget?: number;
   createdAt: string;
   updatedAt: string;
 };

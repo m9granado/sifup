@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { addPlayerToMatch, assignPlayerTeam, findPlayer, generateBalancedTeams, getMatchTeams, getNextMatchSummary, getPendingPayments, getPlayerStandings, importWhatsAppMatch, mergePlayers, registerMatchPayment, registerMonthlyPayment, replaceMatchTeams, setMatchResult, setMonthlyRoster } from "@/lib/sifup-service";
+import { addPlayerToMatch, assignPlayerTeam, deduplicateMatchPlayers, findPlayer, generateBalancedTeams, getMatchTeams, getNextMatchSummary, getPendingPayments, getPlayerStandings, importWhatsAppMatch, mergePlayers, registerMatchPayment, registerMonthlyPayment, removePlayerFromMatch, replaceMatchTeams, setMatchResult, setMonthlyRoster, updateMatch, updateMatchPlayer } from "@/lib/sifup-service";
 import { PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "@/lib/sifup-constants";
 
 type ToolResult = {
@@ -52,11 +52,12 @@ function createServer() {
     "import_whatsapp_match",
     {
       title: "Importar lista WhatsApp",
-      description: "Parsea una lista de WhatsApp y crea o REEMPLAZA por completo los jugadores de un partido (borra equipos y pagos previos). Para sumar una sola persona sin perder la lista, usa add_player_to_match.",
+      description: "Parsea una lista de WhatsApp y actualiza los jugadores del partido. Por defecto usa modo 'merge' no destructivo (conserva equipos, pagos previos, notas manuales y la lista de 'No pueden'). Usa mode='replace' para sobreescribir desde cero.",
       inputSchema: {
         message: z.string().min(1).describe("Mensaje completo de WhatsApp."),
         matchId: z.string().optional().describe("ID del partido a actualizar. Si se omite, se busca por fecha y hora."),
         amountDue: z.number().int().positive().optional().describe(`Monto por jugador no mensual. Default: ${PER_MATCH_AMOUNT}.`),
+        mode: z.enum(["merge", "replace"]).optional().describe("Modo de importación: 'merge' (default, no destructivo) o 'replace' (reemplaza por completo)."),
       },
     },
     (input) => runTool(() => importWhatsAppMatch(input)),
@@ -78,16 +79,16 @@ function createServer() {
   server.registerTool(
     "add_player_to_match",
     {
-      title: "Agregar jugador al partido",
-      description: "Suma un jugador al partido indicado (o al proximo si no se entrega uno) sin tocar al resto de la lista, los equipos ni los pagos. Vincula al jugador si ya existe en el club.",
+      title: "Agregar o actualizar jugador en el partido",
+      description: "Suma un jugador al partido (o actualiza su fila existente sin duplicar si ya estaba en la lista). Conserva el resto de la lista, los equipos y los pagos. Por defecto: confirmed para mensuales, galleta para no mensuales.",
       inputSchema: {
-        name: z.string().min(1).describe("Nombre del jugador a agregar."),
+        name: z.string().min(1).describe("Nombre del jugador a agregar o actualizar."),
         matchId: z.string().optional().describe("ID del partido. Si se omite, se usa el proximo partido."),
         date: z.string().optional().describe("Fecha YYYY-MM-DD del partido si no se entrega matchId."),
         phone: z.string().optional().describe("Telefono del jugador (opcional)."),
-        attendanceStatus: z.enum(["confirmed", "maybe", "out", "waitlist"]).optional().describe("Estado de asistencia. Por defecto: confirmed para mensuales, waitlist (galleta abierta) para no mensuales; un estado explícito prevalece."),
+        attendanceStatus: z.enum(["confirmed", "galleta", "banca", "out", "waitlist", "maybe"]).optional().describe("Estado de asistencia: confirmed (confirmado), galleta (galleta abierta), banca (banca), out (no puede). Por defecto: confirmed para mensuales, galleta para no mensuales."),
         team: z.enum(["A", "B", "none"]).optional().describe("Equipo: A (Rojo), B (Amarillo) o none. Default: none."),
-        amountDue: z.number().int().positive().optional().describe(`Monto a cobrar si no es mensual. Default: ${PER_MATCH_AMOUNT}.`),
+        amountDue: z.number().int().min(0).optional().describe(`Monto a cobrar si no es mensual. Default: ${PER_MATCH_AMOUNT}.`),
       },
     },
     (input) => runTool(() => addPlayerToMatch(input)),
@@ -260,6 +261,77 @@ function createServer() {
       },
     },
     (input) => runTool(() => generateBalancedTeams(input)),
+  );
+
+  server.registerTool(
+    "update_match",
+    {
+      title: "Actualizar datos y formato del partido",
+      description: "Permite cambiar el formato del partido (clasico, rey_de_la_cancha, 7x7), cupo (squadTarget: 12, 14), notas, hora, lugar y costos. Usar para configurar formato 7x7 (14 cupos) o corregir detalles del partido.",
+      inputSchema: {
+        matchId: z.string().optional().describe("ID del partido. Si se omite, se usa el proximo partido."),
+        date: z.string().optional().describe("Fecha YYYY-MM-DD si no se entrega matchId."),
+        matchFormat: z.enum(["clasico", "rey_de_la_cancha", "7x7"]).optional().describe("Formato de juego: 'clasico' (12 cupos), '7x7' (14 cupos) o 'rey_de_la_cancha'."),
+        squadTarget: z.number().int().positive().optional().describe("Cantidad objetivo de jugadores convocados (ej. 12 para clásico, 14 para 7x7)."),
+        notes: z.string().optional().describe("Notas operativas del partido."),
+        time: z.string().optional().describe("Hora del partido (ej. 21:00)."),
+        location: z.string().optional().describe("Lugar o cancha."),
+        courtCost: z.number().int().positive().optional().describe("Costo de la cancha."),
+        courtPrepaid: z.boolean().optional().describe("Si la cancha ya fue pagada anticipadamente."),
+      },
+    },
+    (input) => runTool(() => updateMatch(input)),
+  );
+
+  server.registerTool(
+    "update_match_player",
+    {
+      title: "Editar fila de jugador en partido",
+      description: "Cambia el estado de un jugador en un partido (confirmado, galleta abierta, banca, no puede), su equipo (A/B/none), montos o notas.",
+      inputSchema: {
+        matchId: z.string().optional().describe("ID del partido. Si se omite, se usa el proximo partido."),
+        date: z.string().optional().describe("Fecha YYYY-MM-DD si no se entrega matchId."),
+        name: z.string().optional().describe("Nombre o apodo del jugador a editar."),
+        playerId: z.string().optional().describe("ID del jugador si se conoce."),
+        matchPlayerId: z.string().optional().describe("ID de la fila en matchPlayer directamente."),
+        attendanceStatus: z.enum(["confirmed", "galleta", "banca", "out", "waitlist", "maybe"]).optional().describe("Estado de asistencia: confirmed (confirmado), galleta (galleta abierta), banca (banca), out (no puede)."),
+        team: z.enum(["A", "B", "none"]).optional().describe("Equipo: A (Rojo), B (Amarillo) o none."),
+        amountDue: z.number().int().min(0).optional().describe("Monto a cobrar."),
+        amountPaid: z.number().int().min(0).optional().describe("Monto pagado."),
+        paymentStatus: z.enum(["paid", "unpaid", "promised"]).optional().describe("Estado de pago: paid, unpaid o promised."),
+        note: z.string().optional().describe("Nota del jugador en este partido."),
+      },
+    },
+    (input) => runTool(() => updateMatchPlayer(input)),
+  );
+
+  server.registerTool(
+    "remove_player_from_match",
+    {
+      title: "Quitar jugador del partido",
+      description: "Elimina completamente a un jugador de la convocatoria del partido.",
+      inputSchema: {
+        matchId: z.string().optional().describe("ID del partido. Si se omite, se usa el proximo partido."),
+        date: z.string().optional().describe("Fecha YYYY-MM-DD si no se entrega matchId."),
+        name: z.string().optional().describe("Nombre o apodo del jugador a quitar."),
+        playerId: z.string().optional().describe("ID del jugador."),
+        matchPlayerId: z.string().optional().describe("ID de la fila matchPlayer."),
+      },
+    },
+    (input) => runTool(() => removePlayerFromMatch(input)),
+  );
+
+  server.registerTool(
+    "deduplicate_match_players",
+    {
+      title: "Corregir duplicados en partido",
+      description: "Detecta y fusiona filas duplicadas del mismo jugador en la convocatoria de un partido, consolidando pagos y equipos.",
+      inputSchema: {
+        matchId: z.string().optional().describe("ID del partido. Si se omite, se usa el proximo partido."),
+        date: z.string().optional().describe("Fecha YYYY-MM-DD si no se entrega matchId."),
+      },
+    },
+    (input) => runTool(() => deduplicateMatchPlayers(input)),
   );
 
   return server;

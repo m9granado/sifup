@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, MapPin, Medal, MessageCircle, Pencil, Plus, RotateCcw, Save, Search, Share, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
+import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, Cookie, MapPin, Medal, MessageCircle, Pencil, Plus, RotateCcw, Save, Search, Share, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
 import {
   clearMatchFinalStandingAction,
   createMatchAction,
@@ -1313,17 +1313,17 @@ function UnifiedMatchRoster({
   }, [rows, players, match.monthKey, monthlyPayments]);
 
   const waitlistRows = useMemo(() => {
-    return sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "waitlist"));
+    return sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "waitlist" || row.attendanceStatus === "galleta" || row.attendanceStatus === "banca"));
   }, [rows]);
-  const galletaRows = waitlistRows.filter((row) => !row.note.toLowerCase().includes("banca"));
-  const benchRows = waitlistRows.filter((row) => row.note.toLowerCase().includes("banca"));
+  const galletaRows = waitlistRows.filter((row) => row.attendanceStatus === "galleta" || (row.attendanceStatus === "waitlist" && !row.note.toLowerCase().includes("banca")));
+  const benchRows = waitlistRows.filter((row) => row.attendanceStatus === "banca" || (row.attendanceStatus === "waitlist" && row.note.toLowerCase().includes("banca")));
 
   const unansweredItems = useMemo(() => {
     return players
       .filter((player) => {
         if (!player.active) return false;
         const row = rows.find((r) => matchRowBelongsToPlayer(r, player, players));
-        if (row && (row.attendanceStatus === "confirmed" || row.attendanceStatus === "out")) {
+        if (row && (row.attendanceStatus === "confirmed" || row.attendanceStatus === "out" || row.attendanceStatus === "galleta" || row.attendanceStatus === "banca" || row.attendanceStatus === "waitlist")) {
           return false;
         }
         return true;
@@ -1647,7 +1647,15 @@ function UnifiedMatchRoster({
                               <span className="inline-flex items-center rounded bg-(--cyan)/15 px-1 py-0.5 text-[8px] font-black text-(--cyan) uppercase tracking-wider">
                                 Mensual
                               </span>
-                            ) : null}
+                            ) : (
+                              <span
+                                title="Invitado (galleta)"
+                                aria-label="Invitado (galleta)"
+                                className="inline-flex items-center text-(--gold)"
+                              >
+                                <Cookie size={14} className="shrink-0" />
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="px-3 py-2.5 text-center text-xs font-bold text-(--muted)">
@@ -1819,7 +1827,15 @@ function UnifiedMatchRoster({
                               <span className="inline-flex items-center rounded bg-(--cyan)/15 px-1 py-0.5 text-[8px] font-black text-(--cyan) uppercase tracking-wider">
                                 Mensual
                               </span>
-                            ) : null}
+                            ) : (
+                              <span
+                                title="Invitado (galleta)"
+                                aria-label="Invitado (galleta)"
+                                className="inline-flex items-center text-(--gold)"
+                              >
+                                <Cookie size={14} className="shrink-0" />
+                              </span>
+                            )}
                             {item.totalPlayed >= 2 ? (
                               <span className="inline-flex items-center rounded bg-white/[0.08] px-1 py-0.5 text-[9px] font-semibold text-(--muted)">
                                 {item.totalPlayed} PJ hist.
@@ -1979,7 +1995,15 @@ function UnifiedMatchRoster({
                               <span className="inline-flex items-center rounded bg-(--cyan)/15 px-1 py-0.5 text-[8px] font-black text-(--cyan) uppercase tracking-wider">
                                 Mensual
                               </span>
-                            ) : null}
+                            ) : (
+                              <span
+                                title="Invitado (galleta)"
+                                aria-label="Invitado (galleta)"
+                                className="inline-flex items-center text-(--gold)"
+                              >
+                                <Cookie size={14} className="shrink-0" />
+                              </span>
+                            )}
                             {row.note ? (
                               <span className="text-[10px] italic text-(--muted)">({row.note})</span>
                             ) : null}
@@ -2255,9 +2279,11 @@ function PlayerDetailModal({
           <span>Asistencia</span>
           <select className="h-10 w-full rounded-md border border-(--border) bg-(--panel-strong) px-3 text-sm text-white" value={draft.attendanceStatus} onChange={(event) => setDraft({ ...draft, attendanceStatus: event.target.value as MatchPlayer["attendanceStatus"] })}>
             <option value="confirmed">Sí voy</option>
+            <option value="galleta">Galleta abierta</option>
+            <option value="banca">Banca</option>
             <option value="maybe">Sin respuesta</option>
             <option value="out">No voy</option>
-            <option value="waitlist">Abierto</option>
+            <option value="waitlist">Abierto (legacy)</option>
           </select>
         </label>
         <Input label="# WhatsApp" type="number" value={String(draft.whatsappOrder)} onChange={(value) => setDraft({ ...draft, whatsappOrder: Number(value) })} />
@@ -5522,7 +5548,7 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
   const confirmedRows = rows.filter((r) => r.attendanceStatus === "confirmed");
   const squadTarget = currentMatch.squadTarget ?? SQUAD_TARGET;
   const openSlots = Math.max(squadTarget - confirmedRows.length, 0);
-  const galletaRows = sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "waitlist" && !row.note.toLowerCase().includes("banca")));
+  const galletaRows = sortByWhatsappOrder(rows.filter((row) => (row.attendanceStatus === "galleta" || row.attendanceStatus === "waitlist") && !row.note.toLowerCase().includes("banca")));
   const playableGalletas = galletaRows.slice(0, openSlots);
   const playableRowIds = new Set(playableGalletas.map((row) => row.id));
   const teamRows = [...confirmedRows, ...playableGalletas];
@@ -5536,8 +5562,8 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
   // Orden operativo: primero el ranking mensual y las galletas siempre al final.
   // Dentro de cada bloque conservamos desempates estables por puntos y número de WhatsApp.
   const sortByMonthlyRankingThenGalleta = (teamRows: MatchPlayer[]) => [...teamRows].sort((left, right) => {
-    const leftIsGalleta = left.attendanceStatus === "waitlist";
-    const rightIsGalleta = right.attendanceStatus === "waitlist";
+    const leftIsGalleta = left.attendanceStatus === "galleta" || left.attendanceStatus === "waitlist";
+    const rightIsGalleta = right.attendanceStatus === "galleta" || right.attendanceStatus === "waitlist";
     if (leftIsGalleta !== rightIsGalleta) return leftIsGalleta ? 1 : -1;
 
     if (leftIsGalleta && rightIsGalleta) {
