@@ -126,7 +126,10 @@ export async function importWhatsAppMatch({
       if (existingRow.team !== "none" && team === "none") {
         team = existingRow.team;
       }
-      if (existingRow.paymentStatus === "paid" || existingRow.amountPaid > 0) {
+      // Solo se preserva el monto si hubo un pago real: "paid" con amountPaid=0 es
+      // el estado trivial de una fila mensual/gratis, y si el jugador ya no es
+      // mensual ese $0 quedaria pegado para siempre (bug real: ver German 09-15).
+      if (existingRow.amountPaid > 0) {
         paymentStatus = existingRow.paymentStatus;
         amountPaid = existingRow.amountPaid;
         amountDue = existingRow.amountDue;
@@ -1052,14 +1055,30 @@ export async function updateMatchPlayer(input: UpdateMatchPlayerInput) {
   const now = new Date().toISOString();
   const newStatus = input.attendanceStatus ?? targetRow.attendanceStatus;
   const isOut = newStatus === "out";
+  const isMonthlyPlayer = targetRow.playerId
+    ? isPlayerMonthlyForMonth(targetRow.playerId, match.monthKey, data.players, data.monthlyPayments)
+    : false;
+  // Un jugador "galleta" que queda confirmado nunca deberia quedar en $0: si no
+  // se paso un monto explicito y el que tenia guardado es 0 (arrastrado de una
+  // lista de espera o de cuando todavia figuraba mensual), se recalcula al
+  // precio vigente para que no juegue gratis por error.
+  const shouldRepriceGalleta = !isOut && newStatus === "confirmed" && !isMonthlyPlayer && input.amountDue === undefined && targetRow.amountDue === 0;
+  const amountDue = isOut ? 0 : input.amountDue !== undefined ? input.amountDue : shouldRepriceGalleta ? PER_MATCH_AMOUNT : targetRow.amountDue;
+  const amountPaid = isOut ? 0 : input.amountPaid !== undefined ? input.amountPaid : targetRow.amountPaid;
 
   const updatedRow: MatchPlayer = {
     ...targetRow,
     attendanceStatus: newStatus,
     team: isOut ? "none" : input.team ?? targetRow.team,
-    amountDue: isOut ? 0 : input.amountDue !== undefined ? input.amountDue : targetRow.amountDue,
-    amountPaid: isOut ? 0 : input.amountPaid !== undefined ? input.amountPaid : targetRow.amountPaid,
-    paymentStatus: isOut ? "paid" : input.paymentStatus ?? targetRow.paymentStatus,
+    amountDue,
+    amountPaid,
+    paymentStatus: isOut
+      ? "paid"
+      : input.paymentStatus !== undefined
+        ? input.paymentStatus
+        : shouldRepriceGalleta
+          ? (amountPaid >= amountDue ? "paid" : "unpaid")
+          : targetRow.paymentStatus,
     note: isOut ? "No puede" : input.note !== undefined ? input.note : targetRow.note,
     updatedAt: now,
   };

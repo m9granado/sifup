@@ -184,6 +184,8 @@ function computePlayerStats(player: Player, data: SifupData) {
   return {
     appearances,
     ...record,
+    matchDebt,
+    monthlyDebt,
     pendingDebt: matchDebt + monthlyDebt,
   };
 }
@@ -5115,9 +5117,16 @@ export function PlayerDetailPage({
           </div>
         </div>
       </section>
-      <Card className="mt-4">
-        <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Deuda pendiente</p>
+      <Card className={`mt-4 ${stats.pendingDebt > 0 ? "border-(--red)/30 bg-(--red)/10" : "border-(--green)/30 bg-(--green)/10"}`}>
+        <p className={`text-xs font-black uppercase tracking-wide ${stats.pendingDebt > 0 ? "text-(--red)" : "text-(--green)"}`}>
+          {stats.pendingDebt > 0 ? "Con deuda" : "Al dia"}
+        </p>
         <p className={`mt-1 text-2xl font-black ${stats.pendingDebt > 0 ? "text-(--red)" : "text-(--green)"}`}>{formatCurrency(stats.pendingDebt)}</p>
+        {stats.pendingDebt > 0 && stats.matchDebt > 0 && stats.monthlyDebt > 0 ? (
+          <p className="mt-1 text-xs font-semibold text-(--muted)">
+            {formatCurrency(stats.matchDebt)} de galletas + {formatCurrency(stats.monthlyDebt)} de mensualidad
+          </p>
+        ) : null}
       </Card>
       <Card className="mt-4 space-y-3">
         <div>

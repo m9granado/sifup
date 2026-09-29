@@ -4,10 +4,9 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Clock, Plus, Scale, TrendingUp, Wallet } from "lucide-react";
-import { addClubExpenseAction, bumpMatchAmountDueAction, saveMonthlyPaymentAction, setMatchPlayerPaymentStatusAction } from "@/app/actions";
+import { addClubExpenseAction, saveMonthlyPaymentAction, setMatchPlayerPaymentStatusAction } from "@/app/actions";
 import { Button, Card, findKnownPlayer, Input, Modal, PageTitle, Stat } from "./SifupWorkspace";
 import { formatCurrency, isPlayerMonthlyForMonth, monthLabel, monthlyPaymentFor, newId, shiftMonthKey } from "@/lib/store";
-import { PER_MATCH_AMOUNT } from "@/lib/sifup-constants";
 import type { ClubExpense, Match, MatchPlayer, MonthlyPayment, Player, SifupData } from "@/lib/types";
 
 type GalletaPlayerSummary = {
@@ -19,13 +18,10 @@ type GalletaPlayerSummary = {
   rows: { match: Match; row: MatchPlayer }[];
 };
 
-const LEGACY_MATCH_AMOUNT = 3500;
-
 export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; monthKey: string; canEdit: boolean }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [optimisticCuota, setOptimisticCuota] = useState<Record<string, "paid" | "unpaid">>({});
   const [optimisticGalleta, setOptimisticGalleta] = useState<Record<string, "paid" | "unpaid">>({});
@@ -43,13 +39,11 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
   const cuotaPayments = monthlyPlayers.map((player) => ({
     player,
     payment: monthlyPaymentFor(player, monthKey, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey)),
-    playedCount: data.matchPlayers.filter((row) => matchIdsInMonth.has(row.matchId) && row.playerId === player.id && row.attendanceStatus === "confirmed").length,
   }));
   const paidCount = cuotaPayments.filter((item) => item.payment.paymentStatus === "paid").length;
   const cuotaCollected = cuotaPayments.reduce((sum, item) => sum + item.payment.amountPaid, 0);
   const cuotaExpected = cuotaPayments.reduce((sum, item) => sum + item.payment.expectedAmount, 0);
   const cuotaPending = cuotaPayments.reduce((sum, item) => sum + Math.max(item.payment.expectedAmount - item.payment.amountPaid, 0), 0);
-  const cuotaPlayedTotal = cuotaPayments.reduce((sum, item) => sum + item.playedCount, 0);
 
   const gastoPartidos = matchesInMonth.reduce((sum, match) => sum + match.totalCost, 0);
   const expensesInMonth = [...data.clubExpenses.filter((expense) => expense.expenseDate.slice(0, 7) === monthKey)].sort((a, b) => a.expenseDate.localeCompare(b.expenseDate));
@@ -142,20 +136,6 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
     });
   }
 
-  function bumpPrice() {
-    setError("");
-    setNotice("");
-    startTransition(async () => {
-      try {
-        const count = await bumpMatchAmountDueAction(monthKey, LEGACY_MATCH_AMOUNT, PER_MATCH_AMOUNT);
-        setNotice(count > 0 ? `Actualizadas ${count} galletas a ${formatCurrency(PER_MATCH_AMOUNT)}.` : "No quedaban galletas con el monto anterior.");
-        router.refresh();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "No se pudo actualizar el monto de las galletas.");
-      }
-    });
-  }
-
   return (
     <div>
       <Link href="/payments" className="mb-3 inline-flex items-center gap-1 text-sm font-semibold text-(--muted) transition hover:text-white">
@@ -178,7 +158,6 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
       />
 
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
-      {notice ? <p className="mb-4 rounded-md bg-(--green)/15 px-3 py-2 text-sm font-bold text-(--green)">{notice}</p> : null}
 
       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Costos del mes" value={formatCurrency(-gastoTotal)} tone="red" icon={<Wallet size={18} />} />
@@ -200,8 +179,8 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="space-y-3">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+        <Card className="space-y-3 lg:col-span-3">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-lg font-black text-white">Gastos</h2>
             {canEdit ? (
@@ -239,17 +218,12 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
           </div>
         </Card>
 
-        <Card className="space-y-3">
+        <Card className="space-y-3 lg:col-span-6">
           <div className="flex items-start justify-between gap-2">
             <div>
               <h2 className="text-lg font-black text-white">Situacion galletas</h2>
               <p className="text-xs text-(--muted)">Solo jugadores que jugaron algun partido este mes.</p>
             </div>
-            {canEdit ? (
-              <Button variant="secondary" onClick={bumpPrice} disabled={isPending}>
-                Subir galletas a {formatCurrency(PER_MATCH_AMOUNT)}
-              </Button>
-            ) : null}
           </div>
           <div className="overflow-x-auto rounded-lg border border-(--border)">
             <table className="w-full text-sm">
@@ -275,7 +249,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
                         )}
                       </td>
                       <td className="px-2 py-1.5">
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="flex flex-nowrap gap-1.5 overflow-x-auto">
                           {sortedRows.map(({ match, row }) => {
                             const paid = (optimisticGalleta[row.id] ?? row.paymentStatus) === "paid";
                             const title = `${match.date}: ${paid ? "Pagado" : "Pendiente"}${canEdit ? " - toca para cambiar" : ""}`;
@@ -286,7 +260,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
                                 disabled={!canEdit || isPending}
                                 title={title}
                                 onClick={() => toggleGalleta(row)}
-                                className={`min-h-9 min-w-9 rounded px-2 py-1.5 text-xs font-bold transition disabled:cursor-not-allowed ${paid ? "bg-(--green)/15 text-(--green)" : "bg-(--red)/15 text-(--red)"} ${canEdit ? "hover:opacity-80" : ""}`}
+                                className={`min-h-9 min-w-9 shrink-0 rounded px-2 py-1.5 text-xs font-bold transition disabled:cursor-not-allowed ${paid ? "bg-(--green)/15 text-(--green)" : "bg-(--red)/15 text-(--red)"} ${canEdit ? "hover:opacity-80" : ""}`}
                               >
                                 {match.date.slice(5)}
                               </button>
@@ -318,7 +292,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
           </div>
         </Card>
 
-        <Card className="space-y-3">
+        <Card className="space-y-3 lg:col-span-3">
           <div>
             <h2 className="text-lg font-black text-white">Oficiales Mensuales</h2>
             <p className="text-xs font-semibold text-(--muted)">{paidCount}/{monthlyPlayers.length} pagaron</p>
@@ -328,12 +302,11 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
               <thead className="bg-white/[0.04] text-[10px] font-black uppercase tracking-wide text-(--muted)">
                 <tr>
                   <th className="px-2 py-1.5 text-left">Jugador</th>
-                  <th className="px-2 py-1.5 text-right">Partidos</th>
                   <th className="px-2 py-1.5 text-right">Cuota</th>
                 </tr>
               </thead>
               <tbody>
-                {cuotaPayments.map(({ player, payment, playedCount }) => {
+                {cuotaPayments.map(({ player, payment }) => {
                   const cuotaKey = `${monthKey}:${player.id}`;
                   const paid = (optimisticCuota[cuotaKey] ?? payment.paymentStatus) === "paid";
                   const amountCell = canEdit ? (
@@ -354,21 +327,19 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
                       <td className="whitespace-nowrap px-2 py-1.5">
                         <Link href={`/players/${player.id}`} className="font-semibold text-white hover:text-(--cyan) hover:underline">{player.name}</Link>
                       </td>
-                      <td className="whitespace-nowrap px-2 py-1.5 text-right text-(--muted)">{playedCount}</td>
                       <td className="whitespace-nowrap px-2 py-1.5 text-right">{amountCell}</td>
                     </tr>
                   );
                 })}
                 {monthlyPlayers.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="px-2 py-2 text-sm text-(--muted)">Sin jugadores mensuales este mes.</td>
+                    <td colSpan={2} className="px-2 py-2 text-sm text-(--muted)">Sin jugadores mensuales este mes.</td>
                   </tr>
                 ) : null}
               </tbody>
               <tfoot>
                 <tr className="border-t border-(--border) font-black text-white">
                   <td className="px-2 py-1.5">Total</td>
-                  <td className="whitespace-nowrap px-2 py-1.5 text-right">{cuotaPlayedTotal}</td>
                   <td className="whitespace-nowrap px-2 py-1.5 text-right">
                     <span className="text-(--green)">{formatCurrency(cuotaCollected)}</span>
                     <span className="text-(--muted)"> / </span>
