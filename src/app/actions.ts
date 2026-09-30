@@ -23,7 +23,7 @@ import {
   updateMatchGameScore,
   mergePlayers as repositoryMergePlayers,
 } from "@/lib/repository";
-import { updateMatch, type UpdateMatchInput } from "@/lib/sifup-service";
+import { setMonthlyRoster, updateMatch, type UpdateMatchInput } from "@/lib/sifup-service";
 import type { ClubExpense, Match, MatchGame, MatchPlayer, MatchResult, MatchTeam, MonthlyPayment, Player } from "@/lib/types";
 
 export type LoginState = { error: string };
@@ -205,6 +205,12 @@ export async function saveMonthlyPaymentAction(payment: MonthlyPayment) {
 export async function removeMonthlyPaymentAction(playerId: string, monthKey: string) {
   await requirePermission("payments");
   await deleteMonthlyPayment(playerId, monthKey);
+  revalidateAdminViews();
+}
+
+export async function setMonthlyRosterAction(playerId: string, monthKey: string, monthly: boolean, cancelGalletas: boolean) {
+  await requirePermission("payments");
+  await setMonthlyRoster({ playerId, monthKey, monthly, cancelGalletas });
   revalidateAdminViews();
 }
 

@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { COURT_COST, MONTHLY_AMOUNT, PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "./sifup-constants";
 import { monthKey, weekLabel } from "./sifup-date";
 import { cleanPlayerName, parseWhatsAppList } from "./parser";
-import { deleteMonthlyPayment, getSifupData, saveMatch, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment, savePlayer, mergePlayers as dbMergePlayers } from "./repository";
-import { isPlayerMonthlyForMonth, newId, newMatchId, newPlayerId, nextMatch, sortByWhatsappOrder, summarizeMatch } from "./store";
+import { applyRosterChange as dbApplyRosterChange, deleteMonthlyPayment, getSifupData, saveMatch, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment, savePlayer, mergePlayers as dbMergePlayers } from "./repository";
+import { isPlayerMonthlyForMonth, newId, newMatchId, newPlayerId, nextMatch, planRosterChange, sortByWhatsappOrder, summarizeMatch } from "./store";
 import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, standingsMessage, teamsMessage } from "./whatsapp";
 import { calculateRankingRecord } from "./standings";
 import type { AttendanceStatus, Match, MatchPlayer, MatchResult, MonthlyPayment, Player, Team, Winner } from "./types";
@@ -352,6 +352,7 @@ export type SetMonthlyRosterInput = {
   playerId?: string;
   monthKey?: string;
   monthly: boolean;
+  cancelGalletas?: boolean;
 };
 
 export async function setMonthlyRoster(input: SetMonthlyRosterInput) {
@@ -365,34 +366,44 @@ export async function setMonthlyRoster(input: SetMonthlyRosterInput) {
 
   const targetMonth = input.monthKey ?? currentMonthKey();
   const existing = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === targetMonth);
+  const playerRows = data.matchPlayers.filter((row) => row.playerId === player.id || findKnownPlayer(data.players, row.name)?.id === player.id);
+  const plan = planRosterChange({ playerRows, matches: data.matches, monthKey: targetMonth, monthly: input.monthly, payment: existing, cancelGalletas: input.cancelGalletas ?? false });
 
   if (input.monthly) {
-    if (existing) {
-      return { status: "unchanged", player: player.name, monthKey: targetMonth, note: `${player.name} ya estaba como fijo en ${targetMonth}.` };
-    }
     const now = new Date().toISOString();
-    const payment: MonthlyPayment = {
-      id: `monthly-${targetMonth}-${player.id}`,
-      playerId: player.id,
-      monthKey: targetMonth,
-      expectedAmount: MONTHLY_AMOUNT,
-      amountPaid: 0,
-      paymentStatus: "unpaid",
-      note: `Mensualidad ${targetMonth}, vencimiento 10/${targetMonth.slice(5)}`,
-      createdAt: now,
-      updatedAt: now,
-    };
-    await saveMonthlyPayment(payment);
+    const upsertPayment: MonthlyPayment | undefined = existing
+      ? undefined
+      : {
+          id: `monthly-${targetMonth}-${player.id}`,
+          playerId: player.id,
+          monthKey: targetMonth,
+          expectedAmount: MONTHLY_AMOUNT,
+          amountPaid: 0,
+          paymentStatus: "unpaid",
+          note: `Mensualidad ${targetMonth}, vencimiento 10/${targetMonth.slice(5)}`,
+          createdAt: now,
+          updatedAt: now,
+        };
+    if (!upsertPayment && plan.rowUpdates.length === 0) {
+      return { status: "unchanged", player: player.name, monthKey: targetMonth, ...rosterWarnings(plan, true), note: `${player.name} ya estaba como fijo en ${targetMonth}.` };
+    }
+    await dbApplyRosterChange({ playerId: player.id, monthKey: targetMonth, upsertPayment, rowUpdates: plan.rowUpdates });
     revalidateSifupViews();
-    return { status: "added", player: player.name, monthKey: targetMonth, note: `${player.name} agregado como fijo (mensual) en ${targetMonth}.` };
+    return { status: upsertPayment ? "added" : "galletas_cancelled", player: player.name, monthKey: targetMonth, ...rosterWarnings(plan, true), note: `${player.name} agregado como fijo (mensual) en ${targetMonth}.` };
   }
 
   if (!existing) {
     return { status: "unchanged", player: player.name, monthKey: targetMonth, note: `${player.name} ya era galleta en ${targetMonth}.` };
   }
-  await deleteMonthlyPayment(player.id, targetMonth);
+  await dbApplyRosterChange({ playerId: player.id, monthKey: targetMonth, deletePayment: true, rowUpdates: plan.rowUpdates });
   revalidateSifupViews();
-  return { status: "removed", player: player.name, monthKey: targetMonth, note: `${player.name} pasa a galleta en ${targetMonth}.` };
+  return { status: "removed", player: player.name, monthKey: targetMonth, ...rosterWarnings(plan, false), note: `${player.name} pasa a galleta en ${targetMonth}.` };
+}
+
+function rosterWarnings(plan: ReturnType<typeof planRosterChange>, toMonthly: boolean) {
+  return toMonthly
+    ? { unpaidGalletaCount: plan.unpaidGalletaCount, unpaidGalletaAmount: plan.unpaidGalletaAmount, galletasCancelled: plan.rowUpdates.length, paidGalletaAmount: plan.paidGalletaAmount }
+    : { repricedToGalleta: plan.repricedCount, discardedPaidMonthlyAmount: plan.paidMonthlyAmount };
 }
 
 export type RegisterMatchPaymentInput = {

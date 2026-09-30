@@ -417,6 +417,25 @@
   gap: 16px;
 }
 
+.player-head {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(7, 16, 13, 0.92);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow);
+}
+
+@media (max-width: 1180px) {
+  .player-head {
+    top: 80px;
+  }
+}
+
 .panel {
   border: 1px solid var(--border);
   border-radius: var(--radius);

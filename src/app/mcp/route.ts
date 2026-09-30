@@ -119,6 +119,7 @@ function createServer() {
         playerId: z.string().optional().describe("ID del jugador si se conoce."),
         monthKey: z.string().optional().describe("Mes YYYY-MM. Default: mes actual."),
         monthly: z.boolean().describe("true para marcarlo fijo (mensual) ese mes, false para quitarlo del roster (pasa a galleta)."),
+        cancelGalletas: z.boolean().optional().describe("Solo al marcar fijo: si true, cancela las galletas impagas de ese mes (las cubre la mensualidad). Default false: solo avisa el monto en la respuesta. Al pasar a galleta, los partidos del mes a $0 se recalculan siempre a la tarifa de galleta."),
       },
     },
     (input) => runTool(() => setMonthlyRoster(input)),

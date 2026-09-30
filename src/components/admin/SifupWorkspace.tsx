@@ -3,18 +3,19 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, Cookie, MapPin, Medal, MessageCircle, Pencil, Plus, RotateCcw, Save, Search, Share, Shield, Sparkles, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
+import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, Clock, Cookie, MapPin, Medal, MessageCircle, Pencil, Plus, RotateCcw, Save, Search, Share, Shield, Sparkles, TriangleAlert, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
 import { downloadTeamsChallengeImage, type FormResult } from "@/lib/teams-image";
 import {
   clearMatchFinalStandingAction,
   createMatchAction,
   finishMatchGameAction,
   markMatchPlayerPaidAction,
-  removeMonthlyPaymentAction,
   saveMatchAction,
   saveMatchDetailAction,
   saveMatchTeamsAction,
   saveMonthlyPaymentAction,
+  setMonthlyRosterAction,
+  setMatchPlayerPaymentStatusAction,
   savePlayerAction,
   setMatchFinalStandingAction,
   startMatchGameAction,
@@ -28,7 +29,8 @@ import {
 import type { PlayerLogin } from "@/lib/auth";
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
-import { adjacentMatches, currentMonthKey, formatCurrency, isPlayerMonthlyForMonth, monthLabel, monthlyPaymentFor, newId, newMatchId, newPlayerId, nextMatch, replaceMatchPlayers, shiftMonthKey, sortByWhatsappOrder, summarizeMatch, upsertMatch, upsertMonthlyPayment, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
+import type { RosterChangePlan } from "@/lib/store";
+import { adjacentMatches, currentMonthKey, formatCurrency, isPlayerMonthlyForMonth, monthLabel, monthlyPaymentFor, newId, newMatchId, newPlayerId, nextMatch, planRosterChange, replaceMatchPlayers, shiftMonthKey, sortByWhatsappOrder, summarizeMatch, upsertMatch, upsertMonthlyPayment, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
 import { calculateRankingRecord, pointsForMatchRow, rankingMatches } from "@/lib/standings";
 import { matchSummaryMessage, royalTeamsMessage, teamsMessage } from "@/lib/whatsapp";
 import { COURT_COST, LOSS_POINTS, MATCH_TEAM_COLOR_CLASSES, MATCH_TEAM_COLOR_LABEL, MATCH_TEAM_DEFAULT_COLORS, MONTHLY_AMOUNT, PAYMENT_STATUS_LABEL, PER_MATCH_AMOUNT, ROYAL_GAME_TIME_LIMIT_MIN, ROYAL_GOAL_DIFF_TO_WIN, ROYAL_SQUAD_TARGET, SQUAD_TARGET, WIN_POINTS } from "@/lib/sifup-constants";
@@ -174,6 +176,49 @@ function buildPlayerStandings(data: SifupData) {
     const standing = { rank: index + 1, points: row.points, played: row.played, wins: row.wins, draws: row.draws, losses: row.losses };
     return [[row.id, standing], [row.name.toLowerCase(), standing]] as const;
   }));
+}
+
+function rosterPlanFor(data: SifupData, player: Player, monthKey: string, monthly: boolean, cancelGalletas = true) {
+  const payment = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey);
+  // Al pasar a galleta solo se recalculan los partidos si el jugador estaba en el roster mensual de ese mes.
+  const playerRows = !monthly && !payment ? [] : data.matchPlayers.filter((row) => matchRowBelongsToPlayer(row, player, data.players));
+  return planRosterChange({ playerRows, matches: data.matches, monthKey, monthly, payment, cancelGalletas });
+}
+
+function applyRosterPlanLocally(data: SifupData, player: Player, monthKey: string, monthly: boolean, plan: RosterChangePlan): SifupData {
+  const now = new Date().toISOString();
+  const updates = new Map(plan.rowUpdates.map((update) => [update.id, update]));
+  const matchPlayers = data.matchPlayers.map((row) => (updates.has(row.id) ? { ...row, ...updates.get(row.id), updatedAt: now } : row));
+  const monthlyPayments = monthly
+    ? upsertMonthlyPayment(data.monthlyPayments, monthlyPaymentFor(player, monthKey, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey)))
+    : data.monthlyPayments.filter((item) => !(item.playerId === player.id && item.monthKey === monthKey));
+  return { ...data, matchPlayers, monthlyPayments };
+}
+
+// Cambia mensual/galleta de un jugador en un mes y reconcilia los cobros de sus partidos.
+// `askCancel` = true pregunta antes de cancelar galletas impagas; false las cancela directo.
+function changeRosterMembership(
+  data: SifupData,
+  commit: (next: SifupData) => void,
+  setError: (message: string) => void,
+  player: Player,
+  monthKey: string,
+  monthly: boolean,
+  askCancel = true,
+) {
+  let cancelGalletas = true;
+  const preview = rosterPlanFor(data, player, monthKey, monthly);
+  if (monthly && preview.unpaidGalletaCount > 0 && askCancel) {
+    cancelGalletas = confirm(`${player.name} tiene ${preview.unpaidGalletaCount} galleta(s) sin pagar en ${monthLabel(monthKey)} (${formatCurrency(preview.unpaidGalletaAmount)}).
+
+Aceptar: cancelarlas (las cubre la mensualidad).
+Cancelar: mantenerlas como deuda.`);
+  }
+  if (!monthly && preview.paidMonthlyAmount > 0 && !confirm(`${player.name} ya pago ${formatCurrency(preview.paidMonthlyAmount)} de mensualidad en ${monthLabel(monthKey)}. Al pasar a galleta ese registro se descarta. ¿Continuar?`)) return;
+  const plan = monthly && !cancelGalletas ? rosterPlanFor(data, player, monthKey, monthly, false) : preview;
+  setMonthlyRosterAction(player.id, monthKey, monthly, cancelGalletas)
+    .then(() => commit(applyRosterPlanLocally(data, player, monthKey, monthly, plan)))
+    .catch((err) => setError(err instanceof Error ? err.message : monthly ? "No se pudo agregar al roster de fijos." : "No se pudo quitar del roster de fijos."));
 }
 
 function computePlayerStats(player: Player, data: SifupData) {
@@ -3982,16 +4027,7 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
   }
 
   function toggleRosterMembership(player: Player, monthKey: string, shouldBeMonthly: boolean) {
-    if (shouldBeMonthly) {
-      const payment = monthlyPaymentFor(player, monthKey, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey));
-      saveMonthlyPaymentAction(payment)
-        .then(() => commit({ ...data, monthlyPayments: upsertMonthlyPayment(data.monthlyPayments, payment) }))
-        .catch((err) => setError(err instanceof Error ? err.message : "No se pudo agregar al roster de fijos."));
-      return;
-    }
-    removeMonthlyPaymentAction(player.id, monthKey)
-      .then(() => commit({ ...data, monthlyPayments: data.monthlyPayments.filter((item) => !(item.playerId === player.id && item.monthKey === monthKey)) }))
-      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo quitar del roster de fijos."));
+    changeRosterMembership(data, commit, setError, player, monthKey, shouldBeMonthly);
   }
 
   function initRosterFromSuggested(monthKey: string) {
@@ -4911,23 +4947,24 @@ function playerHistoryDetails(item: PlayerHistoryItem, today: string) {
   return { attendance, didNotAttend, isPending, isDraw, isWin, outcome, points, debt: row ? pendingForMatchRow(row) : 0 };
 }
 
-function PlayerHistoryTable({ items, today }: { items: PlayerHistoryItem[]; today: string }) {
+function PlayerHistoryTable({ items, today, onToggleMatchPaid }: { items: PlayerHistoryItem[]; today: string; onToggleMatchPaid?: (row: MatchPlayer, paid: boolean) => void }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-(--border)">
-      <table className="w-full min-w-[480px] text-sm">
+      <table className={`w-full text-sm ${onToggleMatchPaid ? "min-w-[560px]" : "min-w-[480px]"}`}>
         <thead className="border-b border-(--border) bg-white/[0.04] text-[10px] font-black uppercase tracking-wide text-(--muted)">
           <tr>
             <th className="px-3 py-2 text-left">Fecha</th>
             <th className="px-3 py-2 text-center">Pts</th>
             <th className="px-3 py-2 text-center">Estado</th>
             <th className="px-3 py-2 text-center">Deuda</th>
+            {onToggleMatchPaid ? <th className="px-3 py-2 text-center">Pago</th> : null}
           </tr>
         </thead>
         <tbody>
           {items.map((item) => {
             const details = playerHistoryDetails(item, today);
             const iconClass = details.didNotAttend
-              ? "border border-(--red)/45 bg-(--red)/12 text-(--red)"
+              ? "border border-white/20 bg-white/[0.03] text-(--muted)"
               : details.isPending
                 ? "border border-white/20 bg-white/[0.03] text-(--muted)"
                 : details.isDraw
@@ -4936,11 +4973,25 @@ function PlayerHistoryTable({ items, today }: { items: PlayerHistoryItem[]; toda
                     ? "bg-(--green) text-(--bg-deep)"
                     : "bg-(--red)/90 text-white";
             return (
-            <tr key={item.match.id} className={`border-b border-(--border) last:border-0 hover:bg-white/[0.04] ${details.didNotAttend ? "bg-(--red)/5" : ""}`}>
+            <tr key={item.match.id} className={`border-b border-(--border) last:border-0 hover:bg-white/[0.04]`}>
                 <td className="px-3 py-3 font-bold text-white"><Link href={`/matches/${item.match.id}`} className="hover:underline">{item.match.date}</Link></td>
                 <td className={`px-3 py-3 text-center font-black ${details.isPending || details.didNotAttend ? "text-(--muted)" : "text-(--gold)"}`}>{details.isPending || details.didNotAttend ? "—" : `+${details.points}`}</td>
-                <td className="px-3 py-3"><span className="flex items-center justify-center gap-2"><span className={`flex h-7 w-7 items-center justify-center rounded-full ${iconClass}`} title={details.outcome}>{details.didNotAttend ? <X size={14} strokeWidth={3} /> : details.isPending ? null : details.isDraw ? <strong>−</strong> : details.isWin ? <Check size={15} strokeWidth={4} /> : <X size={14} strokeWidth={3} />}</span><span className={`text-xs font-bold ${details.didNotAttend ? "text-(--red)" : details.isDraw ? "text-(--gold)" : "text-(--muted)"}`}>{details.outcome}</span></span></td>
-                <td className={`px-3 py-3 text-center font-bold ${details.debt > 0 ? "text-(--red)" : "text-(--green)"}`}>{formatCurrency(details.debt)}</td>
+                <td className="px-3 py-3"><span className="flex items-center justify-center gap-2"><span className={`flex h-7 w-7 items-center justify-center rounded-full ${iconClass}`} title={details.outcome}>{details.didNotAttend ? <X size={14} strokeWidth={3} /> : details.isPending ? null : details.isDraw ? <strong>−</strong> : details.isWin ? <Check size={15} strokeWidth={4} /> : <X size={14} strokeWidth={3} />}</span><span className={`text-xs font-bold ${details.isDraw ? "text-(--gold)" : "text-(--muted)"}`}>{details.outcome}</span></span></td>
+                <td className={`px-3 py-3 text-center font-bold ${details.debt > 0 ? "text-(--red)" : "text-(--muted)"}`}>{details.debt > 0 ? formatCurrency(details.debt) : item.row && item.row.amountDue > 0 && item.row.amountPaid > 0 ? <span className="text-(--green)">Pagó {formatCurrency(item.row.amountPaid)}</span> : "—"}</td>
+                {onToggleMatchPaid ? (
+                  <td className="px-3 py-2 text-center">
+                    {item.row && item.row.amountDue > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => onToggleMatchPaid(item.row as MatchPlayer, details.debt === 0)}
+                        title={details.debt === 0 ? "Deshacer pago" : "Marcar como pagado"}
+                        className={`inline-flex min-h-9 items-center justify-center rounded-md border px-2.5 text-xs font-black transition ${details.debt === 0 ? "border-(--border) bg-white/[0.04] text-(--muted) hover:bg-white/[0.1]" : "border-(--green)/45 bg-(--green)/12 text-(--green) hover:bg-(--green)/25"}`}
+                      >
+                        {details.debt === 0 ? "Deshacer" : "Marcar pagado"}
+                      </button>
+                    ) : null}
+                  </td>
+                ) : null}
               </tr>
             );
           })}
@@ -4950,28 +5001,38 @@ function PlayerHistoryTable({ items, today }: { items: PlayerHistoryItem[]; toda
   );
 }
 
-function PlayerMonthlyHistory({
-  player,
-  history,
-  players,
-  monthlyPayments,
-  isAdmin,
-  onToggleRoster,
-  onTogglePaid,
-}: {
-  player: Player;
-  history: PlayerHistoryItem[];
-  players: Player[];
-  monthlyPayments: MonthlyPayment[];
-  isAdmin: boolean;
-  onToggleRoster: (monthKey: string, shouldBeMonthly: boolean) => void;
-  onTogglePaid: (monthKey: string, paid: boolean) => void;
-}) {
-  const todayParts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
-  const today = `${todayParts.find((part) => part.type === "year")?.value}-${todayParts.find((part) => part.type === "month")?.value}-${todayParts.find((part) => part.type === "day")?.value}`;
+type PlayerMonthSummary = {
+  monthKey: string;
+  items: PlayerHistoryItem[];
+  isMonthly: boolean;
+  isFutureMonth: boolean;
+  paid: boolean;
+  paidAt?: string;
+  tone: "paid" | "debt" | "neutral";
+  label: string;
+  galletaDebt: number;
+  monthlyDebt: number;
+  lastPaidOn?: string;
+};
+
+function todayInSantiago() {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  return `${parts.find((part) => part.type === "year")?.value}-${parts.find((part) => part.type === "month")?.value}-${parts.find((part) => part.type === "day")?.value}`;
+}
+
+function monthTitle(monthKey: string) {
+  const label = monthLabel(monthKey);
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function monthShortLabel(monthKey: string) {
+  return new Intl.DateTimeFormat("es-CL", { month: "short" }).format(new Date(`${monthKey}-10T12:00:00`)).replace(".", "");
+}
+
+// Un único criterio de estado de pago por mes, compartido por el bloque de comportamiento y el historial.
+function buildPlayerMonthSummaries(player: Player, history: PlayerHistoryItem[], players: Player[], monthlyPayments: MonthlyPayment[], today: string): PlayerMonthSummary[] {
   const nowMonthKey = currentMonthKey();
   const playerMonthlyPayments = monthlyPayments.filter((payment) => payment.playerId === player.id);
-
   const groups = new Map<string, PlayerHistoryItem[]>();
   for (const item of history) {
     const key = item.match.date.slice(0, 7);
@@ -4982,65 +5043,218 @@ function PlayerMonthlyHistory({
   for (const payment of playerMonthlyPayments) {
     if (!groups.has(payment.monthKey)) groups.set(payment.monthKey, []);
   }
-  const monthKeys = [...groups.keys()].sort((a, b) => b.localeCompare(a));
 
-  if (monthKeys.length === 0) return <p className="text-sm text-(--muted)">Todavia no jugo ningun partido.</p>;
+  return [...groups.keys()].sort((a, b) => b.localeCompare(a)).map((monthKey) => {
+    const items = [...(groups.get(monthKey) ?? [])].sort((a, b) => `${b.match.date} ${b.match.time}`.localeCompare(`${a.match.date} ${a.match.time}`));
+    const isMonthly = isPlayerMonthlyForMonth(player.id, monthKey, players, monthlyPayments);
+    const isFutureMonth = monthKey > nowMonthKey;
+    const payment = isMonthly ? monthlyPaymentFor(player, monthKey, playerMonthlyPayments.find((item) => item.monthKey === monthKey)) : undefined;
+    const paid = payment?.paymentStatus === "paid";
+    const galletaDebt = items.reduce((sum, item) => sum + playerHistoryDetails(item, today).debt, 0);
+    const monthlyDebt = payment && !paid ? Math.max(payment.expectedAmount - payment.amountPaid, 0) : 0;
+    const allFuture = items.length > 0 && items.every((item) => item.match.date > today);
+    const played = items.some((item) => item.row?.attendanceStatus === "confirmed" && item.match.date <= today);
+    const galletaPaid = items.reduce((sum, item) => sum + (item.row?.amountPaid ?? 0), 0);
+    const paidMatchDates = items.filter((item) => (item.row?.amountPaid ?? 0) > 0).map((item) => item.match.date);
+    const lastPaidOn = [paid ? payment?.paidAt?.slice(0, 10) : undefined, ...paidMatchDates].filter(Boolean).sort().pop();
+
+    const hasDebt = galletaDebt > 0 || (isMonthly && !paid && !isFutureMonth);
+    let label: string;
+    if (isMonthly) {
+      label = paid ? "Mensualidad pagada" : isFutureMonth ? "Mes futuro" : "Mensualidad pendiente";
+    } else if (galletaDebt > 0) {
+      label = `Galleta: debe ${formatCurrency(galletaDebt)}`;
+    } else if (isFutureMonth || allFuture) {
+      label = "Por jugar";
+    } else if (!played) {
+      label = "No jugó";
+    } else {
+      label = galletaPaid > 0 ? "Galleta pagada" : "Sin deuda";
+    }
+    const tone: PlayerMonthSummary["tone"] = hasDebt
+      ? "debt"
+      : isMonthly
+        ? (paid ? "paid" : "neutral")
+        : (isFutureMonth || allFuture || !played ? "neutral" : "paid");
+    return { monthKey, items, isMonthly, isFutureMonth, paid, paidAt: payment?.paidAt, tone, label, galletaDebt, monthlyDebt, lastPaidOn };
+  });
+}
+
+const monthToneClass = {
+  paid: "border-(--green)/45 bg-(--green)/12 text-(--green)",
+  debt: "border-(--red)/45 bg-(--red)/12 text-(--red)",
+  neutral: "border-(--border) bg-white/[0.04] text-(--muted)",
+} as const;
+
+function MonthToneIcon({ tone, size = 14 }: { tone: PlayerMonthSummary["tone"]; size?: number }) {
+  if (tone === "paid") return <Check size={size} strokeWidth={3} aria-hidden="true" />;
+  if (tone === "debt") return <TriangleAlert size={size} strokeWidth={2.5} aria-hidden="true" />;
+  return <Clock size={size} strokeWidth={2.5} aria-hidden="true" />;
+}
+
+function openMonthSection(monthKey: string) {
+  const section = document.getElementById(`mes-${monthKey}`);
+  if (section instanceof HTMLDetailsElement) section.open = true;
+}
+
+function PlayerPaymentBehavior({ stats, summaries }: { stats: ReturnType<typeof computePlayerStats>; summaries: PlayerMonthSummary[] }) {
+  const hasDebt = stats.pendingDebt > 0;
+  const debtEntries = summaries.flatMap((summary) => [
+    ...(summary.galletaDebt > 0 ? [{ monthKey: summary.monthKey, kind: summary.isMonthly ? "Galleta (mes oficial)" : "Galleta", amount: summary.galletaDebt }] : []),
+    ...(summary.monthlyDebt > 0 ? [{ monthKey: summary.monthKey, kind: "Mensualidad", amount: summary.monthlyDebt }] : []),
+  ]);
+  const evaluated = summaries.filter((summary) => summary.tone !== "neutral");
+  const onTime = evaluated.filter((summary) => summary.tone === "paid").length;
+  const lastPaidOn = summaries.map((summary) => summary.lastPaidOn).filter(Boolean).sort().pop();
+  const oldestDebt = debtEntries.map((entry) => entry.monthKey).sort()[0];
+  const recent = summaries.slice(0, 6).reverse();
+  const tint = hasDebt ? "border-(--red)/30 bg-(--red)/10" : "border-(--green)/30 bg-(--green)/10";
+  const accent = hasDebt ? "text-(--red)" : "text-(--green)";
 
   return (
-    <div className="space-y-4">
-      {monthKeys.map((monthKey) => {
-        const items = [...(groups.get(monthKey) ?? [])].sort((a, b) => `${b.match.date} ${b.match.time}`.localeCompare(`${a.match.date} ${a.match.time}`));
-        const isMonthly = isPlayerMonthlyForMonth(player.id, monthKey, players, monthlyPayments);
-        const isFutureMonth = monthKey > nowMonthKey;
-        const payment = isMonthly ? monthlyPaymentFor(player, monthKey, playerMonthlyPayments.find((item) => item.monthKey === monthKey)) : undefined;
-        const paid = payment?.paymentStatus === "paid";
-        const galletaDebt = items.reduce((sum, item) => sum + playerHistoryDetails(item, today).debt, 0);
-        const paidBadgeClass = paid
-          ? "border-(--green) bg-(--green)/15 text-(--green)"
-          : isFutureMonth
-            ? "border-(--border) bg-white/[0.03] text-(--muted)"
-            : "border-(--red)/40 bg-(--red)/10 text-(--red)";
-        const paidBadgeTitle = paid
-          ? `Pagado${payment?.paidAt ? ` el ${payment.paidAt.slice(0, 10)}` : ""}`
-          : isFutureMonth
-            ? "Mes futuro"
-            : "Pendiente";
+    <Card className={`mt-4 space-y-4 ${tint}`}>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Comportamiento de pagos</p>
+          <p className={`mt-1 text-sm font-black uppercase tracking-wide ${accent}`}>{hasDebt ? "Con deuda" : "Al dia"}</p>
+        </div>
+        <p className={`text-4xl font-black leading-none ${accent}`}>{formatCurrency(stats.pendingDebt)}</p>
+      </div>
+
+      {debtEntries.length > 0 ? (
+        <ul className="space-y-1.5">
+          {debtEntries.map((entry) => (
+            <li key={`${entry.monthKey}-${entry.kind}`}>
+              <a href={`#mes-${entry.monthKey}`} onClick={() => openMonthSection(entry.monthKey)} className="flex items-center justify-between gap-3 rounded-md border border-(--red)/25 bg-black/20 px-3 py-2 text-sm font-bold text-white transition hover:bg-black/30">
+                <span>{monthTitle(entry.monthKey)} <span className="text-(--muted)">· {entry.kind}</span></span>
+                <span className="text-(--red)">{formatCurrency(entry.amount)}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <dl className="grid grid-cols-3 gap-2 text-center">
+        <div className="rounded-md bg-black/20 px-2 py-2">
+          <dt className="text-[11px] font-bold text-(--muted)">Meses al dia</dt>
+          <dd className="mt-0.5 text-base font-black text-white">{onTime} de {evaluated.length}</dd>
+        </div>
+        <div className="rounded-md bg-black/20 px-2 py-2">
+          <dt className="text-[11px] font-bold text-(--muted)">Ultimo pago</dt>
+          <dd className="mt-0.5 text-base font-black text-white">{lastPaidOn ?? "—"}</dd>
+        </div>
+        <div className="rounded-md bg-black/20 px-2 py-2">
+          <dt className="text-[11px] font-bold text-(--muted)">Deuda mas antigua</dt>
+          <dd className="mt-0.5 text-base font-black text-white">{oldestDebt ? monthTitle(oldestDebt) : "—"}</dd>
+        </div>
+      </dl>
+
+      {recent.length > 0 ? (
+        <div>
+          <p className="mb-2 text-[11px] font-bold text-(--muted)">Ultimos {recent.length} meses</p>
+          <ol className="flex gap-2">
+            {recent.map((summary) => (
+              <li key={summary.monthKey} className="flex flex-1 flex-col items-center gap-1">
+                <a
+                  href={`#mes-${summary.monthKey}`}
+                  onClick={() => openMonthSection(summary.monthKey)}
+                  title={`${monthLabel(summary.monthKey)}: ${summary.label}`}
+                  aria-label={`${monthLabel(summary.monthKey)}: ${summary.label}`}
+                  className={`flex h-9 w-9 items-center justify-center rounded-full border ${monthToneClass[summary.tone]}`}
+                >
+                  <MonthToneIcon tone={summary.tone} />
+                </a>
+                <span className="text-[11px] font-bold capitalize text-(--muted)">{monthShortLabel(summary.monthKey)}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
+function PlayerMonthlyHistory({
+  summaries,
+  isAdmin,
+  today,
+  onToggleRoster,
+  onTogglePaid,
+  onToggleMatchPaid,
+  onCancelGalleta,
+}: {
+  summaries: PlayerMonthSummary[];
+  isAdmin: boolean;
+  today: string;
+  onToggleRoster: (monthKey: string, shouldBeMonthly: boolean) => void;
+  onTogglePaid: (monthKey: string, paid: boolean) => void;
+  onToggleMatchPaid: (row: MatchPlayer, paid: boolean) => void;
+  onCancelGalleta: (monthKey: string) => void;
+}) {
+  if (summaries.length === 0) return <p className="text-sm text-(--muted)">Todavia no jugo ningun partido.</p>;
+
+  const nowMonthKey = currentMonthKey();
+
+  return (
+    <div className="space-y-3">
+      {summaries.map((summary) => {
+        const { monthKey, items, isMonthly, isFutureMonth, paid } = summary;
+        const chipTone: PlayerMonthSummary["tone"] = isMonthly ? (paid ? "paid" : isFutureMonth ? "neutral" : "debt") : summary.tone;
+        const chipClass = `inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-black ${monthToneClass[chipTone]}`;
+        const paidTitle = paid ? `Pagado${summary.paidAt ? ` el ${summary.paidAt.slice(0, 10)}` : ""}` : isFutureMonth ? "Mes futuro" : "Pendiente";
+        // Abiertos: mes actual/futuro y cualquier mes con deuda. Los meses anteriores al dia quedan colapsados.
+        const defaultOpen = monthKey >= nowMonthKey || summary.tone === "debt";
+        const showAdminControls = isAdmin;
 
         return (
-          <div key={monthKey} className="rounded-lg border border-(--border) bg-white/[0.02] p-3">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-black uppercase tracking-wide text-white">{monthLabel(monthKey)}</h3>
+          <details key={monthKey} id={`mes-${monthKey}`} open={defaultOpen} className="group scroll-mt-44 rounded-lg border border-(--border) bg-white/[0.02]">
+            <summary className="flex min-h-12 cursor-pointer list-none flex-wrap items-center justify-between gap-2 p-3 [&::-webkit-details-marker]:hidden">
+              <div className="flex items-center gap-2">
+                <ChevronRight size={16} aria-hidden="true" className="text-(--muted) transition-transform group-open:rotate-90" />
+                <h3 className="text-sm font-black uppercase tracking-wide text-white">{monthLabel(monthKey)}</h3>
+                <span className="rounded border border-(--border) px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-(--muted)">{isMonthly ? "Oficial" : "Galleta"}</span>
+              </div>
               <div className="flex flex-wrap items-center gap-2">
-                {isAdmin ? (
-                  <label className="inline-flex items-center gap-1.5 rounded-md border border-(--border) bg-white/[0.03] px-2 py-1 text-[11px] font-bold text-(--muted)">
-                    <input type="checkbox" className="accent-(--cyan)" checked={isMonthly} onChange={(event) => onToggleRoster(monthKey, event.target.checked)} />
+                <span className={chipClass} title={isMonthly ? paidTitle : undefined}>
+                  <MonthToneIcon tone={chipTone} size={13} />
+                  {summary.label}
+                </span>
+                {isMonthly && summary.galletaDebt > 0 ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-md border border-(--gold)/45 bg-(--gold)/12 px-3 py-1.5 text-xs font-black text-(--gold)" title="Tiene una galleta pendiente aunque el mes es de mensualidad">
+                    <TriangleAlert size={13} strokeWidth={2.5} aria-hidden="true" />
+                    + Galleta {formatCurrency(summary.galletaDebt)} pendiente
+                  </span>
+                ) : null}
+              </div>
+            </summary>
+            <div className="space-y-2 px-3 pb-3">
+              {showAdminControls ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-(--border) bg-white/[0.03] px-2.5 text-xs font-bold text-(--muted)">
+                    <input type="checkbox" className="h-4 w-4 accent-(--cyan)" checked={isMonthly} onChange={(event) => onToggleRoster(monthKey, event.target.checked)} />
                     Mensual este mes
                   </label>
-                ) : null}
-                {isMonthly ? (
-                  <button
-                    type="button"
-                    disabled={!isAdmin || isFutureMonth}
-                    title={paidBadgeTitle}
-                    onClick={() => onTogglePaid(monthKey, paid)}
-                    className={`rounded-md border px-2.5 py-1 text-[11px] font-black transition disabled:cursor-not-allowed ${paidBadgeClass} ${isAdmin && !isFutureMonth ? "hover:opacity-80" : ""}`}
-                  >
-                    {paid ? "Mensualidad pagada" : isFutureMonth ? "Mes futuro" : "Mensualidad pendiente"}
-                  </button>
-                ) : (
-                  <span className={`rounded-md border px-2.5 py-1 text-[11px] font-black ${galletaDebt > 0 ? "border-(--red)/40 bg-(--red)/10 text-(--red)" : "border-(--green)/40 bg-(--green)/10 text-(--green)"}`}>
-                    {galletaDebt > 0 ? `Galleta: ${formatCurrency(galletaDebt)} pendiente` : "Galleta: al dia"}
-                  </span>
-                )}
-              </div>
+                  {isMonthly && summary.galletaDebt > 0 ? (
+                    <button type="button" onClick={() => onCancelGalleta(monthKey)} title="La mensualidad cubre los partidos del mes: deja la galleta pendiente en $0" className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-(--gold)/45 bg-(--gold)/12 px-3 text-xs font-black text-(--gold) transition hover:bg-(--gold)/25">
+                      Cancelar galleta ({formatCurrency(summary.galletaDebt)})
+                    </button>
+                  ) : null}
+                  {isMonthly && !isFutureMonth ? (
+                    <button type="button" title={paidTitle} onClick={() => onTogglePaid(monthKey, paid)} className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-(--border) bg-white/[0.06] px-3 text-xs font-black text-white transition hover:bg-white/[0.12]">
+                      {paid ? "Marcar mensualidad como pendiente" : "Marcar mensualidad como pagada"}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+              {items.length > 0 ? <PlayerHistoryTable items={items} today={today} onToggleMatchPaid={isAdmin ? onToggleMatchPaid : undefined} /> : <p className="px-1 text-sm text-(--muted)">Sin partidos registrados este mes.</p>}
             </div>
-            {items.length > 0 ? <PlayerHistoryTable items={items} today={today} /> : <p className="px-1 text-sm text-(--muted)">Sin partidos registrados este mes.</p>}
-          </div>
+          </details>
         );
       })}
     </div>
   );
 }
+
 
 const linkButtonClass = "inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md border px-3 text-sm font-bold transition bg-white/[0.06] text-white hover:bg-white/[0.12] border-(--border)";
 
@@ -5065,19 +5279,26 @@ export function PlayerDetailPage({
     result: data.results.find((item) => item.matchId === match.id),
   }));
   const editHref = `/players/${player.id}/edit`;
+  const today = todayInSantiago();
+  const monthSummaries = buildPlayerMonthSummaries(player, history, data.players, data.monthlyPayments, today);
 
   function toggleMonthlyRoster(monthKey: string, shouldBeMonthly: boolean) {
     if (!player) return;
-    if (shouldBeMonthly) {
-      const payment = monthlyPaymentFor(player, monthKey, data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey));
-      saveMonthlyPaymentAction(payment)
-        .then(() => commit({ ...data, monthlyPayments: upsertMonthlyPayment(data.monthlyPayments, payment) }))
-        .catch((err) => setError(err instanceof Error ? err.message : "No se pudo agregar al roster de fijos."));
-      return;
-    }
-    removeMonthlyPaymentAction(player.id, monthKey)
-      .then(() => commit({ ...data, monthlyPayments: data.monthlyPayments.filter((item) => !(item.playerId === player.id && item.monthKey === monthKey)) }))
-      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo quitar del roster de fijos."));
+    changeRosterMembership(data, commit, setError, player, monthKey, shouldBeMonthly);
+  }
+
+  function cancelMonthGalletas(monthKey: string) {
+    if (!player) return;
+    changeRosterMembership(data, commit, setError, player, monthKey, true, false);
+  }
+
+  function toggleMatchPaid(row: MatchPlayer, paid: boolean) {
+    const updated: MatchPlayer = paid
+      ? { ...row, paymentStatus: "unpaid", amountPaid: 0, updatedAt: new Date().toISOString() }
+      : { ...row, paymentStatus: "paid", amountPaid: row.amountDue, updatedAt: new Date().toISOString() };
+    setMatchPlayerPaymentStatusAction(row.id, paid ? "unpaid" : "paid")
+      .then(() => commit({ ...data, matchPlayers: data.matchPlayers.map((item) => (item.id === row.id ? updated : item)) }))
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo registrar el pago."));
   }
 
   function toggleMonthlyPaid(monthKey: string, paid: boolean) {
@@ -5095,54 +5316,37 @@ export function PlayerDetailPage({
 
   return (
     <>
-      <PageTitle title={player.name} description={`${isPlayerMonthlyForMonth(player.id, currentMonthKey(), data.players, data.monthlyPayments) ? "Oficial" : "Galleta"} · ${player.nickname || "Sin pseudonimo"}`} />
+      <header className="player-head flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-(--gold)/45 bg-(--gold)/15 text-lg font-black text-(--gold)" aria-hidden="true">
+            {player.name.charAt(0).toUpperCase()}
+          </span>
+          <div className="min-w-0">
+            <h1 className="truncate text-xl font-black uppercase leading-tight tracking-tight text-white sm:text-2xl">{player.name}</h1>
+            <p className="flex items-center gap-2 text-xs font-bold text-(--muted)">
+              <span className={`rounded border px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide ${isPlayerMonthlyForMonth(player.id, currentMonthKey(), data.players, data.monthlyPayments) ? "border-(--gold)/45 text-(--gold)" : "border-(--border) text-(--muted)"}`}>
+                {isPlayerMonthlyForMonth(player.id, currentMonthKey(), data.players, data.monthlyPayments) ? "Oficial" : "Galleta"}
+              </span>
+              <span className="truncate">{player.nickname || "Sin pseudonimo"}</span>
+            </p>
+          </div>
+        </div>
+        {isAdmin ? <Link href={editHref} className={`${linkButtonClass} h-9 px-2.5`} aria-label="Editar jugador"><Pencil size={16} /><span className="hidden sm:inline">Editar</span></Link> : null}
+      </header>
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
-      {isAdmin ? <div className="mb-4 flex flex-wrap gap-2"><Link href={editHref} className={linkButtonClass}><Pencil size={16} />Editar jugador</Link></div> : null}
-      <section className="relative overflow-hidden rounded-xl border border-(--gold)/30 bg-[linear-gradient(135deg,rgba(250,204,21,0.14),rgba(18,214,154,0.08)_48%,rgba(255,255,255,0.03))] p-5 shadow-(--shadow)">
-        <div className="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-(--gold)/10 blur-3xl" aria-hidden="true" />
-        <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-4">
-            <span className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl border border-(--gold)/45 bg-(--gold)/15 text-2xl font-black text-(--gold) shadow-[0_0_30px_rgba(250,204,21,0.18)]">
-              {standing ? `#${standing.rank}` : "—"}
-            </span>
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-(--gold)">Posición en el ranking</p>
-              <h2 className="mt-1 text-2xl font-black text-white">{player.nickname || player.name}</h2>
-              <p className="mt-1 text-sm font-semibold text-(--muted)">{stats.played} PJ · {stats.form} · {stats.winRate}% rendimiento</p>
-            </div>
-          </div>
-          <div className="border-t border-white/10 pt-4 text-left sm:border-l sm:border-t-0 sm:pl-6 sm:pt-0 sm:text-right">
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-(--muted)">Puntos acumulados</p>
-            <p className="mt-1 text-5xl font-black leading-none text-(--gold)">{stats.points}<span className="ml-1 text-base text-(--gold)/70">pts</span></p>
+      <PlayerPaymentBehavior stats={stats} summaries={monthSummaries} />
+      <section className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-(--gold)/25 bg-white/[0.03] px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-(--gold)/45 bg-(--gold)/15 text-base font-black text-(--gold)">
+            {standing ? `#${standing.rank}` : "—"}
+          </span>
+          <div className="min-w-0">
+            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-(--gold)">Ranking</p>
+            <p className="truncate text-sm font-semibold text-(--muted)">{player.nickname || player.name} · {stats.played} PJ · {stats.form} · {stats.winRate}%</p>
           </div>
         </div>
+        <p className="shrink-0 text-3xl font-black leading-none text-(--gold)">{stats.points}<span className="ml-1 text-sm text-(--gold)/70">pts</span></p>
       </section>
-      <Card className={`mt-4 ${stats.pendingDebt > 0 ? "border-(--red)/30 bg-(--red)/10" : "border-(--green)/30 bg-(--green)/10"}`}>
-        <p className={`text-xs font-black uppercase tracking-wide ${stats.pendingDebt > 0 ? "text-(--red)" : "text-(--green)"}`}>
-          {stats.pendingDebt > 0 ? "Con deuda" : "Al dia"}
-        </p>
-        <p className={`mt-1 text-2xl font-black ${stats.pendingDebt > 0 ? "text-(--red)" : "text-(--green)"}`}>{formatCurrency(stats.pendingDebt)}</p>
-        {stats.pendingDebt > 0 && stats.matchDebt > 0 && stats.monthlyDebt > 0 ? (
-          <p className="mt-1 text-xs font-semibold text-(--muted)">
-            {formatCurrency(stats.matchDebt)} de galletas + {formatCurrency(stats.monthlyDebt)} de mensualidad
-          </p>
-        ) : null}
-      </Card>
-      <Card className="mt-4 space-y-3">
-        <div>
-          <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Trayectoria</p>
-          <h2 className="mt-1 text-xl font-black text-white">Historial de pagos y partidos</h2>
-        </div>
-        <PlayerMonthlyHistory
-          player={player}
-          history={history}
-          players={data.players}
-          monthlyPayments={data.monthlyPayments}
-          isAdmin={isAdmin}
-          onToggleRoster={toggleMonthlyRoster}
-          onTogglePaid={toggleMonthlyPaid}
-        />
-      </Card>
       {canManageLogins ? (
         <Card className="mt-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -5168,6 +5372,21 @@ export function PlayerDetailPage({
           )}
         </Card>
       ) : null}
+      <Card className="mt-4 space-y-3">
+        <div>
+          <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Trayectoria</p>
+          <h2 className="mt-1 text-xl font-black text-white">Historial de pagos y partidos</h2>
+        </div>
+        <PlayerMonthlyHistory
+          summaries={monthSummaries}
+          today={today}
+          isAdmin={isAdmin}
+          onToggleRoster={toggleMonthlyRoster}
+          onTogglePaid={toggleMonthlyPaid}
+          onToggleMatchPaid={toggleMatchPaid}
+          onCancelGalleta={cancelMonthGalletas}
+        />
+      </Card>
     </>
   );
 }
@@ -5215,10 +5434,6 @@ export function PlayerEditPage({
         <h2 className="text-lg font-black text-white">Datos del jugador</h2>
         <PlayerEditorForm player={player} onSave={savePlayer} allowMerge={false} />
       </Card>
-      <Card className="mt-4 space-y-3">
-        <h2 className="text-lg font-black text-amber-500">Fusionar jugador</h2>
-        <PlayerMergeForm player={player} players={data.players} onMerged={(targetId) => { router.replace(`/players/${targetId}`); router.refresh(); }} />
-      </Card>
       {canManageLogins ? (
         <Card className="mt-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -5248,6 +5463,10 @@ export function PlayerEditPage({
           )}
         </Card>
       ) : null}
+      <Card className="mt-4 space-y-3">
+        <h2 className="text-lg font-black text-amber-500">Fusionar jugador</h2>
+        <PlayerMergeForm player={player} players={data.players} onMerged={(targetId) => { router.replace(`/players/${targetId}`); router.refresh(); }} />
+      </Card>
     </>
   );
 }

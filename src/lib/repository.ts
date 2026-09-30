@@ -196,7 +196,8 @@ export async function getSifupData(): Promise<SifupData> {
       phone: row.phone,
       attendanceStatus: row.attendance_status,
       paymentStatus: row.payment_status,
-      amountDue: row.amount_due,
+      // Quien no va ("out") nunca debe: filas viejas pueden arrastrar un monto de cuando figuraba confirmado.
+      amountDue: row.attendance_status === "out" ? 0 : row.amount_due,
       amountPaid: row.amount_paid,
       note: row.note,
       team: row.team,
@@ -325,7 +326,7 @@ export async function saveMatchWithPlayers(match: Match, players: MatchPlayer[],
     for (const row of players) {
       await tx`
         insert into match_players (id, match_id, player_id, name, phone, attendance_status, payment_status, amount_due, amount_paid, note, team, team_id, whatsapp_order, goals, created_at, updated_at)
-        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.phone ?? ""}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue ?? 0}, ${row.amountPaid ?? 0}, ${row.note ?? ""}, ${row.team ?? "none"}, ${row.teamId ?? null}, ${row.whatsappOrder ?? null}, ${row.goals ?? null}, ${row.createdAt ?? now}, ${row.updatedAt ?? now})
+        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.phone ?? ""}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.attendanceStatus === "out" ? 0 : row.amountDue ?? 0}, ${row.amountPaid ?? 0}, ${row.note ?? ""}, ${row.team ?? "none"}, ${row.teamId ?? null}, ${row.whatsappOrder ?? null}, ${row.goals ?? null}, ${row.createdAt ?? now}, ${row.updatedAt ?? now})
       `;
     }
   });
@@ -361,7 +362,7 @@ export async function saveMatchPlayers(matchId: string, players: MatchPlayer[], 
     for (const row of players) {
       await tx`
         insert into match_players (id, match_id, player_id, name, phone, attendance_status, payment_status, amount_due, amount_paid, note, team, team_id, whatsapp_order, goals, created_at, updated_at)
-        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.phone ?? ""}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.amountDue ?? 0}, ${row.amountPaid ?? 0}, ${row.note ?? ""}, ${row.team ?? "none"}, ${row.teamId ?? null}, ${row.whatsappOrder ?? null}, ${row.goals ?? null}, ${row.createdAt ?? now}, ${row.updatedAt ?? now})
+        values (${row.id}, ${row.matchId}, ${row.playerId ?? null}, ${row.name}, ${row.phone ?? ""}, ${row.attendanceStatus}, ${row.paymentStatus}, ${row.attendanceStatus === "out" ? 0 : row.amountDue ?? 0}, ${row.amountPaid ?? 0}, ${row.note ?? ""}, ${row.team ?? "none"}, ${row.teamId ?? null}, ${row.whatsappOrder ?? null}, ${row.goals ?? null}, ${row.createdAt ?? now}, ${row.updatedAt ?? now})
       `;
     }
     await tx`update matches set updated_at = ${now} where id = ${matchId}`;
@@ -512,6 +513,42 @@ export async function saveMonthlyPayment(payment: MonthlyPayment) {
 export async function deleteMonthlyPayment(playerId: string, monthKey: string) {
   const sql = requireDatabase();
   await sql`delete from monthly_payments where player_id = ${playerId} and month_key = ${monthKey}`;
+}
+
+export async function applyRosterChange(input: {
+  playerId: string;
+  monthKey: string;
+  upsertPayment?: MonthlyPayment;
+  deletePayment?: boolean;
+  rowUpdates: { id: string; amountDue: number; amountPaid: number; paymentStatus: string; note: string }[];
+}) {
+  const sql = requireDatabase();
+  await sql.begin(async (tx) => {
+    if (input.upsertPayment) {
+      const payment = input.upsertPayment;
+      await tx`
+        insert into monthly_payments (id, player_id, month_key, expected_amount, amount_paid, payment_status, note, paid_at, created_at, updated_at)
+        values (${payment.id}, ${payment.playerId}, ${payment.monthKey}, ${payment.expectedAmount}, ${payment.amountPaid}, ${payment.paymentStatus}, ${payment.note}, ${payment.paidAt ?? null}, ${payment.createdAt}, ${payment.updatedAt})
+        on conflict (player_id, month_key) do update set
+          expected_amount = excluded.expected_amount,
+          amount_paid = excluded.amount_paid,
+          payment_status = excluded.payment_status,
+          note = excluded.note,
+          paid_at = excluded.paid_at,
+          updated_at = excluded.updated_at
+      `;
+    }
+    if (input.deletePayment) {
+      await tx`delete from monthly_payments where player_id = ${input.playerId} and month_key = ${input.monthKey}`;
+    }
+    for (const row of input.rowUpdates) {
+      await tx`
+        update match_players
+        set amount_due = ${row.amountDue}, amount_paid = ${row.amountPaid}, payment_status = ${row.paymentStatus}, note = ${row.note}, updated_at = now()
+        where id = ${row.id}
+      `;
+    }
+  });
 }
 
 export async function saveClubExpense(expense: ClubExpense) {

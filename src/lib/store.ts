@@ -1,5 +1,5 @@
 import type { Match, MatchPlayer, MatchResult, MonthlyPayment, Player, SifupData } from "./types";
-import { MONTHLY_AMOUNT } from "./sifup-constants";
+import { MONTHLY_AMOUNT, PER_MATCH_AMOUNT } from "./sifup-constants";
 
 export function newId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -165,4 +165,73 @@ export function upsertMonthlyPayment(payments: MonthlyPayment[], payment: Monthl
   return payments.some((item) => item.id === payment.id || (item.playerId === payment.playerId && item.monthKey === payment.monthKey))
     ? payments.map((item) => (item.id === payment.id || (item.playerId === payment.playerId && item.monthKey === payment.monthKey) ? payment : item))
     : [...payments, payment];
+}
+
+export type RosterRowUpdate = Pick<MatchPlayer, "id" | "amountDue" | "amountPaid" | "paymentStatus" | "note">;
+
+export type RosterChangePlan = {
+  rowUpdates: RosterRowUpdate[];
+  unpaidGalletaCount: number;
+  unpaidGalletaAmount: number;
+  paidGalletaAmount: number;
+  repricedCount: number;
+  paidMonthlyAmount: number;
+};
+
+const MONTHLY_NOTE = /\s*mensualidad\s*/i;
+
+// Cobros de un jugador al cambiar su condicion mensual/galleta en un mes.
+// `playerRows` son solo las filas del jugador; se filtran por mes y se ignoran las "out".
+export function planRosterChange({
+  playerRows,
+  matches,
+  monthKey,
+  monthly,
+  payment,
+  cancelGalletas = true,
+}: {
+  playerRows: MatchPlayer[];
+  matches: Match[];
+  monthKey: string;
+  monthly: boolean;
+  payment?: MonthlyPayment;
+  cancelGalletas?: boolean;
+}): RosterChangePlan {
+  const monthMatchIds = new Set(matches.filter((match) => match.monthKey === monthKey).map((match) => match.id));
+  const rows = playerRows.filter((row) => monthMatchIds.has(row.matchId) && row.attendanceStatus !== "out");
+  const plan: RosterChangePlan = { rowUpdates: [], unpaidGalletaCount: 0, unpaidGalletaAmount: 0, paidGalletaAmount: 0, repricedCount: 0, paidMonthlyAmount: 0 };
+
+  if (monthly) {
+    for (const row of rows) {
+      plan.paidGalletaAmount += row.amountPaid;
+      const pending = Math.max(row.amountDue - row.amountPaid, 0);
+      if (pending <= 0) continue;
+      plan.unpaidGalletaCount += 1;
+      plan.unpaidGalletaAmount += pending;
+      if (!cancelGalletas) continue;
+      // Si ya habia abonado algo, se respeta lo pagado y solo se cancela el saldo.
+      plan.rowUpdates.push({
+        id: row.id,
+        amountDue: row.amountPaid,
+        amountPaid: row.amountPaid,
+        paymentStatus: "paid",
+        note: row.note.toLowerCase().includes("mensualidad") ? row.note : [row.note, "mensualidad"].filter(Boolean).join(" · "),
+      });
+    }
+    return plan;
+  }
+
+  plan.paidMonthlyAmount = payment?.paymentStatus === "paid" ? payment.amountPaid : 0;
+  for (const row of rows) {
+    if (row.attendanceStatus !== "confirmed" || row.amountDue > 0) continue;
+    plan.repricedCount += 1;
+    plan.rowUpdates.push({
+      id: row.id,
+      amountDue: PER_MATCH_AMOUNT,
+      amountPaid: 0,
+      paymentStatus: "unpaid",
+      note: row.note.replace(MONTHLY_NOTE, " ").trim(),
+    });
+  }
+  return plan;
 }
