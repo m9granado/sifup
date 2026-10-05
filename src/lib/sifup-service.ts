@@ -234,6 +234,9 @@ export async function addPlayerToMatch(input: AddPlayerToMatchInput) {
     (row) => (known && row.playerId === known.id) || normalizeName(row.name) === normalizeName(cleanName),
   );
 
+  const monthlyPlayerId = known?.id ?? already?.playerId;
+  const monthly = monthlyPlayerId ? isPlayerMonthlyForMonth(monthlyPlayerId, match.monthKey, data.players, data.monthlyPayments) : false;
+
   // Si ya existe en el partido, ACTUALIZAR la fila existente sin duplicar (Scope 4)
   if (already) {
     const now = new Date().toISOString();
@@ -242,7 +245,8 @@ export async function addPlayerToMatch(input: AddPlayerToMatchInput) {
       phone: input.phone ?? already.phone,
       attendanceStatus: input.attendanceStatus ?? already.attendanceStatus,
       team: input.team ?? already.team,
-      amountDue: input.amountDue !== undefined ? input.amountDue : already.amountDue,
+      amountDue: monthly ? 0 : input.amountDue !== undefined ? input.amountDue : already.amountDue,
+      paymentStatus: monthly ? "paid" : already.paymentStatus,
       updatedAt: now,
     };
     const nextRows = currentRows.map((r) => (r.id === already.id ? updatedRow : r));
@@ -252,7 +256,6 @@ export async function addPlayerToMatch(input: AddPlayerToMatchInput) {
     return { ...payload, note: `${already.name} ya estaba en la lista del partido y fue actualizado.` };
   }
 
-  const monthly = known ? isPlayerMonthlyForMonth(known.id, match.monthKey, data.players, data.monthlyPayments) : false;
   // Criterio Scope 4: Por defecto confirmed para mensuales, galleta para no mensuales
   const attendanceStatus = input.attendanceStatus ?? (monthly ? "confirmed" : "galleta");
   const out = attendanceStatus === "out";
@@ -1074,7 +1077,7 @@ export async function updateMatchPlayer(input: UpdateMatchPlayerInput) {
   // lista de espera o de cuando todavia figuraba mensual), se recalcula al
   // precio vigente para que no juegue gratis por error.
   const shouldRepriceGalleta = !isOut && newStatus === "confirmed" && !isMonthlyPlayer && input.amountDue === undefined && targetRow.amountDue === 0;
-  const amountDue = isOut ? 0 : input.amountDue !== undefined ? input.amountDue : shouldRepriceGalleta ? PER_MATCH_AMOUNT : targetRow.amountDue;
+  const amountDue = isOut || isMonthlyPlayer ? 0 : input.amountDue !== undefined ? input.amountDue : shouldRepriceGalleta ? PER_MATCH_AMOUNT : targetRow.amountDue;
   const amountPaid = isOut ? 0 : input.amountPaid !== undefined ? input.amountPaid : targetRow.amountPaid;
 
   const updatedRow: MatchPlayer = {
@@ -1083,7 +1086,7 @@ export async function updateMatchPlayer(input: UpdateMatchPlayerInput) {
     team: isOut ? "none" : input.team ?? targetRow.team,
     amountDue,
     amountPaid,
-    paymentStatus: isOut
+    paymentStatus: isOut || isMonthlyPlayer
       ? "paid"
       : input.paymentStatus !== undefined
         ? input.paymentStatus
