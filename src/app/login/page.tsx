@@ -1,9 +1,14 @@
 import { redirect } from "next/navigation";
-import { isAuthenticated } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { sanitizeAuthorizeNext } from "@/lib/oauth-policy";
 import { LoginForm } from "@/components/admin/LoginForm";
 
-export default async function LoginPage() {
-  if (await isAuthenticated()) redirect("/dashboard");
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
+  const { next } = await searchParams;
+  const safeNext = sanitizeAuthorizeNext(next);
+  const user = await getCurrentUser();
+  // A member mid-OAuth-consent can land here to switch to an admin account instead of bouncing to the dashboard.
+  if (user && (user.role === "admin" || !safeNext)) redirect(safeNext ?? "/dashboard");
 
   return (
     <main className="login-page">
@@ -19,7 +24,7 @@ export default async function LoginPage() {
             Ingresa con tu correo y contraseña. Tus permisos determinan las secciones disponibles.
           </p>
         </div>
-        <LoginForm />
+        <LoginForm next={safeNext} />
       </section>
     </main>
   );

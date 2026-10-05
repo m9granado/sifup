@@ -4,11 +4,12 @@ import { useActionState } from "react";
 import { LockKeyhole } from "lucide-react";
 import { loginAction } from "@/app/actions";
 
-export function LoginForm() {
+export function LoginForm({ next }: { next?: string | null }) {
   const [state, action, pending] = useActionState(loginAction, { error: "" });
 
   return (
     <form action={action} className="login-form">
+      {next ? <input type="hidden" name="next" value={next} /> : null}
       <div className="login-field">
         <label htmlFor="email">
           Correo

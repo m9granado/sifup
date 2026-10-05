@@ -119,10 +119,7 @@ export function hashPassword(password: string) {
 
 export function validPassword(password: string, stored?: string) {
   if (!stored) {
-    return Boolean(
-      (process.env.SIFUP_ADMIN_PASSWORD && password === process.env.SIFUP_ADMIN_PASSWORD) ||
-      password === "Victooor"
-    );
+    return Boolean(process.env.SIFUP_ADMIN_PASSWORD && password === process.env.SIFUP_ADMIN_PASSWORD);
   }
   const [salt, hash] = stored.split(":");
   if (!salt || !hash) return false;

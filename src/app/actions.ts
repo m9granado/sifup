@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createSession, destroySession, validPassword, requirePermission, ensurePlayerLoginSchema } from "@/lib/auth";
 import { getSql, hasDatabaseUrl } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
+import { sanitizeAuthorizeNext } from "@/lib/oauth-policy";
 import { randomUUID } from "crypto";
 import {
   clearMatchFinalStanding,
@@ -28,51 +29,10 @@ import type { ClubExpense, Match, MatchGame, MatchPlayer, MatchResult, MatchTeam
 
 export type LoginState = { error: string };
 
-const SYSTEM_ADMINS = [
-  {
-    id: "user-cris-gonzwears",
-    email: "cris.gonzwears@gmail.com",
-    password: "Victooor",
-  },
-];
-
-async function ensureSystemUsers(sql: ReturnType<typeof getSql>) {
-  for (const admin of SYSTEM_ADMINS) {
-    const existing = await sql<Array<{ id: string; password_hash: string; role: string; active: boolean }>>`
-      select id, password_hash, role, active from app_users where email = ${admin.email}
-    `;
-
-    if (!existing[0]) {
-      await sql`
-        insert into app_users (id, email, password_hash, role, active)
-        values (${admin.id}, ${admin.email}, ${hashPassword(admin.password)}, 'admin', true)
-        on conflict (email) do update set password_hash = excluded.password_hash, role = 'admin', active = true
-      `;
-      await sql`
-        insert into user_permissions (user_id, permission)
-        select ${admin.id}, permission
-        from unnest(array['dashboard', 'matches', 'players', 'payments', 'standings', 'users']::text[]) as permission
-        on conflict do nothing
-      `;
-    } else if (!validPassword(admin.password, existing[0].password_hash) || existing[0].role !== "admin" || !existing[0].active) {
-      await sql`
-        update app_users
-        set password_hash = ${hashPassword(admin.password)}, role = 'admin', active = true
-        where email = ${admin.email}
-      `;
-      await sql`
-        insert into user_permissions (user_id, permission)
-        select ${existing[0].id}, permission
-        from unnest(array['dashboard', 'matches', 'players', 'payments', 'standings', 'users']::text[]) as permission
-        on conflict do nothing
-      `;
-    }
-  }
-}
-
 export async function loginAction(_state: LoginState, formData: FormData): Promise<LoginState> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
+  const next = sanitizeAuthorizeNext(formData.get("next")?.toString());
   if (!hasDatabaseUrl()) return { error: "No hay una conexión de base de datos configurada." };
   const sql = getSql();
   await sql.unsafe(`
@@ -89,7 +49,6 @@ export async function loginAction(_state: LoginState, formData: FormData): Promi
     alter table app_users add column if not exists player_id text references players(id) on delete set null;
     create unique index if not exists idx_app_users_player_id on app_users(player_id) where player_id is not null;
   `);
-  await ensureSystemUsers(sql);
   let users = await sql<Array<{ id: string; password_hash: string }>>`select id, password_hash from app_users where email = ${email} and active = true`;
   // Bootstrap the first administrator once, then all access is database-driven.
   if (!users[0] && email === process.env.SIFUP_ADMIN_EMAIL && password === process.env.SIFUP_ADMIN_PASSWORD) {
@@ -99,7 +58,7 @@ export async function loginAction(_state: LoginState, formData: FormData): Promi
   }
   if (!users[0] || !validPassword(password, users[0].password_hash)) return { error: "Correo o contraseña incorrectos." };
   await createSession(users[0].id);
-  redirect("/dashboard");
+  redirect(next ?? "/dashboard");
 }
 
 export async function logoutAction() {

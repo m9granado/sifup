@@ -3,6 +3,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod";
 import { addPlayerToMatch, assignPlayerTeam, deduplicateMatchPlayers, findPlayer, generateBalancedTeams, getMatchTeams, getNextMatchSummary, getPendingPayments, getPlayerStandings, importWhatsAppMatch, mergePlayers, registerMatchPayment, registerMonthlyPayment, removePlayerFromMatch, replaceMatchTeams, setMatchResult, setMonthlyRoster, updateMatch, updateMatchPlayer } from "@/lib/sifup-service";
 import { PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "@/lib/sifup-constants";
+import { buildResourceMetadataChallenge } from "@/lib/oauth-policy";
 
 type ToolResult = {
   content: { type: "text"; text: string }[];
@@ -30,7 +31,14 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 function unauthorized() {
-  return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const resourceMetadataUrl = `${PUBLIC_BASE_URL}/.well-known/oauth-protected-resource`;
+  return Response.json(
+    { error: "Unauthorized" },
+    {
+      status: 401,
+      headers: { "WWW-Authenticate": buildResourceMetadataChallenge(resourceMetadataUrl) },
+    },
+  );
 }
 
 function isAuthorized(request: Request) {
