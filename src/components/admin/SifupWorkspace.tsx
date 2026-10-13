@@ -153,10 +153,11 @@ function matchRowBelongsToPlayer(row: Pick<MatchPlayer, "playerId" | "name">, pl
 }
 
 function isMonthlyMatchRow(row: MatchPlayer, players: Player[], monthKey: string, monthlyPayments: MonthlyPayment[]) {
+  // Roster is canonical when the player is known; the "mensualidad" note is only
+  // a fallback for unresolved rows (mirrors whatsapp.ts's isMonthlyRow).
   const player = playerForMatchRow(row, players);
-  if (row.note.toLowerCase().includes("mensualidad")) return true;
-  if (!player) return false;
-  return isPlayerMonthlyForMonth(player.id, monthKey, players, monthlyPayments);
+  if (player) return isPlayerMonthlyForMonth(player.id, monthKey, players, monthlyPayments);
+  return row.note.toLowerCase().includes("mensualidad");
 }
 
 function buildPlayerStandings(data: SifupData) {

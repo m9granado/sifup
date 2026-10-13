@@ -2,6 +2,7 @@ import "server-only";
 
 import { seedData } from "./mock-data";
 import { getSql, hasDatabaseUrl } from "./db";
+import { monthKey } from "./sifup-date";
 import type { ClubExpense, Match, MatchGame, MatchPlayer, MatchResult, MatchTeam, MonthlyPayment, Player, SifupData } from "./types";
 
 function iso(value: Date | string) {
@@ -166,7 +167,9 @@ export async function getSifupData(): Promise<SifupData> {
       status: row.status,
       totalCost: row.total_cost,
       weekLabel: row.week_label,
-      monthKey: row.month_key,
+      // Derived from match_date at read time (DB column untouched): a stored
+      // month_key desynced from match_date must never drive billing/roster lookups.
+      monthKey: monthKey(dateOnly(row.match_date)),
       courtCost: row.court_cost,
       courtPrepaid: row.court_prepaid,
       notes: row.notes,

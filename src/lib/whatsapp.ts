@@ -6,9 +6,11 @@ const MINIMUM_PLAYERS = 12;
 const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
 function isMonthlyRow(row: MatchPlayer, players: Player[], monthKey: string, monthlyPayments: MonthlyPayment[]) {
-  if (row.note.toLowerCase().includes("mensualidad")) return true;
+  // Roster is canonical when the player is known; "mensualidad" note is only a
+  // fallback for unresolved rows (avoids a stale note faking a MENSUAL badge).
   const player = players.find((item) => item.id === row.playerId) ?? players.find((item) => item.name.toLowerCase() === row.name.toLowerCase());
-  return player ? isPlayerMonthlyForMonth(player.id, monthKey, players, monthlyPayments) : false;
+  if (player) return isPlayerMonthlyForMonth(player.id, monthKey, players, monthlyPayments);
+  return row.note.toLowerCase().includes("mensualidad");
 }
 
 function sortRowsMonthlyFirst(rows: MatchPlayer[], players: Player[], monthKey: string, monthlyPayments: MonthlyPayment[]) {

@@ -67,10 +67,13 @@ function createServer() {
     "find_player",
     {
       title: "Buscar jugador",
-      description: "Busca jugadores existentes del club por nombre o apodo y devuelve candidatos ordenados por coincidencia (exacta, apodo, prefijo, token). Usalo para validar a que jugador corresponde un nombre de WhatsApp antes de importar la lista o agregar a alguien, y asi evitar duplicados.",
+      description: "Busca jugadores existentes del club por nombre o apodo y devuelve candidatos ordenados por coincidencia (exacta, apodo, prefijo, token). Usalo para validar a que jugador corresponde un nombre de WhatsApp antes de importar la lista o agregar a alguien, y asi evitar duplicados. Cada candidato incluye effectivePaymentPlan: el estado mensual/galleta real para el mes resuelto (roster del mes manda sobre el plan global del jugador, incluso si la cuota esta impaga).",
       inputSchema: {
         query: z.string().min(1).describe("Nombre o apodo a buscar."),
         limit: z.number().int().positive().max(20).optional().describe("Cantidad maxima de candidatos. Default: 5."),
+        matchId: z.string().optional().describe("ID de partido para resolver el mes efectivo. Si no existe, falla (no cae a otro partido)."),
+        date: z.string().optional().describe("Fecha YYYY-MM-DD para resolver el mes efectivo si no se entrega matchId."),
+        monthKey: z.string().optional().describe("Mes YYYY-MM explicito si no se entrega matchId ni date. Default: mes actual."),
       },
     },
     (input) => runTool(() => findPlayer(input)),
@@ -89,6 +92,7 @@ function createServer() {
         attendanceStatus: z.enum(["confirmed", "galleta", "banca", "out", "waitlist", "maybe"]).optional().describe("Estado de asistencia: confirmed (confirmado), galleta (galleta abierta), banca (banca), out (no puede). Por defecto: confirmed para mensuales, galleta para no mensuales."),
         team: z.enum(["A", "B", "none"]).optional().describe("Equipo: A (Rojo), B (Amarillo) o none. Default: none."),
         amountDue: z.number().int().min(0).optional().describe(`Monto a cobrar si no es mensual. Default: ${PER_MATCH_AMOUNT}.`),
+        provisionalGuest: z.boolean().optional().describe("Si es true, registra como invitado provisional independiente con resolución de nombre exacto (evita asociar por similitud/fuzzy a jugadores existentes con nombres similares). Crea o reutiliza un jugador perMatch propio con nombre exacto. Por defecto queda en estado galleta (waitlist permitido; no permite confirmed al crear)."),
       },
     },
     (input) => runTool(() => addPlayerToMatch(input)),

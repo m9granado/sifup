@@ -5,7 +5,7 @@ import { COURT_COST, MONTHLY_AMOUNT, PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from ".
 import { monthKey, weekLabel } from "./sifup-date";
 import { cleanPlayerName, parseWhatsAppList } from "./parser";
 import { applyRosterChange as dbApplyRosterChange, deleteMonthlyPayment, getSifupData, saveMatch, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment, savePlayer, mergePlayers as dbMergePlayers } from "./repository";
-import { isPlayerMonthlyForMonth, newId, newMatchId, newPlayerId, nextMatch, planRosterChange, sortByWhatsappOrder, summarizeMatch } from "./store";
+import { isPlayerMonthlyForMonth, newId, newMatchId, newPlayerId, nextMatch, planRosterChange, playerMonthlyContext, sortByWhatsappOrder, summarizeMatch } from "./store";
 import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, standingsMessage, teamsMessage } from "./whatsapp";
 import { calculateRankingRecord } from "./standings";
 import type { AttendanceStatus, Match, MatchPlayer, MatchResult, MonthlyPayment, Player, Team, Winner } from "./types";
@@ -51,7 +51,8 @@ export async function importWhatsAppMatch({
     status: existing?.status ?? "confirmed",
     totalCost: existing?.totalCost ?? COURT_COST,
     weekLabel: existing?.weekLabel || weekLabel(parsed.match.date),
-    monthKey: existing?.monthKey || monthKey(parsed.match.date),
+    // Always derive from `date`, never trust a possibly-stale existing.monthKey.
+    monthKey: monthKey(parsed.match.date),
     courtCost: existing?.courtCost ?? COURT_COST,
     courtPrepaid: existing?.courtPrepaid ?? true,
     notes: preservedNotes,
@@ -129,10 +130,14 @@ export async function importWhatsAppMatch({
       // Solo se preserva el monto si hubo un pago real: "paid" con amountPaid=0 es
       // el estado trivial de una fila mensual/gratis, y si el jugador ya no es
       // mensual ese $0 quedaria pegado para siempre (bug real: ver German 09-15).
+      // amountPaid real siempre se conserva; amountDue/paymentStatus solo se heredan
+      // de la fila existente si no es out/monthly (que deben seguir en 0/paid).
       if (existingRow.amountPaid > 0) {
-        paymentStatus = existingRow.paymentStatus;
         amountPaid = existingRow.amountPaid;
-        amountDue = existingRow.amountDue;
+        if (!out && !monthly) {
+          paymentStatus = existingRow.paymentStatus;
+          amountDue = existingRow.amountDue;
+        }
       }
       if (existingRow.note && !note) {
         note = existingRow.note;
@@ -209,6 +214,30 @@ export async function getNextMatchSummary(input: { matchId?: string; date?: stri
   return buildMatchPayload(match, rows, result, "summary", data.players, data.monthlyPayments);
 }
 
+// Mirrors zod's number().int() validation (rejects NaN/Infinity/fractions/>MAX_SAFE_INTEGER).
+function assertValidAmount(value: number | undefined, label: string) {
+  if (value === undefined) return;
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${label} invalido: debe ser un entero mayor o igual a 0 (recibido ${value}).`);
+  }
+}
+
+const MONTH_KEY_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+function assertValidMonthKey(value: string) {
+  if (!MONTH_KEY_RE.test(value)) {
+    throw new Error(`Mes invalido: '${value}'. Formato esperado YYYY-MM (01-12).`);
+  }
+}
+
+function isValidIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  if (month < 1 || month > 12) return false;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
 export type AddPlayerToMatchInput = {
   name: string;
   matchId?: string;
@@ -217,11 +246,13 @@ export type AddPlayerToMatchInput = {
   attendanceStatus?: AttendanceStatus;
   team?: Team;
   amountDue?: number;
+  provisionalGuest?: boolean;
 };
 
 export async function addPlayerToMatch(input: AddPlayerToMatchInput) {
   const cleanName = cleanPlayerName(input.name ?? "");
   if (!cleanName) throw new Error("Falta el nombre del jugador.");
+  assertValidAmount(input.amountDue, "amountDue");
 
   const data = await getSifupData();
   const match = resolveMatch(data.matches, input);
@@ -229,30 +260,133 @@ export async function addPlayerToMatch(input: AddPlayerToMatchInput) {
 
   const currentRows = data.matchPlayers.filter((row) => row.matchId === match.id);
   const result = data.results.find((item) => item.matchId === match.id);
-  const known = findKnownPlayer(data.players, cleanName, data.matchPlayers);
-  const already = currentRows.find(
-    (row) => (known && row.playerId === known.id) || normalizeName(row.name) === normalizeName(cleanName),
-  );
+  const players = [...data.players];
+
+  let known: Player | undefined;
+  let already: MatchPlayer | undefined;
+
+  if (input.provisionalGuest) {
+    if (input.attendanceStatus === "confirmed") {
+      throw new Error("No se permite attendanceStatus 'confirmed' para un invitado provisional.");
+    }
+
+    const normTarget = normalizeName(cleanName);
+
+    // 1. Resolver nombre exacto únicamente en este modo, nunca findKnownPlayer.
+    const matchingPlayers = players.filter((p) => normalizeName(p.name) === normTarget);
+    if (matchingPlayers.length > 1) {
+      throw new Error(`Ambigüedad: existen múltiples jugadores con el nombre exacto '${cleanName}'.`);
+    }
+
+    const exactPlayer = matchingPlayers[0];
+    if (exactPlayer) {
+      if (exactPlayer.paymentPlan !== "perMatch") {
+        throw new Error(`Colisión incompatible: el jugador '${exactPlayer.name}' no tiene plan por partido.`);
+      }
+      // Rechaza known con perMatch global pero mensual EFECTIVO según roster
+      const isMonthlyEffective = isPlayerMonthlyForMonth(exactPlayer.id, match.monthKey, players, data.monthlyPayments);
+      if (isMonthlyEffective) {
+        throw new Error(`Colisión incompatible: el jugador '${exactPlayer.name}' está en el roster mensual del mes.`);
+      }
+    }
+
+    // 2. Detectar colisión exacta en las filas del partido antes de persistir
+    const matchingRows = currentRows.filter(
+      (row) => normalizeName(row.name) === normTarget || (exactPlayer && row.playerId === exactPlayer.id),
+    );
+
+    if (matchingRows.length > 1) {
+      throw new Error(`Ambigüedad: existen múltiples filas en el partido que coinciden con '${cleanName}'.`);
+    }
+
+    const existingRow = matchingRows[0];
+    if (existingRow) {
+      // Coincidencia en row por nombre exacto debe estar ligada al invitado propio;
+      // si nombre exacto liga Cooper/Hans (o a otro jugador distinto) hay colisión -> error sin escrituras.
+      if (existingRow.playerId && (!exactPlayer || existingRow.playerId !== exactPlayer.id)) {
+        throw new Error(`Colisión en el partido: la fila '${existingRow.name}' está ligada a otro jugador (${existingRow.playerId}).`);
+      }
+
+      // NO demuevas participantes ya confirmados por cierre al repetir. Incompatibilidad de estado se rechaza antes de guardar.
+      if (existingRow.attendanceStatus === "confirmed" && input.attendanceStatus !== undefined) {
+        throw new Error("No se puede cambiar el estado de un participante ya confirmado por cierre.");
+      }
+    }
+
+    // 3. Crear o reusar jugador PROPIO con nombre exacto normalizado y plan perMatch mediante savePlayer.
+    const now = new Date().toISOString();
+    if (exactPlayer) {
+      known = exactPlayer;
+    } else {
+      const newPlayer: Player = {
+        id: newPlayerId(cleanName, players.map((item) => item.id)),
+        name: cleanName,
+        nickname: cleanName.split(" ")[0],
+        phone: input.phone ?? "",
+        paymentPlan: "perMatch",
+        skillLevel: 3,
+        active: true,
+        shortName: cleanName.slice(0, 3).toUpperCase(),
+        isGoalkeeper: false,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await savePlayer(newPlayer);
+      players.push(newPlayer);
+      known = newPlayer;
+    }
+
+    already = existingRow;
+  } else {
+    // NOTA DE SEGURIDAD / COMPATIBILIDAD:
+    // El flujo legacy a continuación utiliza findKnownPlayer (coincidencia difusa/fuzzy).
+    // Esto es inseguro para nombres de invitados provisionales que contengan nombres o apodos
+    // de jugadores existentes (por ejemplo, "H galleta cooper" asocia con score 65 a "Cooper").
+    // Por diseño, no se afloja findKnownPlayer globalmente ni se altera la heurística de matching;
+    // para altas e importaciones provisionales se debe usar la vía explícita provisionalGuest: true.
+    known = findKnownPlayer(players, cleanName, data.matchPlayers);
+    already = currentRows.find(
+      (row) => (known && row.playerId === known.id) || normalizeName(row.name) === normalizeName(cleanName),
+    );
+  }
 
   const monthlyPlayerId = known?.id ?? already?.playerId;
-  const monthly = monthlyPlayerId ? isPlayerMonthlyForMonth(monthlyPlayerId, match.monthKey, data.players, data.monthlyPayments) : false;
+  const monthly = input.provisionalGuest
+    ? false
+    : monthlyPlayerId
+      ? isPlayerMonthlyForMonth(monthlyPlayerId, match.monthKey, players, data.monthlyPayments)
+      : false;
 
   // Si ya existe en el partido, ACTUALIZAR la fila existente sin duplicar (Scope 4)
   if (already) {
     const now = new Date().toISOString();
+    const newStatus = input.attendanceStatus ?? already.attendanceStatus;
+    // Mirrors updateMatchPlayer's "out"/repricing handling so both tools produce the same row shape.
+    const isOut = newStatus === "out";
+    const shouldRepriceGalleta = !input.provisionalGuest && !isOut && newStatus === "confirmed" && !monthly && input.amountDue === undefined && already.amountDue === 0;
+    const amountDue = isOut || monthly ? 0 : input.amountDue !== undefined ? input.amountDue : shouldRepriceGalleta ? PER_MATCH_AMOUNT : already.amountDue;
+    const amountPaid = already.amountPaid;
     const updatedRow: MatchPlayer = {
       ...already,
+      playerId: input.provisionalGuest && !already.playerId ? known?.id : already.playerId,
+      name: input.provisionalGuest ? cleanName : already.name,
       phone: input.phone ?? already.phone,
-      attendanceStatus: input.attendanceStatus ?? already.attendanceStatus,
-      team: input.team ?? already.team,
-      amountDue: monthly ? 0 : input.amountDue !== undefined ? input.amountDue : already.amountDue,
-      paymentStatus: monthly ? "paid" : already.paymentStatus,
+      attendanceStatus: newStatus,
+      team: isOut ? "none" : input.team ?? already.team,
+      amountDue,
+      amountPaid,
+      paymentStatus: isOut || monthly
+        ? "paid"
+        : shouldRepriceGalleta
+          ? (amountPaid >= amountDue ? "paid" : "unpaid")
+          : (amountPaid >= amountDue ? "paid" : already.paymentStatus),
+      note: isOut ? "No puede" : already.note,
       updatedAt: now,
     };
     const nextRows = currentRows.map((r) => (r.id === already.id ? updatedRow : r));
     await saveMatchPlayers(match.id, nextRows);
     revalidateSifupViews(match.id);
-    const payload = buildMatchPayload(match, nextRows, result, "updated", data.players, data.monthlyPayments);
+    const payload = buildMatchPayload(match, nextRows, result, "updated", players, data.monthlyPayments);
     return { ...payload, note: `${already.name} ya estaba en la lista del partido y fue actualizado.` };
   }
 
@@ -265,13 +399,13 @@ export async function addPlayerToMatch(input: AddPlayerToMatchInput) {
     id: newId("mp"),
     matchId: match.id,
     playerId: known?.id,
-    name: known?.name ?? cleanName,
+    name: input.provisionalGuest ? cleanName : (known?.name ?? cleanName),
     phone: input.phone ?? known?.phone ?? "",
     attendanceStatus,
-    paymentStatus: out || monthly ? "paid" : "unpaid",
+    paymentStatus: out || monthly ? "paid" : (amountDue === 0 ? "paid" : "unpaid"),
     amountDue: out || monthly ? 0 : amountDue,
     amountPaid: 0,
-    note: out ? "No puede" : monthly ? "mensualidad" : attendanceStatus === "galleta" ? "Galleta abierta" : "",
+    note: out ? "No puede" : monthly ? "mensualidad" : attendanceStatus === "galleta" ? "Galleta abierta" : attendanceStatus === "waitlist" ? "En lista de espera" : "",
     team: out ? "none" : input.team ?? "none",
     whatsappOrder: Math.max(0, ...currentRows.map((row) => row.whatsappOrder || 0)) + 1,
     goals: 0,
@@ -283,16 +417,20 @@ export async function addPlayerToMatch(input: AddPlayerToMatchInput) {
   await saveMatchPlayers(match.id, nextRows);
   revalidateSifupViews(match.id);
 
-  const payload = buildMatchPayload(match, nextRows, result, "updated", data.players, data.monthlyPayments);
+  const payload = buildMatchPayload(match, nextRows, result, "updated", players, data.monthlyPayments);
   return { ...payload, note: `${newRow.name} agregado al partido en el puesto #${newRow.whatsappOrder}.` };
 }
 
-function resolveMatch(matches: Match[], input: { matchId?: string; date?: string }) {
-  return (
-    (input.matchId ? matches.find((item) => item.id === input.matchId) : undefined) ??
-    (input.date ? matches.find((item) => item.date === input.date) : undefined) ??
-    nextMatch(matches)
-  );
+// An explicit matchId/date that doesn't resolve must not silently fall back to
+// the next match. monthKey is normalized from `date`, never trusted as stored,
+// so a desynced value can't make isPlayerMonthlyForMonth read the wrong month.
+function resolveMatch(matches: Match[], input: { matchId?: string; date?: string }): Match | undefined {
+  const match = input.matchId !== undefined
+    ? matches.find((item) => item.id === input.matchId)
+    : input.date !== undefined
+      ? matches.find((item) => item.date === input.date)
+      : nextMatch(matches);
+  return match ? { ...match, monthKey: monthKey(match.date) } : undefined;
 }
 
 function currentMonthKey() {
@@ -315,6 +453,7 @@ export async function registerMonthlyPayment(input: RegisterMonthlyPaymentInput)
       : undefined;
   if (!player) throw new Error("Jugador no encontrado.");
   const targetMonth = input.monthKey ?? currentMonthKey();
+  assertValidMonthKey(targetMonth);
   if (!isPlayerMonthlyForMonth(player.id, targetMonth, data.players, data.monthlyPayments)) throw new Error(`${player.name} no es jugador mensual (oficial) en ${targetMonth}.`);
 
   const paid = input.paid ?? true;
@@ -368,6 +507,7 @@ export async function setMonthlyRoster(input: SetMonthlyRosterInput) {
   if (!player) throw new Error("Jugador no encontrado.");
 
   const targetMonth = input.monthKey ?? currentMonthKey();
+  assertValidMonthKey(targetMonth);
   const existing = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === targetMonth);
   const playerRows = data.matchPlayers.filter((row) => row.playerId === player.id || findKnownPlayer(data.players, row.name)?.id === player.id);
   const plan = planRosterChange({ playerRows, matches: data.matches, monthKey: targetMonth, monthly: input.monthly, payment: existing, cancelGalletas: input.cancelGalletas ?? false });
@@ -515,9 +655,9 @@ function buildMatchPayload(match: Match, rows: MatchPlayer[], result: Parameters
     match,
     summary,
     players: {
-      confirmed: confirmed.map(publicMatchPlayer),
-      out: out.map(publicMatchPlayer),
-      all: sortedRows.map(publicMatchPlayer),
+      confirmed: confirmed.map((row) => withEffectivePlan(row, players, monthlyPayments, match.monthKey)),
+      out: out.map((row) => withEffectivePlan(row, players, monthlyPayments, match.monthKey)),
+      all: sortedRows.map((row) => withEffectivePlan(row, players, monthlyPayments, match.monthKey)),
     },
     messages: {
       matchSummary: matchSummaryMessage(match, sortedRows, players, monthlyPayments),
@@ -543,27 +683,71 @@ function publicMatchPlayer(row: MatchPlayer) {
   };
 }
 
+// Resolves the same way whatsapp.ts's isMonthlyRow does: id match, then exact
+// name match. Never fuzzy — an unresolved row stays undefined/perMatch.
+function withEffectivePlan(row: MatchPlayer, players: Player[], monthlyPayments: MonthlyPayment[], matchMonthKey: string) {
+  const base = publicMatchPlayer(row);
+  const player = players.find((item) => item.id === row.playerId) ?? players.find((item) => item.name.toLowerCase() === row.name.toLowerCase());
+  if (!player) return { ...base, effectivePaymentPlan: undefined as "monthly" | "perMatch" | undefined };
+  const context = playerMonthlyContext(player.id, matchMonthKey, players, monthlyPayments);
+  return { ...base, effectivePaymentPlan: (context.isMonthly ? "monthly" : "perMatch") as "monthly" | "perMatch" };
+}
+
 export type FindPlayerInput = {
   query: string;
   limit?: number;
+  // Optional context to resolve the effective monthly status (matchId > date >
+  // monthKey priority; defaults to the current month).
+  matchId?: string;
+  date?: string;
+  monthKey?: string;
 };
 
-export async function findPlayer({ query, limit = 5 }: FindPlayerInput) {
+type EffectiveMonthContext = { monthKey: string; matchId?: string; date?: string };
+
+// Mirrors resolveMatch's strictness: an unknown matchId/date throws, and
+// monthKey is always derived from `date`, never trusted as stored.
+function resolveEffectiveMonthContext(input: { matchId?: string; date?: string; monthKey?: string }, data: { matches: Match[] }): EffectiveMonthContext {
+  if (input.matchId !== undefined) {
+    const match = data.matches.find((item) => item.id === input.matchId);
+    if (!match) throw new Error(`No existe un partido con matchId '${input.matchId}'.`);
+    return { monthKey: monthKey(match.date), matchId: match.id, date: match.date };
+  }
+  if (input.date !== undefined) {
+    if (!isValidIsoDate(input.date)) throw new Error(`Fecha invalida: '${input.date}'. Formato esperado YYYY-MM-DD.`);
+    const match = data.matches.find((item) => item.date === input.date);
+    return { monthKey: monthKey(input.date), matchId: match?.id, date: input.date };
+  }
+  if (input.monthKey !== undefined) {
+    assertValidMonthKey(input.monthKey);
+    return { monthKey: input.monthKey };
+  }
+  return { monthKey: currentMonthKey() };
+}
+
+export async function findPlayer({ query, limit = 5, matchId, date, monthKey: monthKeyInput }: FindPlayerInput) {
   const data = await getSifupData();
   const candidates = rankPlayerCandidates(data.players, query).slice(0, limit);
+  const context = resolveEffectiveMonthContext({ matchId, date, monthKey: monthKeyInput }, data);
 
   return {
     query,
-    matches: candidates.map(({ player, matchType, score }) => ({
-      id: player.id,
-      name: player.name,
-      nickname: player.nickname,
-      active: player.active,
-      paymentPlan: player.paymentPlan,
-      skillLevel: player.skillLevel,
-      matchType,
-      score,
-    })),
+    effectiveContext: context,
+    matches: candidates.map(({ player, matchType, score }) => {
+      const monthlyContext = playerMonthlyContext(player.id, context.monthKey, data.players, data.monthlyPayments);
+      return {
+        id: player.id,
+        name: player.name,
+        nickname: player.nickname,
+        active: player.active,
+        paymentPlan: player.paymentPlan,
+        effectivePaymentPlan: (monthlyContext.isMonthly ? "monthly" : "perMatch") as "monthly" | "perMatch",
+        effectiveSource: monthlyContext.source,
+        skillLevel: player.skillLevel,
+        matchType,
+        score,
+      };
+    }),
   };
 }
 
@@ -1051,6 +1235,8 @@ export type UpdateMatchPlayerInput = {
 };
 
 export async function updateMatchPlayer(input: UpdateMatchPlayerInput) {
+  assertValidAmount(input.amountDue, "amountDue");
+  assertValidAmount(input.amountPaid, "amountPaid");
   const data = await getSifupData();
   const match = resolveMatch(data.matches, input);
   if (!match) throw new Error("No hay partido para actualizar.");
@@ -1078,7 +1264,9 @@ export async function updateMatchPlayer(input: UpdateMatchPlayerInput) {
   // precio vigente para que no juegue gratis por error.
   const shouldRepriceGalleta = !isOut && newStatus === "confirmed" && !isMonthlyPlayer && input.amountDue === undefined && targetRow.amountDue === 0;
   const amountDue = isOut || isMonthlyPlayer ? 0 : input.amountDue !== undefined ? input.amountDue : shouldRepriceGalleta ? PER_MATCH_AMOUNT : targetRow.amountDue;
-  const amountPaid = isOut ? 0 : input.amountPaid !== undefined ? input.amountPaid : targetRow.amountPaid;
+  // A real prior payment is never fabricated nor erased just by changing attendance
+  // (e.g. marking someone "out" must not wipe out a payment they already made).
+  const amountPaid = input.amountPaid !== undefined ? input.amountPaid : targetRow.amountPaid;
 
   const updatedRow: MatchPlayer = {
     ...targetRow,
