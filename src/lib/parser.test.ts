@@ -41,7 +41,7 @@ test("parseWhatsAppList parses bullets and no pueden section with independent se
   assert.equal(result.players[5].amountDue, 0);
 });
 
-test("matchSummaryMessage renders template matching exact WhatsApp spec with dynamic target", () => {
+test("matchSummaryMessage renders current simplified WhatsApp template with dynamic target", () => {
   const parsed = parseWhatsAppList(realMessage, 3500);
   const text = matchSummaryMessage(
     {
@@ -72,17 +72,17 @@ test("matchSummaryMessage renders template matching exact WhatsApp spec with dyn
     [],
   );
 
-  assert.match(text, /⚽ \*SIFUP · Fútbol de martes\*/);
+  assert.match(text, /^\*SIFUP/);
   assert.match(text, /📅 Martes 7 Julio · 🕘 21:00 hrs/);
-  assert.match(text, /📍 Club de los Sordos/);
-  assert.match(text, /💰 Cancha pagada ✅/);
+  assert.match(text, /^Club de los Sordos$/m);
+  assert.doesNotMatch(text, /Cancha pagada/);
   assert.match(text, /\*Jugadores \(5\/12\)\*/);
-  assert.match(text, / 1 · Victor/);
-  assert.match(text, / 5 · Marcio/);
-  assert.match(text, /12 · $/m);
-  assert.match(text, /🍪 \*Galletas abiertas:\* -/);
-  assert.match(text, /🪑 \*Banca:\* -/);
-  assert.match(text, /❌ \*No pueden:\*\n- Mantelli\n- Cooper/);
+  assert.match(text, / 1\u00b7 Victor \uD83C\uDF6A/);
+  assert.match(text, / 5\u00b7 Marcio \uD83C\uDF6A/);
+  assert.match(text, /12\u00b7 $/m);
+  assert.doesNotMatch(text, /Galletas abiertas/);
+  assert.match(text, /\*Banca\* .+\n1\.\n2\.\n3\./);
+  assert.match(text, /\*No pueden:\*\n1. Mantelli\n2. Cooper\n3\./);
   assert.match(text, /https:\/\/sifup\.vercel\.app\/m\/0707$/);
 });
 
@@ -135,9 +135,9 @@ test("matchSummaryMessage renders categorized waiting lists with cookie emoji", 
     notes: "", matchFormat: "clasico", createdAt: "", updatedAt: "",
   }, parsed.players.map((player, index) => ({ ...player, id: `row-${index}`, matchId: "match-categories", createdAt: "", updatedAt: "" })), [], []);
 
-  assert.match(text, /\*Jugadores \(1\/12\)\*\n 1 · Marcio/);
-  assert.match(text, /🍪 \*Galletas abiertas\*\n1 · Mella 🍪/);
-  assert.match(text, /🪑 \*Banca\*\n1 · Eduardo Loaiza/);
+  assert.match(text, /\*Jugadores \(1\/12\)\*\n 1. Marcio/);
+  assert.match(text, /Galletas abiertas\*\n1. Mella/);
+  assert.match(text, /\*Banca\* .+\n1. Eduardo Loaiza/);
 });
 
 test("matchSummaryMessage keeps overflow officials in Banca", () => {
@@ -162,8 +162,8 @@ test("matchSummaryMessage keeps overflow officials in Banca", () => {
     status: "confirmed", totalCost: 35000, weekLabel: "", monthKey: "2026-09", courtCost: 0,
     courtPrepaid: false, notes: "", matchFormat: "clasico", squadTarget: 12, createdAt: "", updatedAt: "",
   }, rows, [], []);
-  assert.match(text, /12 · Jugador 12/);
-  assert.match(text, /🪑 \*Banca\*\n1 · Jugador 13\n2 · Jugador 14/);
+  assert.match(text, /12\u00b7 Jugador 12 \uD83C\uDF6A/);
+  assert.match(text, /\*Banca\* .+\n1. Jugador 13\n2. Jugador 14/);
 });
 
 test("cleanPlayerName strips emojis, symbols and text in parentheses", () => {
@@ -259,7 +259,7 @@ Club Sordos
   );
 
   assert.match(text, /\*Jugadores \(1\/14\)\*/);
-  assert.match(text, /14 · $/m);
+  assert.match(text, /14\u00b7 $/m);
 });
 
 test("summarizeMatch maintains consistency between unpaidCount and pendingAmount with galletas", () => {
