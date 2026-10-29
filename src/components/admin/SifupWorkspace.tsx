@@ -3870,7 +3870,8 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
   const [error, setError] = useState("");
   const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
   const [editingGuestName, setEditingGuestName] = useState<string | null>(null);
-  const month = currentMonthKey();
+  const cutoff = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const month = cutoff.slice(0, 7);
   const [planYear, setPlanYear] = useState(() => Number(month.slice(0, 4)));
   const [rosterMonth, setRosterMonth] = useState(month);
   const monthlyPlayers = data.players
@@ -3886,7 +3887,6 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
       return playerA.localeCompare(playerB);
     });
   const perMatchPending = data.matchPlayers.filter((row) => row.amountDue > row.amountPaid);
-  const cutoff = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   const cash = clubCashSnapshot(data, cutoff);
   const court = courtFinanceSummary(data, month);
   const matchMonth = (row: MatchPlayer) => data.matches.find(match => match.id === row.matchId)?.date.slice(0, 7);

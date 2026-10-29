@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { clubCashSnapshot, clubCashYear } from "./club-cash";
 import type { SifupData } from "./types";
 
@@ -33,4 +34,15 @@ test("cash uses receipt/expense dates, excludes promises/credit and keeps unknow
   assert.deepEqual(clubCashSnapshot(changed,"2026-10-29"),cash);
   assert.equal(clubCashSnapshot(data,"2026-09-30").recordedDatedBalance,-35000);
   assert.deepEqual(data,before);
+});
+
+test("payments month and cash cutoff share Santiago at the UTC month boundary", () => {
+  const source = readFileSync(new URL("../components/admin/SifupWorkspace.tsx", import.meta.url), "utf8");
+  const page = source.split("export function PaymentsPage(")[1].split("function markPaid(")[0];
+  assert.match(page, /const month = cutoff\.slice\(0, 7\)/);
+  const expression = page.match(/const cutoff = (.+);/)![1];
+  const FixedDate = class extends Date { constructor() { super("2026-11-01T01:00:00Z"); } };
+  const cutoff = new Function("Date", `return ${expression}`)(FixedDate);
+  assert.equal(cutoff,"2026-10-31");
+  assert.equal(cutoff.slice(0,7),"2026-10");
 });
