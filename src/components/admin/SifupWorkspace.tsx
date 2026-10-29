@@ -3686,7 +3686,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
           ) : (
             <Card className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Partido terminado</p>
+                <p className="text-xs font-black uppercase tracking-wide text-(--muted)">{matchStatusLabel(currentMatch.status)}</p>
                 <p className="mt-1 text-xl font-black text-(--gold)">Resultado pendiente</p>
               </div>
               {isAdmin ? (

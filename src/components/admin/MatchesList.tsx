@@ -1,11 +1,10 @@
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
-import { matchesOverview } from "@/lib/matches-overview";
+import { matchesOverview, matchStatusLabels as labels } from "@/lib/matches-overview";
 import { monthLabel, summarizeMatch } from "@/lib/store";
 import { SQUAD_TARGET } from "@/lib/sifup-constants";
 import type { Match, SifupData } from "@/lib/types";
 
-const labels = { open: "Pendiente", confirmed: "Confirmado", roster_locked: "Lista cerrada", played: "Jugado", suspended: "Suspendido" };
 function Status({ match }: { match: Match }) {
   return <span className={`inline-block rounded-full px-3 py-1 text-xs font-bold ${match.status === "suspended" ? "bg-orange-200/10 text-orange-200" : match.status === "open" ? "bg-amber-200/10 text-amber-200" : match.status === "roster_locked" ? "bg-sky-200/10 text-sky-200" : "bg-emerald-200/10 text-emerald-200"}`}>{labels[match.status] ?? match.status}</span>;
 }

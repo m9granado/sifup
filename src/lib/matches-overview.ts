@@ -1,5 +1,7 @@
 import type { Match } from "./types";
 
+export const matchStatusLabels = { open: "Pendiente", confirmed: "Confirmado", roster_locked: "Lista cerrada", played: "Jugado", suspended: "Suspendido" };
+
 /** Date is the calendar source of truth; every match occurs exactly once. */
 export function matchesOverview(matches: Match[], today: string) {
   const sorted = [...matches].sort((a, b) => `${b.date} ${b.time} ${b.id}`.localeCompare(`${a.date} ${a.time} ${a.id}`));
