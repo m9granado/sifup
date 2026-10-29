@@ -4,6 +4,14 @@ import { z } from "zod";
 import { addPlayerToMatch, assignPlayerTeam, deduplicateMatchPlayers, findPlayer, generateBalancedTeams, getMatchTeams, getNextMatchSummary, getPendingPayments, getPlayerStandings, importWhatsAppMatch, mergePlayers, registerMatchPayment, registerMonthlyPayment, removePlayerFromMatch, replaceMatchTeams, setMatchResult, setMonthlyRoster, updateMatch, updateMatchPlayer } from "@/lib/sifup-service";
 import { PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "@/lib/sifup-constants";
 import { getCourtFinances, linkCourtPayment } from "@/lib/court-payment-service";
+import { correctPaymentReceivedAt, getPaymentRecord } from "@/lib/sifup-service";
+import { parsePaymentReceipt } from "@/lib/payment-receipt";
+
+const receivedAtSchema = z.string().superRefine((value, ctx) => {
+  try { parsePaymentReceipt(value); } catch (error) {
+    ctx.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Fecha invalida." });
+  }
+}).describe("Recepcion real: YYYY-MM-DD sin hora, o ISO 8601 con Z/offset explicito; ej. 2026-10-28T00:02-03:00. Timestamps se leen en UTC; paidDate conserva la fecha informada. No es el mes de cuota ni la fecha del partido.");
 
 type ToolResult = {
   content: { type: "text"; text: string }[];
@@ -133,6 +141,7 @@ function createServer() {
         playerId: z.string().optional().describe("ID del jugador si se conoce."),
         monthKey: z.string().optional().describe("Mes YYYY-MM. Default: mes actual."),
         paid: z.boolean().optional().describe("true para marcar pagado (default), false para revertir a pendiente."),
+        receivedAt: receivedAtSchema.optional(),
       },
     },
     (input) => runTool(() => registerMonthlyPayment(input)),
@@ -164,10 +173,28 @@ function createServer() {
         playerId: z.string().optional().describe("ID del jugador si se conoce."),
         matchId: z.string().optional().describe("ID del partido especifico. Si se omite, se busca el partido con saldo pendiente mas reciente."),
         amount: z.number().int().positive().optional().describe("Monto recibido. Default: el saldo pendiente completo de ese partido."),
+        receivedAt: receivedAtSchema.optional(),
       },
     },
     (input) => runTool(() => registerMatchPayment(input)),
   );
+
+  const paymentSelector = {
+    playerId: z.string().min(1),
+    monthKey: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional(),
+    matchId: z.string().min(1).optional(),
+  };
+  server.registerTool("get_payment_record", {
+    title: "Leer importe, estado y recepcion de un pago",
+    description: "Lectura exacta por playerId y exactamente uno de monthKey (mensualidad) o matchId (galleta). No crea pagos; devuelve paidDate, paidAt UTC y precision date/instant/unknown.",
+    annotations: { readOnlyHint: true },
+    inputSchema: paymentSelector,
+  }, (input) => runTool(() => getPaymentRecord(input)));
+  server.registerTool("correct_payment_received_at", {
+    title: "Corregir solo fecha de recepcion",
+    description: "Corrige recepcion de un pago existente con importe recibido > 0. Usa playerId y exactamente uno de monthKey o matchId. NO registra abonos, cambia importes/estado ni salda promesas. Repetir no duplica dinero.",
+    inputSchema: { ...paymentSelector, receivedAt: receivedAtSchema },
+  }, (input) => runTool(() => correctPaymentReceivedAt(input)));
 
   server.registerTool(
     "merge_players",

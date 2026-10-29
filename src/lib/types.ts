@@ -80,6 +80,8 @@ export type MatchPlayer = {
   paymentStatus: PaymentStatus;
   amountDue: number;
   amountPaid: number;
+  paidDate?: string;
+  paidAt?: string;
   note: string;
   team: Team;
   teamId?: string;
@@ -107,6 +109,7 @@ export type MonthlyPayment = {
   paymentStatus: PaymentStatus;
   note: string;
   paidAt?: string;
+  paidDate?: string;
   createdAt: string;
   updatedAt: string;
 };

@@ -150,6 +150,10 @@ create table if not exists monthly_payments (
 );
 
 alter table monthly_payments add column if not exists paid_at timestamptz;
+-- Receipt precision: paid_date alone means no clock time was supplied.
+alter table monthly_payments add column if not exists paid_date date;
+alter table match_players add column if not exists paid_at timestamptz;
+alter table match_players add column if not exists paid_date date;
 
 create table if not exists club_finances (
   id text primary key,

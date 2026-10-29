@@ -8,6 +8,8 @@ import { applyRosterChange as dbApplyRosterChange, deleteMonthlyPayment, getSifu
 import { isPlayerMonthlyForMonth, newId, newMatchId, newPlayerId, nextMatch, planRosterChange, playerMonthlyContext, sortByWhatsappOrder, summarizeMatch } from "./store";
 import { finalResultMessage, matchSummaryMessage, pendingPaymentsMessage, standingsMessage, teamsMessage } from "./whatsapp";
 import { calculateRankingRecord } from "./standings";
+import { mergedReceipt, parsePaymentReceipt } from "./payment-receipt";
+import { correctPaymentReceipt } from "./repository";
 import type { AttendanceStatus, Match, MatchPlayer, MatchResult, MonthlyPayment, Player, Team, Winner } from "./types";
 
 export type ImportWhatsAppMatchInput = {
@@ -154,6 +156,8 @@ export async function importWhatsAppMatch({
       paymentStatus,
       amountDue,
       amountPaid,
+      paidAt: existingRow?.paidAt,
+      paidDate: existingRow?.paidDate,
       note,
       team,
       teamId: existingRow?.teamId,
@@ -442,9 +446,12 @@ export type RegisterMonthlyPaymentInput = {
   playerId?: string;
   monthKey?: string;
   paid?: boolean;
+  receivedAt?: string;
 };
 
 export async function registerMonthlyPayment(input: RegisterMonthlyPaymentInput) {
+  const receipt = input.receivedAt !== undefined ? parsePaymentReceipt(input.receivedAt) : undefined;
+  if (receipt && input.paid === false) throw new Error("No se puede fechar una promesa o un pago pendiente.");
   const data = await getSifupData();
   const player = input.playerId
     ? data.players.find((item) => item.id === input.playerId)
@@ -468,12 +475,13 @@ export async function registerMonthlyPayment(input: RegisterMonthlyPaymentInput)
     amountPaid: paid ? expected : 0,
     paymentStatus: paid ? "paid" : "unpaid",
     note: existing?.note ?? `Mensualidad ${targetMonth}, vencimiento 10/${targetMonth.slice(5)}`,
-    paidAt: paid ? now : undefined,
+    paidAt: receipt ? receipt.paidAt : existing?.paidAt ?? (paid && !(existing?.amountPaid) && !existing?.paidDate ? now : undefined),
+    paidDate: receipt ? receipt.paidDate : existing?.paidDate,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
 
-  await saveMonthlyPayment(payment);
+  await saveMonthlyPayment(payment, receipt !== undefined);
   revalidateSifupViews();
 
   return {
@@ -483,6 +491,7 @@ export async function registerMonthlyPayment(input: RegisterMonthlyPaymentInput)
     expectedAmount: expected,
     amountPaid: payment.amountPaid,
     paidAt: payment.paidAt ?? null,
+    paidDate: payment.paidDate ?? null,
     note: paid
       ? `${player.name} pago la mensualidad de ${targetMonth}.`
       : `Se marco pendiente la mensualidad de ${player.name} para ${targetMonth}.`,
@@ -554,9 +563,13 @@ export type RegisterMatchPaymentInput = {
   playerId?: string;
   matchId?: string;
   amount?: number;
+  receivedAt?: string;
 };
 
 export async function registerMatchPayment(input: RegisterMatchPaymentInput) {
+  assertValidAmount(input.amount, "amount");
+  if (input.amount === 0) throw new Error("El abono debe ser positivo; para corregir fechas usa correct_payment_received_at.");
+  const receipt = input.receivedAt !== undefined ? parsePaymentReceipt(input.receivedAt) : undefined;
   const data = await getSifupData();
   const player = input.playerId
     ? data.players.find((item) => item.id === input.playerId)
@@ -572,6 +585,7 @@ export async function registerMatchPayment(input: RegisterMatchPaymentInput) {
   });
 
   if (candidates.length === 0) throw new Error("No se encontro al jugador en ningun partido.");
+  if (input.matchId && candidates.length !== 1) throw new Error("Hay filas duplicadas; resolver antes de registrar un pago.");
 
   const row = input.matchId
     ? candidates[0]
@@ -588,10 +602,14 @@ export async function registerMatchPayment(input: RegisterMatchPaymentInput) {
   const match = data.matches.find((item) => item.id === row.matchId);
   const amount = input.amount ?? Math.max(row.amountDue - row.amountPaid, 0);
   const now = new Date().toISOString();
-  const updatedAmountPaid = Math.min(row.amountDue, row.amountPaid + amount);
+  const updatedAmountPaid = Math.max(row.amountPaid, Math.min(row.amountDue, row.amountPaid + amount));
+  const receivedAmount = Math.max(updatedAmountPaid - row.amountPaid, 0);
+  if (receipt && receivedAmount === 0) throw new Error("Pago ya registrado: usa correct_payment_received_at para corregir solo la fecha.");
   const updatedRow: MatchPlayer = {
     ...row,
     amountPaid: updatedAmountPaid,
+    paidAt: receipt ? receipt.paidAt : row.paidAt ?? (receivedAmount > 0 && !row.paidDate ? now : undefined),
+    paidDate: receipt ? receipt.paidDate : row.paidDate,
     paymentStatus: updatedAmountPaid >= row.amountDue ? "paid" : row.paymentStatus,
     updatedAt: now,
   };
@@ -608,8 +626,52 @@ export async function registerMatchPayment(input: RegisterMatchPaymentInput) {
     amountDue: updatedRow.amountDue,
     pending: Math.max(updatedRow.amountDue - updatedRow.amountPaid, 0),
     status: updatedRow.paymentStatus,
-    note: `${row.name} pago ${amount} para el partido ${match?.weekLabel || match?.date}. Saldo pendiente: ${Math.max(updatedRow.amountDue - updatedRow.amountPaid, 0)}.`,
+    paidAt: updatedRow.paidAt ?? null,
+    paidDate: updatedRow.paidDate ?? null,
+    note: `${row.name} pago ${receivedAmount} para el partido ${match?.weekLabel || match?.date}. Saldo pendiente: ${Math.max(updatedRow.amountDue - updatedRow.amountPaid, 0)}.`,
   };
+}
+
+export type PaymentRecordInput = { playerId: string; monthKey?: string; matchId?: string };
+
+function resolvePaymentRecord(data: Awaited<ReturnType<typeof getSifupData>>, input: PaymentRecordInput) {
+  if (!input.playerId || (input.monthKey !== undefined) === (input.matchId !== undefined)) {
+    throw new Error("Usa playerId y exactamente uno de monthKey o matchId.");
+  }
+  if (!data.players.some((player) => player.id === input.playerId)) throw new Error("Jugador no encontrado.");
+  if (input.monthKey !== undefined) {
+    assertValidMonthKey(input.monthKey);
+    const payment = data.monthlyPayments.find((row) => row.playerId === input.playerId && row.monthKey === input.monthKey);
+    if (!payment) throw new Error("Mensualidad no registrada.");
+    return { kind: "monthly" as const, payment };
+  }
+  const rows = data.matchPlayers.filter((row) => row.playerId === input.playerId && row.matchId === input.matchId);
+  if (rows.length !== 1) throw new Error("Se requiere una unica fila de jugador en ese partido.");
+  return { kind: "perMatch" as const, payment: rows[0] };
+}
+
+export async function getPaymentRecord(input: PaymentRecordInput) {
+  const { kind, payment } = resolvePaymentRecord(await getSifupData(), input);
+  return {
+    kind, id: payment.id, playerId: payment.playerId,
+    monthKey: kind === "monthly" ? (payment as MonthlyPayment).monthKey : null,
+    matchId: kind === "perMatch" ? (payment as MatchPlayer).matchId : null,
+    amountDue: kind === "monthly" ? (payment as MonthlyPayment).expectedAmount : (payment as MatchPlayer).amountDue,
+    amountPaid: payment.amountPaid, paymentStatus: payment.paymentStatus,
+    paidDate: payment.paidDate ?? null, paidAt: payment.paidAt ?? null,
+    receiptPrecision: payment.paidAt ? "instant" : payment.paidDate ? "date" : "unknown",
+    timeZone: payment.paidAt ? "UTC" : null,
+    createdAt: payment.createdAt, updatedAt: payment.updatedAt,
+  };
+}
+
+export async function correctPaymentReceivedAt(input: PaymentRecordInput & { receivedAt: string }) {
+  parsePaymentReceipt(input.receivedAt);
+  const { kind, payment } = resolvePaymentRecord(await getSifupData(), input);
+  if (payment.amountPaid <= 0) throw new Error("Una promesa o deuda no es un pago recibido.");
+  await correctPaymentReceipt(kind, payment.id, input.receivedAt);
+  revalidateSifupViews(input.matchId);
+  return getPaymentRecord(input);
 }
 
 export async function getPendingPayments(input: { monthKey?: string } = {}) {
@@ -677,6 +739,8 @@ function publicMatchPlayer(row: MatchPlayer) {
     paymentStatus: row.paymentStatus,
     amountDue: row.amountDue,
     amountPaid: row.amountPaid,
+    paidAt: row.paidAt ?? null,
+    paidDate: row.paidDate ?? null,
     note: row.note,
     team: row.team,
     whatsappOrder: row.whatsappOrder,
@@ -1364,6 +1428,7 @@ export async function deduplicateMatchPlayers(input: { matchId?: string; date?: 
 
       deduplicatedRows[existingIndex] = {
         ...existing,
+        ...mergedReceipt(existing, row),
         amountPaid: combinedPaid,
         amountDue: combinedDue,
         attendanceStatus: bestStatus,
