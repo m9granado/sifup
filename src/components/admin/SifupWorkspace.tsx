@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { MatchesList } from "./MatchesList";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, Clock, Cookie, MapPin, Medal, MessageCircle, Pencil, Plus, RotateCcw, Save, Search, Share, Shield, Sparkles, TriangleAlert, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
@@ -794,7 +795,7 @@ export function MatchesPage({ initialData }: InitialDataProps) {
     <>
       <PageTitle
         title="Partidos"
-        description="Martes registrados por semana, pagos y asistencia."
+        description="Tu próxima fecha y el historial del equipo, por mes."
         action={
           isAdmin ? (
             <div className="flex flex-wrap gap-2">
@@ -808,97 +809,7 @@ export function MatchesPage({ initialData }: InitialDataProps) {
         }
       />
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
-      <div className="space-y-3">
-        {(() => {
-          const today = new Date().toISOString().slice(0, 10);
-          const nextId = [...data.matches]
-            .filter((match) => match.date >= today && match.status !== "played" && match.status !== "roster_locked" && match.status !== "suspended")
-            .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))[0]?.id;
-          const sortedMatches = [...data.matches].sort((a, b) => b.date.localeCompare(a.date));
-          return sortedMatches.map((match) => {
-            const rows = data.matchPlayers.filter((row) => row.matchId === match.id);
-            const summary = summarizeMatch(rows);
-            const isNext = match.id === nextId;
-            const isCompactConfirmed = match.status === "confirmed" && !isNext;
-            const result = data.results.find((r) => r.matchId === match.id);
-            const winners = result && result.winner !== "draw"
-              ? data.matchPlayers.filter((mp) => mp.matchId === match.id && mp.team === result.winner && mp.attendanceStatus === "confirmed")
-              : [];
-
-            return (
-              <Link key={match.id} href={`/matches/${match.id}`} className="block">
-                <Card
-                  className={`transition ${
-                    result
-                      ? "played-match-card"
-                      : isNext
-                      ? "next-match-card ring-2 ring-(--lime)/20"
-                      : "upcoming-match-card"
-                  }`}
-                >
-                  {result ? (
-                    <div className="flex flex-col gap-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="flex items-center gap-2 text-(--gold)">
-                            <Trophy size={16} aria-hidden="true" />
-                            <p className="text-xs font-black uppercase tracking-wide">Partido finalizado</p>
-                          </div>
-                          <h2 className="mt-1 text-lg font-black text-white">
-                            {result.winner === "draw" ? "Empate" : `Ganó el equipo ${teamLabel(result.winner)}`}
-                          </h2>
-                          <p className="mt-1 text-sm font-medium text-(--muted)">
-                            {match.date}
-                          </p>
-                        </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <StatusBadge value={matchStatusLabel(match.status)} />
-                        </div>
-                      </div>
-                      {winners.length > 0 ? (
-                        <div className="rounded-lg border border-(--gold)/45 bg-(--gold)/12 p-3">
-                          <p className="mb-2 text-xs font-black uppercase tracking-wide text-(--gold)">Jugadores ganadores</p>
-                          <div className="flex flex-wrap gap-2">
-                          {winners.map((w) => (
-                            <span key={w.id} className="inline-flex items-center rounded-md bg-(--gold) px-3 py-1.5 text-sm font-black text-(--bg-deep)">
-                              {w.name}
-                            </span>
-                          ))}
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : isCompactConfirmed ? (
-                    <div className="flex items-center justify-between gap-3">
-                      <h2 className="min-w-0 truncate text-base font-medium text-white">{match.weekLabel || match.date}</h2>
-                      <StatusBadge value={matchStatusLabel(match.status)} />
-                    </div>
-                  ) : (
-                    <div>
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h2 className="text-lg font-bold text-white">{match.weekLabel || match.date}</h2>
-                            {isNext ? <span className="rounded-full bg-(--lime) px-2 py-1 text-xs font-bold text-(--bg-deep)">Proximo partido</span> : null}
-                          </div>
-                          <p className="mt-1 text-sm font-medium text-(--muted)">{match.date} - {match.time}</p>
-                          <p className="mt-1 text-sm text-(--muted)">{match.location}</p>
-                        </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <StatusBadge value={matchStatusLabel(match.status)} />
-                        </div>
-                      </div>
-                      <div className="mt-3 text-sm font-bold text-(--muted)">
-                        <span>{summary.confirmedCount}/{match.squadTarget ?? SQUAD_TARGET} jugadores</span>
-                      </div>
-                    </div>
-                  )}
-                </Card>
-              </Link>
-            );
-          });
-        })()}
-      </div>
+      <MatchesList data={data} today={new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())} />
     </>
   );
 }
