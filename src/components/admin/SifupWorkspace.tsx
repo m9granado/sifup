@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { MatchesList } from "./MatchesList";
 import { ClubCashCard } from "./ClubCashCard";
-import { clubCashSnapshot } from "@/lib/club-cash";
+import { clubCashSnapshot, clubCashYear } from "@/lib/club-cash";
 import { courtFinanceSummary } from "@/lib/court-payments";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -644,30 +644,7 @@ function pendingPayments(payments: MonthlyPayment[], rows: MatchPlayer[]) {
   return payments.reduce((sum, payment) => sum + Math.max(payment.expectedAmount - payment.amountPaid, 0), 0) + rows.reduce((sum, row) => sum + Math.max(row.amountDue - row.amountPaid, 0), 0);
 }
 
-type MonthlyFinanceRow = {
-  key: string;
-  galletas: number;
-  mensual: number;
-  gastosCancha: number;
-  otrosGastos: number;
-  running: number;
-};
-
-function monthlyFinanceSummary(year: number, data: SifupData): MonthlyFinanceRow[] {
-  const months = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0"));
-  let running = 0;
-  return months.map((mm) => {
-    const key = `${year}-${mm}`;
-    const galletas = data.matches
-      .filter((match) => match.monthKey === key)
-      .reduce((sum, match) => sum + data.matchPlayers.filter((row) => row.matchId === match.id).reduce((rowSum, row) => rowSum + row.amountPaid, 0), 0);
-    const mensual = data.monthlyPayments.filter((payment) => payment.monthKey === key).reduce((sum, payment) => sum + payment.amountPaid, 0);
-    const gastosCancha = data.clubExpenses.filter((expense) => expense.category === "court" && expense.expenseDate.slice(0, 7) === key).reduce((sum, expense) => sum + expense.amount, 0);
-    const otrosGastos = data.clubExpenses.filter((expense) => expense.category !== "court" && expense.expenseDate.slice(0, 7) === key).reduce((sum, expense) => sum + expense.amount, 0);
-    running += galletas + mensual - gastosCancha - otrosGastos;
-    return { key, galletas, mensual, gastosCancha, otrosGastos, running };
-  });
-}
+type MonthlyFinanceRow = ReturnType<typeof clubCashYear>[number];
 
 function nextWeekDates(latestDate: string, count: number) {
   const base = new Date(`${latestDate}T12:00:00`);
@@ -3916,7 +3893,7 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
   const pending = pendingPayments(currentMonthlyPayments, perMatchPending.filter(row => matchMonth(row) === month));
   const historicalPending = perMatchPending.filter(row => (matchMonth(row) ?? month) < month).reduce((sum,row) => sum + row.amountDue - row.amountPaid, 0);
   const expenses = [...data.clubExpenses].sort((a, b) => b.expenseDate.localeCompare(a.expenseDate) || a.label.localeCompare(b.label));
-  const financeSummary = monthlyFinanceSummary(planYear, data);
+  const financeSummary = clubCashYear(data, planYear, cutoff);
 
   function markPaid(row: MatchPlayer) {
     const updated = { ...row, paymentStatus: "paid" as const, amountPaid: row.amountDue, updatedAt: new Date().toISOString() };
@@ -4262,13 +4239,13 @@ function MonthlyPaymentPlan({
               </tr>
             ) : null}
             <tr>
-              <td colSpan={13} className="pt-3 pb-1 text-[11px] font-black uppercase tracking-wide text-(--muted)">Flujo del club</td>
+              <td colSpan={13} className="pt-3 pb-1 text-[11px] font-black uppercase tracking-wide text-(--muted)">Movimientos fechados · sin recibos sin fecha ni ajustes sin clasificar</td>
             </tr>
             <FinanceRow label="Ingresos galletas" values={financeSummary.map((row) => row.galletas)} tone="green" />
             <FinanceRow label="Ingresos mensuales" values={financeSummary.map((row) => row.mensual)} tone="green" />
             <FinanceRow label="Gastos cancha" values={financeSummary.map((row) => -row.gastosCancha)} tone="red" />
             <FinanceRow label="Otros gastos" values={financeSummary.map((row) => -row.otrosGastos)} tone="red" />
-            <FinanceRow label="Total acumulado" values={financeSummary.map((row) => row.running)} tone="auto" bold />
+            <FinanceRow label="Acumulado fechado del año (no caja)" values={financeSummary.map((row) => row.running)} tone="auto" bold />
           </tbody>
         </table>
       </div>
