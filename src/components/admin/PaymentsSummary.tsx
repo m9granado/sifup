@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { ClubCashCard } from "./ClubCashCard";
-import { clubCashSnapshot } from "@/lib/club-cash";
+import { MonthlyFundsCard, MonthlyFundsDetails } from "./MonthlyFundsCard";
+import { monthlyFunds } from "@/lib/club-cash";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, Clock, Plus, Scale, TrendingUp, Wallet } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, Plus } from "lucide-react";
 import { addClubExpenseAction, saveMonthlyPaymentAction, setMatchPlayerPaymentStatusAction } from "@/app/actions";
 import { Button, Card, findKnownPlayer, Input, Modal, PageTitle, Stat } from "./SifupWorkspace";
 import { formatCurrency, isPlayerMonthlyForMonth, monthLabel, monthlyPaymentFor, newId, shiftMonthKey } from "@/lib/store";
@@ -52,9 +52,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
   const [year,month] = monthKey.split("-").map(Number);
   const monthEnd = new Date(Date.UTC(year,month,0)).toISOString().slice(0,10);
   const cutoff = monthEnd < today ? monthEnd : today;
-  const cash = clubCashSnapshot(data,cutoff);
-  const periodMovements = cash.dated.filter(item => item.date?.startsWith(monthKey));
-  const gastoTotal = Math.abs(periodMovements.filter(item => item.amount < 0).reduce((sum,item) => sum + item.amount,0));
+  const gastoTotal = monthlyFunds(data, monthKey, cutoff).disbursed;
 
   const galletaRows = data.matchPlayers.filter(
     (row) =>
@@ -79,9 +77,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
   }
   const galletaPlayers = [...galletaByPlayer.values()].sort((a, b) => a.name.localeCompare(b.name));
 
-  const ingresosDelMes = periodMovements.filter(item => item.amount > 0).reduce((sum,item) => sum + item.amount,0);
   const pendientesDePago = cuotaPending + galletaPending;
-  const saldoDelMes = ingresosDelMes - gastoTotal;
 
   function toggleCuota(player: Player) {
     const existing = data.monthlyPayments.find((item) => item.playerId === player.id && item.monthKey === monthKey);
@@ -148,7 +144,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
         <ChevronLeft size={14} /> Pagos
       </Link>
       <PageTitle
-        title="Resumen mensual"
+        title={`Fondos de ${monthLabel(monthKey)}`}
         description={monthLabel(monthKey).replace(/^\w/, (letter) => letter.toUpperCase())}
         action={
           <div className="flex items-center gap-1">
@@ -165,12 +161,10 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
 
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
-      <ClubCashCard data={data} cutoff={cutoff} />
-      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Desembolsado del mes" value={formatCurrency(gastoTotal)} tone="red" icon={<Wallet size={18} />} />
-        <Stat label="Recibido fechado del mes" value={formatCurrency(ingresosDelMes)} tone="green" icon={<TrendingUp size={18} />} />
-        <Stat label="Pendientes de pago" value={formatCurrency(pendientesDePago)} tone="gold" icon={<Clock size={18} />} />
-        <Stat label="Resultado fechado del mes (no caja)" value={formatCurrency(saldoDelMes)} tone={saldoDelMes >= 0 ? "green" : "red"} icon={<Scale size={18} />} />
+      <MonthlyFundsCard data={data} monthKey={monthKey} cutoff={cutoff} />
+      <div className="mb-4">
+        <Stat label="Por cobrar para el mes · no incluido en fondos" value={formatCurrency(pendientesDePago)} tone="gold" icon={<Clock size={18} />} />
+        <p className="mt-2 text-xs text-(--muted)">Cuotas pendientes: {formatCurrency(cuotaPending)} · Galletas pendientes: {formatCurrency(galletaPending)} (pueden corresponder a fechas futuras).</p>
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -350,9 +344,8 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
                 <tr className="border-t border-(--border) font-black text-white">
                   <td className="px-2 py-1.5">Total</td>
                   <td className="whitespace-nowrap px-2 py-1.5 text-right">
-                    <span className="text-(--green)">{formatCurrency(cuotaCollected)}</span>
-                    <span className="text-(--muted)"> / </span>
-                    <span className="text-(--red)">{formatCurrency(cuotaExpected - cuotaCollected)}</span>
+                    <span className="block text-(--green)">Recibido: {formatCurrency(cuotaCollected)}</span>
+                    <span className="block text-(--red)">Pendiente: {formatCurrency(Math.max(cuotaExpected - cuotaCollected, 0))}</span>
                   </td>
                 </tr>
               </tfoot>
@@ -360,6 +353,8 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
           </div>
         </Card>
       </div>
+
+      <MonthlyFundsDetails data={data} monthKey={monthKey} cutoff={cutoff} />
 
       {showExpenseForm ? (
         <Modal title="Agregar gasto" onClose={() => setShowExpenseForm(false)}>

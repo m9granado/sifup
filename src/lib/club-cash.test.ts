@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { clubCashSnapshot, clubCashYear } from "./club-cash";
+import { clubCashSnapshot, clubCashYear, monthlyFunds } from "./club-cash";
 import type { SifupData } from "./types";
 
 test("cash uses receipt/expense dates, excludes promises/credit and keeps unknowns explicit", () => {
@@ -37,6 +37,49 @@ test("cash uses receipt/expense dates, excludes promises/credit and keeps unknow
   assert.deepEqual(clubCashSnapshot(changed,"2026-10-29"),cash);
   assert.equal(clubCashSnapshot(data,"2026-09-30").recordedDatedBalance,-35000);
   assert.deepEqual(data,before);
+});
+
+test("monthly funds count advances by fee/match month without moving receipts or duplicating court spend", () => {
+  const data = {
+    monthlyPayments: [
+      { id: "advance", monthKey: "2026-11", amountPaid: 20000, paidDate: "2026-10-28", paidAt: "2026-10-28T12:00Z" },
+      { id: "unknown-date", monthKey: "2026-11", amountPaid: 7000, updatedAt: "2026-10-29" },
+      { id: "promise", monthKey: "2026-11", amountPaid: 0, paymentStatus: "promised", expectedAmount: 20000 },
+      { id: "late-oct", monthKey: "2026-10", amountPaid: 9000, paidDate: "2026-11-03" },
+    ],
+    matchPlayers: [
+      { id: "guest", matchId: "nov", amountPaid: 5000, paidAt: "2026-10-29T01:00Z", attendanceStatus: "confirmed" },
+      { id: "future", matchId: "nov", amountPaid: 5000, paidDate: "2026-11-04" },
+      { id: "pending", matchId: "nov", amountPaid: 0, amountDue: 5000 },
+    ],
+    matches: [{ id: "nov", date: "2026-11-03", monthKey: "2026-10", courtCost: 35000, totalCost: 35000, courtPrepaid: true }],
+    clubExpenses: [
+      { id: "prepaid", expenseDate: "2026-10-01", amount: 35000, category: "court" },
+      { id: "new", expenseDate: "2026-11-01", amount: 2000, category: "equipment" },
+      { id: "discount", expenseDate: "2026-11-01", amount: -1000, category: "other" },
+    ], courtPayments: [{sourceMatchId: "oct", targetMatchId: "nov", expenseId: "prepaid", amount: 35000}],
+  } as unknown as SifupData;
+  const before = structuredClone(data);
+  const advance = monthlyFunds(data, "2026-11", "2026-10-29");
+  assert.equal(advance.received, 32000);
+  assert.equal(advance.disbursed, 0);
+  assert.equal(advance.balance, 32000);
+  assert.equal(advance.undatedReceived, 7000);
+  assert.equal(advance.receipts.find(item => item.id === "guest")?.date, "2026-10-28");
+  assert.equal(monthlyFunds(data, "2026-10", "2026-10-29").received, 0);
+  const november = monthlyFunds(data, "2026-11", "2026-11-30");
+  assert.equal(november.received, 37000);
+  assert.equal(november.disbursed, 2000);
+  assert.equal(november.balance, 35000);
+  assert.equal(monthlyFunds(data, "2026-10", "2026-11-30").received, 9000);
+  assert.equal(clubCashYear(data, 2026, "2026-11-30")[9].mensual, 20000);
+  const changed = structuredClone(data);
+  changed.courtPayments = [];
+  changed.matches[0].courtPrepaid = false;
+  assert.deepEqual(monthlyFunds(changed, "2026-11", "2026-11-30"), november);
+  assert.equal(monthlyFunds(data, "2026-12", "2026-12-31").balance, 0);
+  assert.equal(Object.is(monthlyFunds(data, "2026-12", "2026-12-31").disbursed, -0), false);
+  assert.deepEqual(data, before); // Receipt dates, amounts, statuses and all business rows stay intact.
 });
 
 test("payments month and cash cutoff share Santiago at the UTC month boundary", () => {

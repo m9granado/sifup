@@ -1,11 +1,12 @@
 import type { SifupData } from "./types";
 
 export function clubCashSnapshot(data: SifupData, cutoff: string) {
-  const movements: { id: string; date: string | null; amount: number; source: string; kind: "monthly" | "match" | "expense"; category?: string }[] = [];
+  const movements: { id: string; date: string | null; amount: number; source: string; month?: string; kind: "monthly" | "match" | "expense"; category?: string }[] = [];
   for (const payment of [...data.monthlyPayments, ...data.matchPlayers]) {
     if (payment.amountPaid <= 0) continue;
     const date = payment.paidDate ?? (payment.paidAt ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(payment.paidAt)) : null);
-    movements.push({ id: payment.id, date, amount: payment.amountPaid, kind: "monthKey" in payment ? "monthly" : "match", source: "monthKey" in payment ? `Cuota ${payment.monthKey}` : `Galleta ${payment.matchId}` });
+    const month = "monthKey" in payment ? payment.monthKey : data.matches.find(match => match.id === payment.matchId)?.date.slice(0, 7);
+    movements.push({ id: payment.id, date, month, amount: payment.amountPaid, kind: "monthKey" in payment ? "monthly" : "match", source: "monthKey" in payment ? `Cuota ${payment.monthKey}` : `Galleta ${payment.matchId}` });
   }
   const unclassified = data.clubExpenses.filter(expense => expense.amount < 0);
   for (const expense of data.clubExpenses.filter(expense => expense.amount > 0)) movements.push({ id: expense.id, date: expense.expenseDate, amount: -expense.amount, kind: "expense", category: expense.category, source: expense.label });
@@ -20,6 +21,17 @@ export function clubCashSnapshot(data: SifupData, cutoff: string) {
     // There is no reconciled opening balance or complete ledger in the current model.
     reconciled: false as const,
   };
+}
+
+export function monthlyFunds(data: SifupData, month: string, cutoff: string) {
+  const cash = clubCashSnapshot(data, cutoff);
+  const receipts = [...cash.dated, ...cash.undated].filter(item => item.amount > 0 && item.month === month);
+  // ponytail: expenses have no attribution month; use payment month and disclose the limit in UI.
+  const expenses = cash.dated.filter(item => item.kind === "expense" && item.date?.startsWith(month));
+  const received = receipts.reduce((sum, item) => sum + item.amount, 0);
+  const disbursed = Math.abs(expenses.reduce((sum, item) => sum + item.amount, 0));
+  return { receipts, expenses, received, disbursed, balance: received - disbursed,
+    undatedReceived: receipts.filter(item => !item.date).reduce((sum, item) => sum + item.amount, 0) };
 }
 
 export function clubCashYear(data: SifupData, year: number, cutoff: string) {
