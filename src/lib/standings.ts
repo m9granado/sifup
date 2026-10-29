@@ -16,13 +16,14 @@ export type PlayerRecord = {
   form: string;
 };
 
-export function rankingMatches(matches: Pick<Match, "id" | "date" | "time" | "weekLabel" | "matchFormat">[], results: Pick<MatchResult, "matchId">[], teams: Pick<MatchTeam, "matchId" | "finalRank">[]) {
+export function rankingMatches(matches: (Pick<Match, "id" | "date" | "time" | "weekLabel" | "matchFormat"> & Partial<Pick<Match, "status">>)[], results: Pick<MatchResult, "matchId">[], teams: Pick<MatchTeam, "matchId" | "finalRank">[]) {
   const resultMatchIds = new Set(results.map((result) => result.matchId));
   const teamsByMatch = new Map<string, Pick<MatchTeam, "matchId" | "finalRank">[]>();
   teams.forEach((team) => teamsByMatch.set(team.matchId, [...(teamsByMatch.get(team.matchId) ?? []), team]));
 
   return matches
     .filter((match) => {
+      if (match.status === "suspended") return false;
       if (match.matchFormat !== "rey_de_la_cancha") return resultMatchIds.has(match.id);
       const matchTeams = teamsByMatch.get(match.id) ?? [];
       return matchTeams.length > 0 && matchTeams.every((team) => team.finalRank !== undefined);

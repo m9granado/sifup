@@ -141,7 +141,7 @@ function teamLabel(team: Team) {
 }
 
 function matchStatusLabel(status: string) {
-  return { open: "Abierto", confirmed: "Confirmado", played: "Jugado", roster_locked: "Lista cerrada" }[status] ?? status;
+  return { open: "Abierto", confirmed: "Confirmado", played: "Jugado", roster_locked: "Lista cerrada", suspended: "Suspendido" }[status] ?? status;
 }
 
 function playerForMatchRow(row: Pick<MatchPlayer, "playerId" | "name">, players: Player[]) {
@@ -812,7 +812,7 @@ export function MatchesPage({ initialData }: InitialDataProps) {
         {(() => {
           const today = new Date().toISOString().slice(0, 10);
           const nextId = [...data.matches]
-            .filter((match) => match.date >= today && match.status !== "played" && match.status !== "roster_locked")
+            .filter((match) => match.date >= today && match.status !== "played" && match.status !== "roster_locked" && match.status !== "suspended")
             .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))[0]?.id;
           const sortedMatches = [...data.matches].sort((a, b) => b.date.localeCompare(a.date));
           return sortedMatches.map((match) => {

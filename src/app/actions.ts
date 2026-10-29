@@ -24,6 +24,8 @@ import {
   mergePlayers as repositoryMergePlayers,
 } from "@/lib/repository";
 import { setMonthlyRoster, updateMatch, type UpdateMatchInput } from "@/lib/sifup-service";
+import { getCourtFinances, linkCourtPayment } from "@/lib/court-payment-service";
+import type { CourtPaymentInput } from "@/lib/court-payments";
 import type { ClubExpense, Match, MatchGame, MatchPlayer, MatchResult, MatchTeam, MonthlyPayment, Player } from "@/lib/types";
 
 export type LoginState = { error: string };
@@ -218,6 +220,17 @@ export async function addClubExpenseAction(expense: ClubExpense) {
   await requirePermission("payments");
   await saveClubExpense(expense);
   revalidateAdminViews();
+}
+
+export async function getCourtFinancesAction(monthKey: string) {
+  await requirePermission("payments");
+  return getCourtFinances({ monthKey });
+}
+
+export async function linkCourtPaymentAction(input: CourtPaymentInput & { dryRun?: boolean }) {
+  await requirePermission("payments");
+  await requirePermission("matches");
+  return linkCourtPayment(input);
 }
 
 export async function mergePlayersAction(sourceId: string, targetId: string) {

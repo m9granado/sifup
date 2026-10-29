@@ -1,9 +1,11 @@
 import "server-only";
+import type { TransactionSql } from "postgres";
+import { planCourtPayment, type CourtPaymentInput } from "./court-payments";
 
 import { seedData } from "./mock-data";
 import { getSql, hasDatabaseUrl } from "./db";
 import { monthKey } from "./sifup-date";
-import type { ClubExpense, Match, MatchGame, MatchPlayer, MatchResult, MatchTeam, MonthlyPayment, Player, SifupData } from "./types";
+import type { ClubExpense, CourtPayment, Match, MatchGame, MatchPlayer, MatchResult, MatchTeam, MonthlyPayment, Player, SifupData } from "./types";
 
 function iso(value: Date | string) {
   if (value instanceof Date) return value.toISOString();
@@ -142,11 +144,11 @@ type ClubExpenseRow = {
   updated_at: Date | string;
 };
 
-export async function getSifupData(): Promise<SifupData> {
+export async function getSifupData(client?: ReturnType<typeof getSql> | TransactionSql): Promise<SifupData> {
   if (!hasDatabaseUrl()) return seedData;
 
-  const sql = getSql();
-  const [matches, players, matchPlayers, results, matchTeams, matchGames, monthlyPayments, finances, clubExpenses] = await Promise.all([
+  const sql = client ?? getSql();
+  const [matches, players, matchPlayers, results, matchTeams, matchGames, monthlyPayments, finances, clubExpenses, courtPayments] = await Promise.all([
     sql<MatchRow[]>`select * from matches order by match_date desc, match_time desc`,
     sql<PlayerRow[]>`select * from players order by name asc`,
     sql<MatchPlayerRow[]>`select * from match_players order by match_id desc, whatsapp_order asc nulls last, created_at asc, id asc`,
@@ -156,9 +158,11 @@ export async function getSifupData(): Promise<SifupData> {
     sql<MonthlyPaymentRow[]>`select * from monthly_payments order by month_key desc, player_id asc`,
     sql<ClubFinanceRow[]>`select * from club_finances order by created_at asc limit 1`,
     sql<ClubExpenseRow[]>`select * from club_expenses order by expense_date desc, created_at desc`,
+    sql<Array<{ source_match_id: string; target_match_id: string; expense_id: string; amount: number }>>`select * from court_payments order by source_match_id`,
   ]);
 
   return {
+    courtPayments: courtPayments.map((row): CourtPayment => ({ sourceMatchId: row.source_match_id, targetMatchId: row.target_match_id, expenseId: row.expense_id, amount: row.amount })),
     matches: matches.map((row) => ({
       id: row.id,
       date: dateOnly(row.match_date),
@@ -288,6 +292,35 @@ export async function getSifupData(): Promise<SifupData> {
 function requireDatabase() {
   if (!hasDatabaseUrl()) throw new Error("DATABASE_URL no esta configurado.");
   return getSql();
+}
+
+export async function applyCourtPayment(input: CourtPaymentInput) {
+  const sql = requireDatabase();
+  return sql.begin(async (tx) => {
+    // ponytail: serialize this low-volume financial operation; per-expense locks
+    // can replace the shared lock if concurrent administrators ever need them.
+    await tx`select pg_advisory_xact_lock(17402026)`;
+    await tx`select id from club_expenses where id = ${input.expenseId} for update`;
+    await tx`select id from matches order by id for update`;
+    const plan = planCourtPayment(await getSifupData(tx), input);
+    if (plan.unchanged) return plan;
+    const { source, target, payment } = plan;
+    if (plan.createTarget) {
+      await tx`insert into matches (id, match_date, match_time, location, status, total_cost, week_label, month_key, court_cost, court_prepaid, notes, match_format, squad_target, created_at, updated_at)
+        values (${target.id}, ${target.date}, ${target.time}, ${target.location}, ${target.status}, ${target.totalCost}, ${target.weekLabel}, ${target.monthKey}, ${target.courtCost}, true, ${target.notes}, ${target.matchFormat}, ${target.squadTarget ?? 12}, ${target.createdAt}, ${target.updatedAt})`;
+    }
+    if (source.id !== target.id) {
+      // Release a direct link inside the same transaction before suspending its
+      // old destination; the replacement below retains the original source ID.
+      await tx`delete from court_payments where source_match_id = ${source.id} and target_match_id = ${source.id}`;
+      await tx`update matches set status = 'suspended', court_prepaid = false, updated_at = now() where id = ${source.id}`;
+    }
+    await tx`insert into court_payments (source_match_id, target_match_id, expense_id, amount)
+      values (${payment.sourceMatchId}, ${payment.targetMatchId}, ${payment.expenseId}, ${payment.amount})
+      on conflict (source_match_id) do update set target_match_id = excluded.target_match_id`;
+    await tx`update matches set court_prepaid = true, updated_at = now() where id = ${target.id}`;
+    return plan;
+  });
 }
 
 export async function saveMatchWithPlayers(match: Match, players: MatchPlayer[], teams?: MatchTeam[]) {

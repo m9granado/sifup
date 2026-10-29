@@ -349,7 +349,7 @@ test('MCP contract: add_player_to_match.amountDue is a real zod schema — optio
     if (name === '@modelcontextprotocol/sdk/server/mcp.js') return { McpServer: FakeMcpServer };
     if (name === '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js') return { WebStandardStreamableHTTPServerTransport: FakeTransport };
     if (name === 'zod') return serviceRequire('zod');
-    if (name === '@/lib/sifup-service') return noopToolStub;
+    if (name === '@/lib/sifup-service' || name === '@/lib/court-payment-service') return noopToolStub;
     if (name === '@/lib/sifup-constants') return { PER_MATCH_AMOUNT: 5000, PUBLIC_BASE_URL: 'https://example.test' };
     if (name === '@/lib/oauth-policy') return { buildResourceMetadataChallenge: () => '' };
     return serviceRequire(name);

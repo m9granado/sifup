@@ -31,6 +31,7 @@ export function newPlayerId(name: string, existingIds: Iterable<string> = []) {
 }
 
 export function nextMatch(matches: Match[]) {
+  matches = matches.filter((match) => match.status !== "suspended");
   const now = new Date();
   const upcoming = matches
     .filter((match) => new Date(`${match.date}T${match.time || "00:00"}`) >= now)

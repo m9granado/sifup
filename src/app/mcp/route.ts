@@ -3,6 +3,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod";
 import { addPlayerToMatch, assignPlayerTeam, deduplicateMatchPlayers, findPlayer, generateBalancedTeams, getMatchTeams, getNextMatchSummary, getPendingPayments, getPlayerStandings, importWhatsAppMatch, mergePlayers, registerMatchPayment, registerMonthlyPayment, removePlayerFromMatch, replaceMatchTeams, setMatchResult, setMonthlyRoster, updateMatch, updateMatchPlayer } from "@/lib/sifup-service";
 import { PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "@/lib/sifup-constants";
+import { getCourtFinances, linkCourtPayment } from "@/lib/court-payment-service";
 
 type ToolResult = {
   content: { type: "text"; text: string }[];
@@ -62,6 +63,30 @@ function createServer() {
     },
     (input) => runTool(() => importWhatsAppMatch(input)),
   );
+
+  server.registerTool("get_court_finances", {
+    title: "Comparar pagos de cancha con partidos",
+    description: "Desembolso real del mes, partidos jugados/suspendidos, credito asignado y consumido. Incluye gastos disponibles para vincular por ID; nunca infiere pagos a partir de una reserva.",
+    annotations: { readOnlyHint: true },
+    inputSchema: { monthKey: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).describe("Mes YYYY-MM.") },
+  }, (input) => runTool(() => getCourtFinances(input)));
+
+  server.registerTool("link_court_payment", {
+    title: "Vincular pago de cancha a un partido",
+    description: "Asigna parte de un gasto de cancha existente al partido, por su costo completo. No crea un gasto ni cobra jugadores. Simula por defecto; dryRun=false confirma la escritura.",
+    inputSchema: {
+      expenseId: z.string().min(1), matchId: z.string().min(1), dryRun: z.boolean().optional(),
+    },
+  }, (input) => runTool(() => linkCourtPayment(input)));
+
+  server.registerTool("transfer_court_payment", {
+    title: "Suspender fecha y trasladar cancha pagada",
+    description: "Conserva origen suspendido y gasto original; aplica el credito a una fecha posterior al mismo valor. Crea destino vacio si no existe. No mueve jugadores, mensualidades, galletas ni resultados. Reintentos iguales no duplican credito. Simula por defecto; dryRun=false confirma.",
+    inputSchema: {
+      expenseId: z.string().min(1), matchId: z.string().min(1),
+      targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), dryRun: z.boolean().optional(),
+    },
+  }, (input) => runTool(() => linkCourtPayment(input)));
 
   server.registerTool(
     "find_player",
