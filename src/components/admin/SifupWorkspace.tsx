@@ -2,6 +2,9 @@
 
 import Link from "next/link";
 import { MatchesList } from "./MatchesList";
+import { ClubCashCard } from "./ClubCashCard";
+import { clubCashSnapshot } from "@/lib/club-cash";
+import { courtFinanceSummary } from "@/lib/court-payments";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, Clock, Cookie, MapPin, Medal, MessageCircle, Pencil, Plus, RotateCcw, Save, Search, Share, Shield, Sparkles, TriangleAlert, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
@@ -570,7 +573,7 @@ function PaymentAccountCard({ data }: { data: SifupData }) {
         <div><dt className="text-(--muted)">Cancha</dt><dd className="font-bold text-white">{formatCurrency(finance.courtCost)}</dd></div>
       </dl>
       <p className="rounded-md bg-(--green)/15 px-3 py-2 text-sm font-bold text-(--green)">
-        {finance.prepaidCourts} canchas pagadas: {formatCurrency(finance.prepaidTotal)}.
+        Referencia histórica: {finance.prepaidCourts} canchas / {formatCurrency(finance.prepaidTotal)}. No acredita saldo de caja ni crédito vigente conciliado.
       </p>
     </Card>
   );
@@ -636,10 +639,6 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
 }
 
 const MONTH_ABBR = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-
-function totalPayments(payments: MonthlyPayment[], rows: MatchPlayer[]) {
-  return payments.reduce((sum, payment) => sum + payment.amountPaid, 0) + rows.reduce((sum, row) => sum + row.amountPaid, 0);
-}
 
 function pendingPayments(payments: MonthlyPayment[], rows: MatchPlayer[]) {
   return payments.reduce((sum, payment) => sum + Math.max(payment.expectedAmount - payment.amountPaid, 0), 0) + rows.reduce((sum, row) => sum + Math.max(row.amountDue - row.amountPaid, 0), 0);
@@ -3910,12 +3909,12 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
       return playerA.localeCompare(playerB);
     });
   const perMatchPending = data.matchPlayers.filter((row) => row.amountDue > row.amountPaid);
-  const courtBalance = data.clubFinance.prepaidTotal - data.matches.filter((match) => match.courtPrepaid).reduce((sum, match) => sum + match.courtCost, 0);
-  const collected = totalPayments(allMonthlyPayments, data.matchPlayers);
-  const pending = pendingPayments(currentMonthlyPayments, perMatchPending);
-  const expenseTotal = data.clubExpenses.reduce((sum, expense) => sum + expense.amount, 0);
-  const balance = collected - expenseTotal;
-  const projectedBalance = balance + pending;
+  const cutoff = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const cash = clubCashSnapshot(data, cutoff);
+  const court = courtFinanceSummary(data, month);
+  const matchMonth = (row: MatchPlayer) => data.matches.find(match => match.id === row.matchId)?.date.slice(0, 7);
+  const pending = pendingPayments(currentMonthlyPayments, perMatchPending.filter(row => matchMonth(row) === month));
+  const historicalPending = perMatchPending.filter(row => (matchMonth(row) ?? month) < month).reduce((sum,row) => sum + row.amountDue - row.amountPaid, 0);
   const expenses = [...data.clubExpenses].sort((a, b) => b.expenseDate.localeCompare(a.expenseDate) || a.label.localeCompare(b.label));
   const financeSummary = monthlyFinanceSummary(planYear, data);
 
@@ -4029,19 +4028,20 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
       />
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: el marcado de pagos queda reservado para admin." /> : null}
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
+      <ClubCashCard data={data} cutoff={cutoff} />
       <div className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Cobrado" value={formatCurrency(collected)} />
-        <Stat label="Gastado" value={formatCurrency(expenseTotal)} />
-        <Stat label="Balance" value={formatCurrency(balance)} />
-        <Stat label="Proyectado" value={formatCurrency(projectedBalance)} />
+        <Stat label="Recibido fechado del mes" value={formatCurrency(cash.periodReceived)} />
+        <Stat label="Desembolsado del mes" value={formatCurrency(cash.periodDisbursed)} />
+        <Stat label={`Por cobrar ${month}`} value={formatCurrency(pending)} />
+        <Stat label="Galletas históricas pendientes" value={formatCurrency(historicalPending)} />
       </div>
       <div className="mb-4 grid gap-4 lg:grid-cols-[1fr_0.7fr]">
         <PaymentAccountCard data={data} />
         <Card>
           <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">Cancha</p>
-          <p className="mt-2 text-2xl font-semibold text-white">{formatCurrency(data.clubFinance.prepaidTotal)}</p>
-          <p className="mt-1 text-sm text-(--muted)">Pagado para {data.clubFinance.prepaidCourts} fechas. Saldo referencial: {formatCurrency(courtBalance)}.</p>
-          <p className="mt-3 rounded-md bg-(--cyan)/15 px-3 py-2 text-sm font-bold text-(--cyan)">Por cobrar ahora: {formatCurrency(pending)}.</p>
+          <p className="mt-2 text-2xl font-semibold text-white">{formatCurrency(court.scheduledCredit)}</p>
+          <p className="mt-1 text-sm text-(--muted)">Crédito asignado a fechas pendientes de {month}. No es dinero disponible.</p>
+          <p className="mt-3 text-sm text-(--muted)">Saldo técnico sin asignar: {formatCurrency(court.expenses.reduce((sum,expense) => sum + expense.unallocated,0))}. Requiere conciliación; no acredita crédito vigente.</p>
         </Card>
       </div>
       {isAdmin ? (
