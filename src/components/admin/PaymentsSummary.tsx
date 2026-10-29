@@ -54,7 +54,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
   const cutoff = monthEnd < today ? monthEnd : today;
   const cash = clubCashSnapshot(data,cutoff);
   const periodMovements = cash.dated.filter(item => item.date?.startsWith(monthKey));
-  const gastoTotal = -periodMovements.filter(item => item.amount < 0).reduce((sum,item) => sum + item.amount,0);
+  const gastoTotal = Math.abs(periodMovements.filter(item => item.amount < 0).reduce((sum,item) => sum + item.amount,0));
 
   const galletaRows = data.matchPlayers.filter(
     (row) =>

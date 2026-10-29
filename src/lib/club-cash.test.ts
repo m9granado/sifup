@@ -27,6 +27,9 @@ test("cash uses receipt/expense dates, excludes promises/credit and keeps unknow
   assert.equal(year[9].running,cash.recordedDatedBalance);
   assert.equal(year[10].mensual,0);
   assert.equal(year[10].galletas,0); // Future-dated money excluded at cutoff.
+  assert.equal(year[10].gastosCancha,0);
+  assert.equal(year[10].otrosGastos,0);
+  assert.equal(clubCashSnapshot(data,"2026-11-29").periodDisbursed,0);
   const before = structuredClone(data);
   const changed = structuredClone(data);
   changed.matches[0].status="suspended";

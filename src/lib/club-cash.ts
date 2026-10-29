@@ -16,7 +16,7 @@ export function clubCashSnapshot(data: SifupData, cutoff: string) {
   return {
     cutoff, recordedDatedBalance: sum(dated), undatedReceived: sum(undated), dated, undated, unclassified,
     periodReceived: sum(period.filter(item => item.amount > 0)),
-    periodDisbursed: -sum(period.filter(item => item.amount < 0)),
+    periodDisbursed: Math.abs(sum(period.filter(item => item.amount < 0))),
     // There is no reconciled opening balance or complete ledger in the current model.
     reconciled: false as const,
   };
@@ -30,7 +30,7 @@ export function clubCashYear(data: SifupData, year: number, cutoff: string) {
     const movements = cash.dated.filter(item => item.date?.startsWith(key));
     const sum = (kind: string, category?: string) => movements.filter(item => item.kind === kind && (!category || item.category === category)).reduce((total, item) => total + item.amount, 0);
     const galletas = sum("match"), mensual = sum("monthly");
-    const gastosCancha = -sum("expense", "court"), otrosGastos = -sum("expense") - gastosCancha;
+    const gastosCancha = Math.abs(sum("expense", "court")), otrosGastos = Math.abs(sum("expense")) - gastosCancha;
     running += galletas + mensual - gastosCancha - otrosGastos;
     return { key, galletas, mensual, gastosCancha, otrosGastos, running };
   });
