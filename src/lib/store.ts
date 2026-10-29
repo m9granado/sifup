@@ -220,7 +220,7 @@ export function planRosterChange({
   payment?: MonthlyPayment;
   cancelGalletas?: boolean;
 }): RosterChangePlan {
-  const monthMatchIds = new Set(matches.filter((match) => match.monthKey === monthKey).map((match) => match.id));
+  const monthMatchIds = new Set(matches.filter((match) => (match.date?.slice(0, 7) ?? match.monthKey) === monthKey && match.status !== "suspended").map((match) => match.id));
   const rows = playerRows.filter((row) => monthMatchIds.has(row.matchId) && row.attendanceStatus !== "out");
   const plan: RosterChangePlan = { rowUpdates: [], unpaidGalletaCount: 0, unpaidGalletaAmount: 0, paidGalletaAmount: 0, repricedCount: 0, paidMonthlyAmount: 0 };
 
@@ -246,7 +246,7 @@ export function planRosterChange({
 
   plan.paidMonthlyAmount = payment?.paymentStatus === "paid" ? payment.amountPaid : 0;
   for (const row of rows) {
-    if (row.attendanceStatus !== "confirmed" || row.amountDue > 0) continue;
+    if (row.attendanceStatus !== "confirmed" || row.amountDue > 0 || row.amountPaid > 0) continue;
     plan.repricedCount += 1;
     plan.rowUpdates.push({
       id: row.id,

@@ -677,6 +677,7 @@ export async function correctPaymentReceivedAt(input: PaymentRecordInput & { rec
 export async function getPendingPayments(input: { monthKey?: string } = {}) {
   const data = await getSifupData();
   const targetMonth = input.monthKey ?? currentMonthKey();
+  assertValidMonthKey(targetMonth);
 
   const monthlyPending = data.players
     .filter((player) => player.active && isPlayerMonthlyForMonth(player.id, targetMonth, data.players, data.monthlyPayments))
@@ -692,17 +693,32 @@ export async function getPendingPayments(input: { monthKey?: string } = {}) {
     .filter((row) => row.amountDue > row.amountPaid)
     .map((row) => {
       const match = data.matches.find((item) => item.id === row.matchId);
-      return { player: row.name, match: match?.weekLabel || match?.date || row.matchId, matchId: row.matchId, pending: Math.max(row.amountDue - row.amountPaid, 0), status: row.paymentStatus };
+      return { player: row.name, match: match?.weekLabel || match?.date || row.matchId, matchId: row.matchId, date: match?.date ?? null, monthKey: match?.date.slice(0, 7) ?? null, pending: Math.max(row.amountDue - row.amountPaid, 0), status: row.paymentStatus };
     });
+
+  // Keep the legacy all-period list/totals; expose explicit, disjoint period buckets.
+  const perMatchCurrent = perMatchPending.filter((item) => item.monthKey === targetMonth);
+  const perMatchHistorical = perMatchPending.filter((item) => item.monthKey && item.monthKey < targetMonth);
+  const perMatchFuture = perMatchPending.filter((item) => item.monthKey && item.monthKey > targetMonth);
+  const perMatchUndated = perMatchPending.filter((item) => !item.monthKey);
+  const sumPending = (items: typeof perMatchPending) => items.reduce((sum, item) => sum + item.pending, 0);
 
   return {
     monthKey: targetMonth,
     totals: {
       monthly: monthlyPending.reduce((sum, item) => sum + item.pending, 0),
       perMatch: perMatchPending.reduce((sum, item) => sum + item.pending, 0),
+      perMatchCurrent: sumPending(perMatchCurrent),
+      perMatchHistorical: sumPending(perMatchHistorical),
+      perMatchFuture: sumPending(perMatchFuture),
+      perMatchUndated: sumPending(perMatchUndated),
     },
     monthlyPending,
     perMatchPending,
+    perMatchCurrent,
+    perMatchHistorical,
+    perMatchFuture,
+    perMatchUndated,
   };
 }
 

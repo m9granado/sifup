@@ -62,6 +62,23 @@ function fixture() {
   return { data, service: fixtureModule.exports, matchId: match.id, repository };
 }
 
+test('pending payment buckets separate match dates without changing balances or the legacy total', async () => {
+  const { data, service } = fixture();
+  data.matches = ['2026-09-29', '2026-10-27', '2026-11-03'].map(date => ({ ...data.matches[0], id: date, date, monthKey: '2020-01' }));
+  data.matchPlayers = [...data.matches.map((match, index) => ({ id: `row-${index}`, matchId: match.id, name: `Guest ${index}`, amountDue: 5000, amountPaid: 1000, paymentStatus: 'unpaid' })), { id: 'unknown', matchId: 'missing', name: 'Unknown', amountDue: 5000, amountPaid: 0, paymentStatus: 'unpaid' }];
+  const before = structuredClone(data);
+  const result = await service.getPendingPayments({ monthKey: '2026-10' });
+  assert.equal(result.totals.perMatch, 17000);
+  assert.equal(result.totals.perMatchCurrent, 4000);
+  assert.equal(result.totals.perMatchHistorical, 4000);
+  assert.equal(result.totals.perMatchFuture, 4000);
+  assert.equal(result.totals.perMatchUndated, 5000);
+  assert.deepEqual(result.perMatchCurrent.map(row => row.date), ['2026-10-27']);
+  assert.equal(result.perMatchPending.length, 4);
+  assert.deepEqual(data, before);
+  await assert.rejects(service.getPendingPayments({ monthKey: '2026-13' }));
+});
+
 test('monthly additions remain free, including explicit per-match tariff and repeated calls', async () => {
   const { data, service, matchId } = fixture();
   const input = { matchId, name: 'Mensual Test', attendanceStatus: 'confirmed', amountDue: 5000 };

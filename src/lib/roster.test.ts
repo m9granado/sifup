@@ -54,3 +54,19 @@ test("a galleta recalcula partidos confirmados a $0 y avisa mensualidad pagada",
   assert.equal(plan.paidMonthlyAmount, 20000);
   assert.deepEqual(plan.rowUpdates, [{ id: "a", amountDue: 5000, amountPaid: 0, paymentStatus: "unpaid", note: "" }]);
 });
+
+test("roster changes preserve suspended dates, received money and other months", () => {
+  const dates = [
+    { id: "suspended", date: "2026-10-06", monthKey: "2026-10", status: "suspended" },
+    { id: "played", date: "2026-10-27", monthKey: "2026-09", status: "played" },
+    { id: "nov", date: "2026-11-03", monthKey: "2026-11", status: "confirmed" },
+  ] as Match[];
+  const rows = [row({ id: "s", matchId: "suspended" }), row({ id: "p", matchId: "played" }), row({ id: "cash", matchId: "played", amountPaid: 1000 }), row({ id: "n", matchId: "nov" })];
+  const before = structuredClone(rows);
+  const plan = planRosterChange({ playerRows: rows, matches: dates, monthKey: "2026-10", monthly: false });
+  assert.deepEqual(plan.rowUpdates.map(update => update.id), ["p"]);
+  assert.equal(plan.repricedCount, 1);
+  const monthly = planRosterChange({ playerRows: [row({ id: "s", matchId: "suspended", amountDue: 5000 })], matches: dates, monthKey: "2026-10", monthly: true });
+  assert.deepEqual(monthly.rowUpdates, []);
+  assert.deepEqual(rows, before);
+});
