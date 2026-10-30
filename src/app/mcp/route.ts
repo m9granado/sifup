@@ -3,7 +3,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod";
 import { addPlayerToMatch, assignPlayerTeam, deduplicateMatchPlayers, findPlayer, generateBalancedTeams, getMatchTeams, getNextMatchSummary, getPendingPayments, getPlayerStandings, importWhatsAppMatch, mergePlayers, registerMatchPayment, registerMonthlyPayment, removePlayerFromMatch, replaceMatchTeams, setMatchResult, setMonthlyRoster, updateMatch, updateMatchPlayer } from "@/lib/sifup-service";
 import { PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "@/lib/sifup-constants";
-import { getCourtFinances, linkCourtPayment } from "@/lib/court-payment-service";
+import { getCourtFinances, linkCourtPayment, getMatchRecords, scheduleMatches, registerCourtExpense } from "@/lib/court-payment-service";
 import { correctPaymentReceivedAt, getPaymentRecord } from "@/lib/sifup-service";
 import { parsePaymentReceipt } from "@/lib/payment-receipt";
 
@@ -71,6 +71,31 @@ function createServer() {
     },
     (input) => runTool(() => importWhatsAppMatch(input)),
   );
+
+  server.registerTool("get_match_records", {
+    title: "Leer fechas y datos protegidos de partidos",
+    description: "Lee partidos por fechas exactas, con notas, hora, jugadores, pagos, resultados y vinculos. No escribe.",
+    annotations: { readOnlyHint: true },
+    inputSchema: { dates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).min(1).max(12) },
+  }, input => runTool(() => getMatchRecords(input)));
+
+  server.registerTool("schedule_matches", {
+    title: "Programar fechas vacias o suspender sin borrar historia",
+    description: "Previsualiza un conjunto atomico de fechas. Crea partidos vacios pendientes (open), sin prepago ni jugadores, o actualiza agenda/suspension sin mover pagos, plantillas o resultados. Rechaza actividad y vinculos financieros. Notas explicitas para provisionalidad/indisponibilidad. No confirma reservas del recinto. dryRun=false aplica; por defecto solo simula.",
+    inputSchema: { entries: z.array(z.object({
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+      location: z.string().trim().min(1).max(200), status: z.enum(["open", "suspended"]),
+      notes: z.string().trim().min(1).max(2000), courtCost: z.number().int().positive(),
+    })).min(1).max(12), dryRun: z.boolean().optional() },
+  }, input => runTool(() => scheduleMatches(input)));
+
+  server.registerTool("register_court_expense", {
+    title: "Registrar desembolso original de cancha una sola vez",
+    description: "Registra un pago real ya realizado al proveedor con fecha, pagador y procedencia explicita (declaracion no equivale a comprobante bancario). Idempotente por expenseId; rechaza coincidencia de fecha/monto con otro ID y cambios de un gasto existente. No crea asignaciones, ingresos ni reembolsos. Simula salvo dryRun=false.",
+    inputSchema: { expenseId: z.string().trim().min(1).max(120), expenseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      amount: z.number().int().positive(), label: z.string().trim().min(1).max(200), payer: z.string().trim().min(1).max(200),
+      provider: z.string().trim().min(1).max(200), evidence: z.string().trim().min(1).max(2000), dryRun: z.boolean().optional() },
+  }, input => runTool(() => registerCourtExpense(input)));
 
   server.registerTool("get_court_finances", {
     title: "Comparar pagos de cancha con partidos",

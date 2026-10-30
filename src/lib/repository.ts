@@ -1,6 +1,7 @@
 import "server-only";
 import type { TransactionSql } from "postgres";
 import { planCourtPayment, type CourtPaymentInput } from "./court-payments";
+import { planSchedule, planCourtExpense, type ScheduleEntry, type CourtExpenseInput } from "./court-operations";
 
 import { seedData } from "./mock-data";
 import { getSql, hasDatabaseUrl } from "./db";
@@ -299,6 +300,37 @@ export async function getSifupData(client?: ReturnType<typeof getSql> | Transact
 function requireDatabase() {
   if (!hasDatabaseUrl()) throw new Error("DATABASE_URL no esta configurado.");
   return getSql();
+}
+
+export async function applySchedule(entries: ScheduleEntry[]) {
+  return requireDatabase().begin(async tx => {
+    // ponytail: reuse the court-operation lock; split by date only if throughput requires it.
+    await tx`select pg_advisory_xact_lock(17402026)`;
+    await tx`select id from matches order by id for update`;
+    const plan = planSchedule(await getSifupData(tx), entries);
+    for (const { match, previous, unchanged } of plan) {
+      if (unchanged) continue;
+      if (previous) {
+        await tx`update matches set match_time = ${match.time}, location = ${match.location}, status = ${match.status}, notes = ${match.notes}, court_cost = ${match.courtCost}, court_prepaid = ${match.courtPrepaid}, updated_at = now() where id = ${match.id}`;
+      } else {
+        await tx`insert into matches (id, match_date, match_time, location, status, total_cost, week_label, month_key, court_cost, court_prepaid, notes, match_format, squad_target, created_at, updated_at)
+          values (${match.id}, ${match.date}, ${match.time}, ${match.location}, ${match.status}, ${match.totalCost}, ${match.weekLabel}, ${match.monthKey}, ${match.courtCost}, false, ${match.notes}, ${match.matchFormat}, ${match.squadTarget ?? 12}, ${match.createdAt}, ${match.updatedAt})`;
+      }
+    }
+    return plan;
+  });
+}
+
+export async function applyCourtExpense(input: CourtExpenseInput) {
+  return requireDatabase().begin(async tx => {
+    await tx`select pg_advisory_xact_lock(17402026)`;
+    const plan = planCourtExpense(await getSifupData(tx), input);
+    if (!plan.unchanged) {
+      const e = plan.expense;
+      await tx`insert into club_expenses (id, expense_date, label, amount, category, note, created_at, updated_at) values (${e.id}, ${e.expenseDate}, ${e.label}, ${e.amount}, ${e.category}, ${e.note}, ${e.createdAt}, ${e.updatedAt})`;
+    }
+    return plan;
+  });
 }
 
 export async function applyCourtPayment(input: CourtPaymentInput) {

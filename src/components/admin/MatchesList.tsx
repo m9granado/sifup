@@ -20,6 +20,7 @@ export function MatchesList({ data, today }: { data: SifupData; today: string })
       <h2 id="next-match-title" className="mt-3 text-2xl font-black text-white first-letter:uppercase"><time dateTime={next.date}>{fullDate(next.date)}</time></h2>
       <p className="mt-2 break-words text-sm text-slate-200">{next.time} · {next.location || "Cancha por definir"}</p>
       <div className="mt-4"><Status match={next} /></div>
+      {next.status === "open" && next.notes ? <p className="mt-3 break-words text-sm text-slate-200">{next.notes}</p> : null}
       <p className="mt-4 font-bold text-white">{confirmed} / {next.squadTarget ?? SQUAD_TARGET} jugadores</p>
       <Link href={`/matches/${next.id}`} className={`mt-4 block rounded-lg bg-emerald-200 px-4 py-3 text-center font-black text-emerald-950 hover:bg-emerald-100 ${focus}`}>Ver partido</Link>
     </section> : <p className="rounded-xl border border-white/15 p-5 text-(--muted)">Sin próxima fecha programada. El historial sigue disponible abajo.</p>}
@@ -37,7 +38,7 @@ export function MatchesList({ data, today }: { data: SifupData; today: string })
             const title = result ? result.winner === "draw" ? "Empate" : `Ganó ${result.winner === "A" ? "Rojo" : "Amarillo"}` : `${match.time} · ${match.location || "Cancha por definir"}`;
             return <li key={match.id}><Link href={`/matches/${match.id}`} className={`flex min-h-20 items-center gap-3 rounded-xl bg-emerald-950/30 px-3 py-3 hover:bg-emerald-950/60 ${focus}`}>
               <time dateTime={match.date} className="w-14 shrink-0 text-center text-sm font-bold uppercase text-slate-300">{new Intl.DateTimeFormat("es-CL", { day: "numeric", month: "short" }).format(new Date(`${match.date}T12:00:00`))}</time>
-              <div className="min-w-0 flex-1"><h3 className="break-words text-sm font-bold text-white">{title}</h3><div className="mt-2"><Status match={match} /></div>{match.status === "suspended" && match.notes ? <p className="mt-2 break-words text-xs text-slate-300">{match.notes}</p> : null}</div>
+              <div className="min-w-0 flex-1"><h3 className="break-words text-sm font-bold text-white">{title}</h3><div className="mt-2"><Status match={match} /></div>{["open", "suspended"].includes(match.status) && match.notes ? <p className="mt-2 break-words text-xs text-slate-300">{match.notes}</p> : null}</div>
               <ChevronRight aria-hidden="true" className="shrink-0 text-slate-300" size={18} /><span className="sr-only">Ver detalle del {fullDate(match.date)}</span>
             </Link></li>;
           })}

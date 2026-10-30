@@ -3545,6 +3545,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         previous={previous}
         next={next}
       />
+      {currentMatch.notes && ["open", "suspended"].includes(currentMatch.status) ? <p className="mb-4 break-words rounded-xl border border-amber-200/30 bg-amber-200/10 px-4 py-3 text-sm text-amber-100">{currentMatch.notes}</p> : null}
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: equipos y resultado son solo lectura." /> : null}
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
