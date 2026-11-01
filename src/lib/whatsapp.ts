@@ -6,9 +6,11 @@ const MINIMUM_PLAYERS = 12;
 const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
 function isMonthlyRow(row: MatchPlayer, players: Player[], monthKey: string, monthlyPayments: MonthlyPayment[]) {
-  if (row.note.toLowerCase().includes("mensualidad")) return true;
+  // Roster is canonical when the player is known; "mensualidad" note is only a
+  // fallback for unresolved rows (avoids a stale note faking a MENSUAL badge).
   const player = players.find((item) => item.id === row.playerId) ?? players.find((item) => item.name.toLowerCase() === row.name.toLowerCase());
-  return player ? isPlayerMonthlyForMonth(player.id, monthKey, players, monthlyPayments) : false;
+  if (player) return isPlayerMonthlyForMonth(player.id, monthKey, players, monthlyPayments);
+  return row.note.toLowerCase().includes("mensualidad");
 }
 
 function sortRowsMonthlyFirst(rows: MatchPlayer[], players: Player[], monthKey: string, monthlyPayments: MonthlyPayment[]) {
@@ -73,20 +75,21 @@ export function matchSummaryMessage(match: Match, rows: MatchPlayer[], players: 
     ? `🍪 *Galletas abiertas*\n${galletas.map((row, index) => `${index + 1}· ${row.name} 🍪`).join("\n")}\n\n`
     : "";
 
+  // Lista cerrada: título inequívoco y sin bloques de banca/ausentes vacíos
+  // que insinúen que todavía se puede sumar gente.
+  const isLocked = match.status === "roster_locked";
+  const title = isLocked ? `🔒 *LISTA CERRADA* (${official.length}/${squadTarget})` : `*Jugadores (${Math.min(confirmed.length, squadTarget)}/${squadTarget})*`;
+  const benchBlockFinal = isLocked ? (bench.length > 0 ? `\n${benchBlock}\n` : "") : `\n${galletasBlock}${benchBlock}\n\n`;
+  const outBlockFinal = isLocked ? "" : `${outBlock}\n\n\n`;
+
   return `${header}
 ${dateTime}
 ${location}
 
-*Jugadores (${Math.min(confirmed.length, squadTarget)}/${squadTarget})*
+${title}
 ${playerLines.join("\n")}
-
-${galletasBlock}${benchBlock}
-
-
-${outBlock}
-
-
-🔗 Ver partido:
+${benchBlockFinal}
+${outBlockFinal}🔗 Ver partido:
 ${shortMatchUrl(match)}`;
 }
 
