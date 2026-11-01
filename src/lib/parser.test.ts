@@ -226,6 +226,45 @@ test("parseWhatsAppList prevents duplicate player rows in the same match", () =>
   );
 });
 
+test("matchSummaryMessage marks a roster_locked match as closed, not as an open list with empty bench/out", () => {
+  const parsed = parseWhatsAppList(realMessage, 3500);
+  const text = matchSummaryMessage(
+    {
+      id: "match-locked",
+      date: parsed.match.date,
+      time: parsed.match.time,
+      location: "Club de los Sordos",
+      status: "roster_locked",
+      totalCost: 35000,
+      weekLabel: "1a sem jul",
+      monthKey: "2026-07",
+      courtCost: 35000,
+      courtPrepaid: true,
+      notes: "",
+      matchFormat: "clasico",
+      squadTarget: 5,
+      createdAt: "2026-07-03T00:00:00.000Z",
+      updatedAt: "2026-07-03T00:00:00.000Z",
+    },
+    parsed.players.map((player, index) => ({
+      ...player,
+      id: `row-${index + 1}`,
+      matchId: "match-locked",
+      createdAt: "2026-07-03T00:00:00.000Z",
+      updatedAt: "2026-07-03T00:00:00.000Z",
+    })),
+    [],
+    [],
+  );
+
+  // Debe decir explícitamente que la lista está cerrada.
+  assert.match(text, /LISTA CERRADA/);
+  // No debe mostrar el bloque "No pueden" vacío ni "Banca" con slots vacíos
+  // que sugieran que todavía se puede sumar gente.
+  assert.doesNotMatch(text, /No pueden/);
+  assert.doesNotMatch(text, /\n1\.\n2\.\n3\./);
+});
+
 test("parseWhatsAppList detects 7x7 format and sets squadTarget to 14", () => {
   const input = `Fútbol 7x7 · Martes 29/09 21:00 hrs
 Club Sordos

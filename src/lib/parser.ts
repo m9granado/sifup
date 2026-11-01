@@ -116,16 +116,17 @@ function parseHeader(headerLines: string[]) {
       : "21";
   const minute = hourMatch?.[2] ?? "00";
 
-  // Detección de formato 7x7 o squadTarget
+  // Detección de formato 7x7 o squadTarget. Formato normal del club: 7x7 (14
+  // cupos). Sin indicación explícita en el texto, el default es 14, no 12.
   const is7x7 = /\b7x7\b|\b7\s*vs\s*7\b|\b7\s*v\s*7\b/i.test(joined);
   const targetMatch = joined.match(/\((\d{1,2})\/(\d{1,2})\)/);
-  const squadTarget = is7x7 ? 14 : targetMatch ? Number(targetMatch[2]) : 12;
+  const squadTarget = is7x7 ? 14 : targetMatch ? Number(targetMatch[2]) : 14;
 
   return {
     date: month && day ? `${year}-${month}-${day}` : "",
     time: `${hour}:${minute}`,
     location: location || "Por definir",
-    matchFormat: is7x7 || squadTarget === 14 ? ("7x7" as const) : ("clasico" as const),
+    matchFormat: squadTarget === 12 ? ("clasico" as const) : ("7x7" as const),
     squadTarget,
   };
 }
