@@ -355,6 +355,7 @@ function createServer() {
         date: z.string().optional().describe("Fecha YYYY-MM-DD si no se entrega matchId."),
         matchFormat: z.enum(["clasico", "rey_de_la_cancha", "7x7"]).optional().describe("Formato de juego: 'clasico' (12 cupos), '7x7' (14 cupos) o 'rey_de_la_cancha'."),
         squadTarget: z.number().int().positive().optional().describe("Cantidad objetivo de jugadores convocados (ej. 12 para clásico, 14 para 7x7)."),
+        status: z.enum(["open", "confirmed", "roster_locked", "played", "suspended"]).optional().describe("Estado del partido. Usar 'roster_locked' para cerrar la convocatoria (cupo completo): cambia el mensaje de WhatsApp a lista cerrada. 'confirmed' la reabre."),
         notes: z.string().optional().describe("Notas operativas del partido."),
         time: z.string().optional().describe("Hora del partido (ej. 21:00)."),
         location: z.string().optional().describe("Lugar o cancha."),
