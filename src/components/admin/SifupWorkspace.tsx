@@ -1,6 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { MatchesList } from "./MatchesList";
+import { ClubCashCard } from "./ClubCashCard";
+import { CourtPaymentControls } from "./CourtPaymentControls";
+import { clubCashSnapshot } from "@/lib/club-cash";
+import { courtFinanceSummary } from "@/lib/court-payments";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, Clock, Cookie, MapPin, Medal, MessageCircle, Pencil, Plus, RotateCcw, Save, Search, Share, Shield, Sparkles, TriangleAlert, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
@@ -141,7 +146,7 @@ function teamLabel(team: Team) {
 }
 
 function matchStatusLabel(status: string) {
-  return { open: "Abierto", confirmed: "Confirmado", played: "Jugado", roster_locked: "Lista cerrada" }[status] ?? status;
+  return { open: "Abierto", confirmed: "Confirmado", played: "Jugado", roster_locked: "Lista cerrada", suspended: "Suspendido" }[status] ?? status;
 }
 
 function playerForMatchRow(row: Pick<MatchPlayer, "playerId" | "name">, players: Player[]) {
@@ -153,10 +158,11 @@ function matchRowBelongsToPlayer(row: Pick<MatchPlayer, "playerId" | "name">, pl
 }
 
 function isMonthlyMatchRow(row: MatchPlayer, players: Player[], monthKey: string, monthlyPayments: MonthlyPayment[]) {
+  // Roster is canonical when the player is known; the "mensualidad" note is only
+  // a fallback for unresolved rows (mirrors whatsapp.ts's isMonthlyRow).
   const player = playerForMatchRow(row, players);
-  if (row.note.toLowerCase().includes("mensualidad")) return true;
-  if (!player) return false;
-  return isPlayerMonthlyForMonth(player.id, monthKey, players, monthlyPayments);
+  if (player) return isPlayerMonthlyForMonth(player.id, monthKey, players, monthlyPayments);
+  return row.note.toLowerCase().includes("mensualidad");
 }
 
 function buildPlayerStandings(data: SifupData) {
@@ -568,7 +574,7 @@ function PaymentAccountCard({ data }: { data: SifupData }) {
         <div><dt className="text-(--muted)">Cancha</dt><dd className="font-bold text-white">{formatCurrency(finance.courtCost)}</dd></div>
       </dl>
       <p className="rounded-md bg-(--green)/15 px-3 py-2 text-sm font-bold text-(--green)">
-        {finance.prepaidCourts} canchas pagadas: {formatCurrency(finance.prepaidTotal)}.
+        Referencia histórica: {finance.prepaidCourts} canchas / {formatCurrency(finance.prepaidTotal)}. No acredita saldo de caja ni crédito vigente conciliado.
       </p>
     </Card>
   );
@@ -634,10 +640,6 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
 }
 
 const MONTH_ABBR = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-
-function totalPayments(payments: MonthlyPayment[], rows: MatchPlayer[]) {
-  return payments.reduce((sum, payment) => sum + payment.amountPaid, 0) + rows.reduce((sum, row) => sum + row.amountPaid, 0);
-}
 
 function pendingPayments(payments: MonthlyPayment[], rows: MatchPlayer[]) {
   return payments.reduce((sum, payment) => sum + Math.max(payment.expectedAmount - payment.amountPaid, 0), 0) + rows.reduce((sum, row) => sum + Math.max(row.amountDue - row.amountPaid, 0), 0);
@@ -793,7 +795,7 @@ export function MatchesPage({ initialData }: InitialDataProps) {
     <>
       <PageTitle
         title="Partidos"
-        description="Martes registrados por semana, pagos y asistencia."
+        description="Tu próxima fecha y el historial del equipo, por mes."
         action={
           isAdmin ? (
             <div className="flex flex-wrap gap-2">
@@ -807,97 +809,7 @@ export function MatchesPage({ initialData }: InitialDataProps) {
         }
       />
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
-      <div className="space-y-3">
-        {(() => {
-          const today = new Date().toISOString().slice(0, 10);
-          const nextId = [...data.matches]
-            .filter((match) => match.date >= today && match.status !== "played" && match.status !== "roster_locked")
-            .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))[0]?.id;
-          const sortedMatches = [...data.matches].sort((a, b) => b.date.localeCompare(a.date));
-          return sortedMatches.map((match) => {
-            const rows = data.matchPlayers.filter((row) => row.matchId === match.id);
-            const summary = summarizeMatch(rows);
-            const isNext = match.id === nextId;
-            const isCompactConfirmed = match.status === "confirmed" && !isNext;
-            const result = data.results.find((r) => r.matchId === match.id);
-            const winners = result && result.winner !== "draw"
-              ? data.matchPlayers.filter((mp) => mp.matchId === match.id && mp.team === result.winner && mp.attendanceStatus === "confirmed")
-              : [];
-
-            return (
-              <Link key={match.id} href={`/matches/${match.id}`} className="block">
-                <Card
-                  className={`transition ${
-                    result
-                      ? "played-match-card"
-                      : isNext
-                      ? "next-match-card ring-2 ring-(--lime)/20"
-                      : "upcoming-match-card"
-                  }`}
-                >
-                  {result ? (
-                    <div className="flex flex-col gap-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="flex items-center gap-2 text-(--gold)">
-                            <Trophy size={16} aria-hidden="true" />
-                            <p className="text-xs font-black uppercase tracking-wide">Partido finalizado</p>
-                          </div>
-                          <h2 className="mt-1 text-lg font-black text-white">
-                            {result.winner === "draw" ? "Empate" : `Ganó el equipo ${teamLabel(result.winner)}`}
-                          </h2>
-                          <p className="mt-1 text-sm font-medium text-(--muted)">
-                            {match.date}
-                          </p>
-                        </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <StatusBadge value={matchStatusLabel(match.status)} />
-                        </div>
-                      </div>
-                      {winners.length > 0 ? (
-                        <div className="rounded-lg border border-(--gold)/45 bg-(--gold)/12 p-3">
-                          <p className="mb-2 text-xs font-black uppercase tracking-wide text-(--gold)">Jugadores ganadores</p>
-                          <div className="flex flex-wrap gap-2">
-                          {winners.map((w) => (
-                            <span key={w.id} className="inline-flex items-center rounded-md bg-(--gold) px-3 py-1.5 text-sm font-black text-(--bg-deep)">
-                              {w.name}
-                            </span>
-                          ))}
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : isCompactConfirmed ? (
-                    <div className="flex items-center justify-between gap-3">
-                      <h2 className="min-w-0 truncate text-base font-medium text-white">{match.weekLabel || match.date}</h2>
-                      <StatusBadge value={matchStatusLabel(match.status)} />
-                    </div>
-                  ) : (
-                    <div>
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h2 className="text-lg font-bold text-white">{match.weekLabel || match.date}</h2>
-                            {isNext ? <span className="rounded-full bg-(--lime) px-2 py-1 text-xs font-bold text-(--bg-deep)">Proximo partido</span> : null}
-                          </div>
-                          <p className="mt-1 text-sm font-medium text-(--muted)">{match.date} - {match.time}</p>
-                          <p className="mt-1 text-sm text-(--muted)">{match.location}</p>
-                        </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <StatusBadge value={matchStatusLabel(match.status)} />
-                        </div>
-                      </div>
-                      <div className="mt-3 text-sm font-bold text-(--muted)">
-                        <span>{summary.confirmedCount}/{match.squadTarget ?? SQUAD_TARGET} jugadores</span>
-                      </div>
-                    </div>
-                  )}
-                </Card>
-              </Link>
-            );
-          });
-        })()}
-      </div>
+      <MatchesList data={data} today={new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())} />
     </>
   );
 }
@@ -3774,7 +3686,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
           ) : (
             <Card className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Partido terminado</p>
+                <p className="text-xs font-black uppercase tracking-wide text-(--muted)">{matchStatusLabel(currentMatch.status)}</p>
                 <p className="mt-1 text-xl font-black text-(--gold)">Resultado pendiente</p>
               </div>
               {isAdmin ? (
@@ -3998,12 +3910,12 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
       return playerA.localeCompare(playerB);
     });
   const perMatchPending = data.matchPlayers.filter((row) => row.amountDue > row.amountPaid);
-  const courtBalance = data.clubFinance.prepaidTotal - data.matches.filter((match) => match.courtPrepaid).reduce((sum, match) => sum + match.courtCost, 0);
-  const collected = totalPayments(allMonthlyPayments, data.matchPlayers);
-  const pending = pendingPayments(currentMonthlyPayments, perMatchPending);
-  const expenseTotal = data.clubExpenses.reduce((sum, expense) => sum + expense.amount, 0);
-  const balance = collected - expenseTotal;
-  const projectedBalance = balance + pending;
+  const cutoff = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const cash = clubCashSnapshot(data, cutoff);
+  const court = courtFinanceSummary(data, month);
+  const matchMonth = (row: MatchPlayer) => data.matches.find(match => match.id === row.matchId)?.date.slice(0, 7);
+  const pending = pendingPayments(currentMonthlyPayments, perMatchPending.filter(row => matchMonth(row) === month));
+  const historicalPending = perMatchPending.filter(row => (matchMonth(row) ?? month) < month).reduce((sum,row) => sum + row.amountDue - row.amountPaid, 0);
   const expenses = [...data.clubExpenses].sort((a, b) => b.expenseDate.localeCompare(a.expenseDate) || a.label.localeCompare(b.label));
   const financeSummary = monthlyFinanceSummary(planYear, data);
 
@@ -4117,21 +4029,23 @@ export function PaymentsPage({ initialData }: InitialDataProps) {
       />
       {!isAdmin ? <AdminOnlyNotice label="Vista publica: el marcado de pagos queda reservado para admin." /> : null}
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
+      <ClubCashCard data={data} cutoff={cutoff} />
       <div className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Cobrado" value={formatCurrency(collected)} />
-        <Stat label="Gastado" value={formatCurrency(expenseTotal)} />
-        <Stat label="Balance" value={formatCurrency(balance)} />
-        <Stat label="Proyectado" value={formatCurrency(projectedBalance)} />
+        <Stat label="Recibido fechado del mes" value={formatCurrency(cash.periodReceived)} />
+        <Stat label="Desembolsado del mes" value={formatCurrency(cash.periodDisbursed)} />
+        <Stat label={`Por cobrar ${month}`} value={formatCurrency(pending)} />
+        <Stat label="Galletas históricas pendientes" value={formatCurrency(historicalPending)} />
       </div>
       <div className="mb-4 grid gap-4 lg:grid-cols-[1fr_0.7fr]">
         <PaymentAccountCard data={data} />
         <Card>
           <p className="text-xs font-semibold uppercase tracking-wide text-(--muted)">Cancha</p>
-          <p className="mt-2 text-2xl font-semibold text-white">{formatCurrency(data.clubFinance.prepaidTotal)}</p>
-          <p className="mt-1 text-sm text-(--muted)">Pagado para {data.clubFinance.prepaidCourts} fechas. Saldo referencial: {formatCurrency(courtBalance)}.</p>
-          <p className="mt-3 rounded-md bg-(--cyan)/15 px-3 py-2 text-sm font-bold text-(--cyan)">Por cobrar ahora: {formatCurrency(pending)}.</p>
+          <p className="mt-2 text-2xl font-semibold text-white">{formatCurrency(court.scheduledCredit)}</p>
+          <p className="mt-1 text-sm text-(--muted)">Crédito asignado a fechas pendientes de {month}. No es dinero disponible.</p>
+          <p className="mt-3 text-sm text-(--muted)">Saldo técnico sin asignar: {formatCurrency(court.expenses.reduce((sum,expense) => sum + expense.unallocated,0))}. Requiere conciliación; no acredita crédito vigente.</p>
         </Card>
       </div>
+      <CourtPaymentControls data={data} canEdit={isAdmin} />
       {isAdmin ? (
         <div className="mb-4">
           <MonthlyRosterEditor
@@ -5115,10 +5029,10 @@ function PlayerPaymentBehavior({ stats, summaries }: { stats: ReturnType<typeof 
     <Card className={`mt-4 space-y-4 ${tint}`}>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Comportamiento de pagos</p>
-          <p className={`mt-1 text-sm font-black uppercase tracking-wide ${accent}`}>{hasDebt ? "Con deuda" : "Al dia"}</p>
+          <div className="text-xs font-black uppercase tracking-wide text-(--muted)">Comportamiento de pagos</div>
+          <div className={`mt-1 text-sm font-black uppercase tracking-wide ${accent}`}>{hasDebt ? "Con deuda" : "Al dia"}</div>
         </div>
-        <p className={`text-4xl font-black leading-none ${accent}`}>{formatCurrency(stats.pendingDebt)}</p>
+        <div className={`text-4xl font-black leading-none ${accent}`}>{formatCurrency(stats.pendingDebt)}</div>
       </div>
 
       {debtEntries.length > 0 ? (
@@ -5151,7 +5065,7 @@ function PlayerPaymentBehavior({ stats, summaries }: { stats: ReturnType<typeof 
 
       {recent.length > 0 ? (
         <div>
-          <p className="mb-2 text-[11px] font-bold text-(--muted)">Ultimos {recent.length} meses</p>
+          <div className="mb-2 text-[11px] font-bold text-(--muted)">Ultimos {recent.length} meses</div>
           <ol className="flex gap-2">
             {recent.map((summary) => (
               <li key={summary.monthKey} className="flex flex-1 flex-col items-center gap-1">

@@ -4,6 +4,15 @@ import { z } from "zod";
 import { addPlayerToMatch, assignPlayerTeam, deduplicateMatchPlayers, findPlayer, generateBalancedTeams, getMatchTeams, getNextMatchSummary, getPendingPayments, getPlayerStandings, importWhatsAppMatch, mergePlayers, registerMatchPayment, registerMonthlyPayment, removePlayerFromMatch, replaceMatchTeams, setMatchResult, setMonthlyRoster, updateMatch, updateMatchPlayer } from "@/lib/sifup-service";
 import { PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "@/lib/sifup-constants";
 import { buildResourceMetadataChallenge } from "@/lib/oauth-policy";
+import { getCourtFinances, linkCourtPayment } from "@/lib/court-payment-service";
+import { correctPaymentReceivedAt, getPaymentRecord } from "@/lib/sifup-service";
+import { parsePaymentReceipt } from "@/lib/payment-receipt";
+
+const receivedAtSchema = z.string().superRefine((value, ctx) => {
+  try { parsePaymentReceipt(value); } catch (error) {
+    ctx.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Fecha invalida." });
+  }
+}).describe("Recepcion real: YYYY-MM-DD sin hora, o ISO 8601 con Z/offset explicito; ej. 2026-10-28T00:02-03:00. Timestamps se leen en UTC; paidDate conserva la fecha informada. No es el mes de cuota ni la fecha del partido.");
 
 type ToolResult = {
   content: { type: "text"; text: string }[];
@@ -71,14 +80,41 @@ function createServer() {
     (input) => runTool(() => importWhatsAppMatch(input)),
   );
 
+  server.registerTool("get_court_finances", {
+    title: "Comparar pagos de cancha con partidos",
+    description: "Desembolso real del mes, partidos jugados/suspendidos, credito asignado y consumido. Incluye gastos disponibles para vincular por ID; nunca infiere pagos a partir de una reserva.",
+    annotations: { readOnlyHint: true },
+    inputSchema: { monthKey: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).describe("Mes YYYY-MM.") },
+  }, (input) => runTool(() => getCourtFinances(input)));
+
+  server.registerTool("link_court_payment", {
+    title: "Vincular pago de cancha a un partido",
+    description: "Asigna parte de un gasto de cancha existente al partido, por su costo completo. No crea un gasto ni cobra jugadores. Simula por defecto; dryRun=false confirma la escritura.",
+    inputSchema: {
+      expenseId: z.string().min(1), matchId: z.string().min(1), dryRun: z.boolean().optional(),
+    },
+  }, (input) => runTool(() => linkCourtPayment(input)));
+
+  server.registerTool("transfer_court_payment", {
+    title: "Suspender fecha y trasladar cancha pagada",
+    description: "Conserva origen suspendido y gasto original; aplica el credito a una fecha posterior al mismo valor. Crea destino vacio si no existe. No mueve jugadores, mensualidades, galletas ni resultados. Reintentos iguales no duplican credito. Simula por defecto; dryRun=false confirma.",
+    inputSchema: {
+      expenseId: z.string().min(1), matchId: z.string().min(1),
+      targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), dryRun: z.boolean().optional(),
+    },
+  }, (input) => runTool(() => linkCourtPayment(input)));
+
   server.registerTool(
     "find_player",
     {
       title: "Buscar jugador",
-      description: "Busca jugadores existentes del club por nombre o apodo y devuelve candidatos ordenados por coincidencia (exacta, apodo, prefijo, token). Usalo para validar a que jugador corresponde un nombre de WhatsApp antes de importar la lista o agregar a alguien, y asi evitar duplicados.",
+      description: "Busca jugadores existentes del club por nombre o apodo y devuelve candidatos ordenados por coincidencia (exacta, apodo, prefijo, token). Usalo para validar a que jugador corresponde un nombre de WhatsApp antes de importar la lista o agregar a alguien, y asi evitar duplicados. Cada candidato incluye effectivePaymentPlan: el estado mensual/galleta real para el mes resuelto (roster del mes manda sobre el plan global del jugador, incluso si la cuota esta impaga).",
       inputSchema: {
         query: z.string().min(1).describe("Nombre o apodo a buscar."),
         limit: z.number().int().positive().max(20).optional().describe("Cantidad maxima de candidatos. Default: 5."),
+        matchId: z.string().optional().describe("ID de partido para resolver el mes efectivo. Si no existe, falla (no cae a otro partido)."),
+        date: z.string().optional().describe("Fecha YYYY-MM-DD para resolver el mes efectivo si no se entrega matchId."),
+        monthKey: z.string().optional().describe("Mes YYYY-MM explicito si no se entrega matchId ni date. Default: mes actual."),
       },
     },
     (input) => runTool(() => findPlayer(input)),
@@ -97,6 +133,7 @@ function createServer() {
         attendanceStatus: z.enum(["confirmed", "galleta", "banca", "out", "waitlist", "maybe"]).optional().describe("Estado de asistencia: confirmed (confirmado), galleta (galleta abierta), banca (banca), out (no puede). Por defecto: confirmed para mensuales, galleta para no mensuales."),
         team: z.enum(["A", "B", "none"]).optional().describe("Equipo: A (Rojo), B (Amarillo) o none. Default: none."),
         amountDue: z.number().int().min(0).optional().describe(`Monto a cobrar si no es mensual. Default: ${PER_MATCH_AMOUNT}.`),
+        provisionalGuest: z.boolean().optional().describe("Si es true, registra como invitado provisional independiente con resolución de nombre exacto (evita asociar por similitud/fuzzy a jugadores existentes con nombres similares). Crea o reutiliza un jugador perMatch propio con nombre exacto. Por defecto queda en estado galleta (waitlist permitido; no permite confirmed al crear)."),
       },
     },
     (input) => runTool(() => addPlayerToMatch(input)),
@@ -112,6 +149,7 @@ function createServer() {
         playerId: z.string().optional().describe("ID del jugador si se conoce."),
         monthKey: z.string().optional().describe("Mes YYYY-MM. Default: mes actual."),
         paid: z.boolean().optional().describe("true para marcar pagado (default), false para revertir a pendiente."),
+        receivedAt: receivedAtSchema.optional(),
       },
     },
     (input) => runTool(() => registerMonthlyPayment(input)),
@@ -143,10 +181,28 @@ function createServer() {
         playerId: z.string().optional().describe("ID del jugador si se conoce."),
         matchId: z.string().optional().describe("ID del partido especifico. Si se omite, se busca el partido con saldo pendiente mas reciente."),
         amount: z.number().int().positive().optional().describe("Monto recibido. Default: el saldo pendiente completo de ese partido."),
+        receivedAt: receivedAtSchema.optional(),
       },
     },
     (input) => runTool(() => registerMatchPayment(input)),
   );
+
+  const paymentSelector = {
+    playerId: z.string().min(1),
+    monthKey: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional(),
+    matchId: z.string().min(1).optional(),
+  };
+  server.registerTool("get_payment_record", {
+    title: "Leer importe, estado y recepcion de un pago",
+    description: "Lectura exacta por playerId y exactamente uno de monthKey (mensualidad) o matchId (galleta). No crea pagos; devuelve paidDate, paidAt UTC y precision date/instant/unknown.",
+    annotations: { readOnlyHint: true },
+    inputSchema: paymentSelector,
+  }, (input) => runTool(() => getPaymentRecord(input)));
+  server.registerTool("correct_payment_received_at", {
+    title: "Corregir solo fecha de recepcion",
+    description: "Corrige recepcion de un pago existente con importe recibido > 0. Usa playerId y exactamente uno de monthKey o matchId. NO registra abonos, cambia importes/estado ni salda promesas. Repetir no duplica dinero.",
+    inputSchema: { ...paymentSelector, receivedAt: receivedAtSchema },
+  }, (input) => runTool(() => correctPaymentReceivedAt(input)));
 
   server.registerTool(
     "merge_players",

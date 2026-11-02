@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { ClubCashCard } from "./ClubCashCard";
+import { clubCashSnapshot } from "@/lib/club-cash";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Clock, Plus, Scale, TrendingUp, Wallet } from "lucide-react";
@@ -33,7 +35,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  const matchesInMonth = [...data.matches.filter((match) => match.monthKey === monthKey)].sort((a, b) => a.date.localeCompare(b.date));
+  const matchesInMonth = [...data.matches.filter((match) => match.date.slice(0, 7) === monthKey)].sort((a, b) => a.date.localeCompare(b.date));
   const matchIdsInMonth = new Set(matchesInMonth.map((match) => match.id));
 
   const cuotaPayments = monthlyPlayers.map((player) => ({
@@ -45,10 +47,14 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
   const cuotaExpected = cuotaPayments.reduce((sum, item) => sum + item.payment.expectedAmount, 0);
   const cuotaPending = cuotaPayments.reduce((sum, item) => sum + Math.max(item.payment.expectedAmount - item.payment.amountPaid, 0), 0);
 
-  const gastoPartidos = matchesInMonth.reduce((sum, match) => sum + match.totalCost, 0);
   const expensesInMonth = [...data.clubExpenses.filter((expense) => expense.expenseDate.slice(0, 7) === monthKey)].sort((a, b) => a.expenseDate.localeCompare(b.expenseDate));
-  const gastoExtra = expensesInMonth.reduce((sum, expense) => sum + expense.amount, 0);
-  const gastoTotal = gastoPartidos + gastoExtra;
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const [year,month] = monthKey.split("-").map(Number);
+  const monthEnd = new Date(Date.UTC(year,month,0)).toISOString().slice(0,10);
+  const cutoff = monthEnd < today ? monthEnd : today;
+  const cash = clubCashSnapshot(data,cutoff);
+  const periodMovements = cash.dated.filter(item => item.date?.startsWith(monthKey));
+  const gastoTotal = -periodMovements.filter(item => item.amount < 0).reduce((sum,item) => sum + item.amount,0);
 
   const galletaRows = data.matchPlayers.filter(
     (row) =>
@@ -73,7 +79,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
   }
   const galletaPlayers = [...galletaByPlayer.values()].sort((a, b) => a.name.localeCompare(b.name));
 
-  const ingresosDelMes = cuotaCollected + ingresosGalleta;
+  const ingresosDelMes = periodMovements.filter(item => item.amount > 0).reduce((sum,item) => sum + item.amount,0);
   const pendientesDePago = cuotaPending + galletaPending;
   const saldoDelMes = ingresosDelMes - gastoTotal;
 
@@ -159,11 +165,12 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
 
       {error ? <p className="mb-4 rounded-md bg-(--gold)/15 px-3 py-2 text-sm font-bold text-(--gold)">{error}</p> : null}
 
+      <ClubCashCard data={data} cutoff={cutoff} />
       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Costos del mes" value={formatCurrency(-gastoTotal)} tone="red" icon={<Wallet size={18} />} />
-        <Stat label="Ingresos del mes" value={formatCurrency(ingresosDelMes)} tone="green" icon={<TrendingUp size={18} />} />
+        <Stat label="Desembolsado del mes" value={formatCurrency(gastoTotal)} tone="red" icon={<Wallet size={18} />} />
+        <Stat label="Recibido fechado del mes" value={formatCurrency(ingresosDelMes)} tone="green" icon={<TrendingUp size={18} />} />
         <Stat label="Pendientes de pago" value={formatCurrency(pendientesDePago)} tone="gold" icon={<Clock size={18} />} />
-        <Stat label="Saldo del mes" value={formatCurrency(saldoDelMes)} tone={saldoDelMes >= 0 ? "green" : "red"} icon={<Scale size={18} />} highlight />
+        <Stat label="Resultado fechado del mes (no caja)" value={formatCurrency(saldoDelMes)} tone={saldoDelMes >= 0 ? "green" : "red"} icon={<Scale size={18} />} />
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -189,7 +196,7 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
               </Button>
             ) : null}
           </div>
-          <ul className="space-y-2">
+          <details className="text-sm text-(--muted)"><summary className="cursor-pointer py-2">Partidos programados (no son desembolsos)</summary><ul className="space-y-2">
             {matchesInMonth.map((match) => {
               const played = data.results.some((result) => result.matchId === match.id);
               return (
@@ -204,13 +211,15 @@ export function PaymentsSummary({ data, monthKey, canEdit }: { data: SifupData; 
                 </li>
               );
             })}
-            {expensesInMonth.map((expense) => (
+          </ul></details>
+          <ul className="space-y-2">
+            {expensesInMonth.filter(expense => expense.expenseDate <= cutoff && expense.amount > 0).map((expense) => (
               <li key={expense.id} className="flex items-center justify-between gap-2 text-sm">
                 <span className="text-(--muted)">{expense.label}</span>
                 <span className="font-bold text-white">{formatCurrency(expense.amount)}</span>
               </li>
             ))}
-            {matchesInMonth.length === 0 && expensesInMonth.length === 0 ? <li className="text-sm text-(--muted)">Sin gastos registrados este mes.</li> : null}
+            {expensesInMonth.length === 0 ? <li className="text-sm text-(--muted)">Sin gastos registrados este mes.</li> : null}
           </ul>
           <div className="flex items-center justify-between border-t border-(--border) pt-2 text-sm font-black text-white">
             <span>Total</span>
