@@ -31,6 +31,7 @@ export function newPlayerId(name: string, existingIds: Iterable<string> = []) {
 }
 
 export function nextMatch(matches: Match[]) {
+  matches = matches.filter((match) => match.status !== "suspended");
   const now = new Date();
   const upcoming = matches
     .filter((match) => new Date(`${match.date}T${match.time || "00:00"}`) >= now)
@@ -79,12 +80,34 @@ export function whatsappOrderFor(row: MatchPlayer) {
   return row.whatsappOrder || orderFromId || Number.MAX_SAFE_INTEGER;
 }
 
-export function isPlayerMonthlyForMonth(playerId: string, monthKey: string, players: Player[], monthlyPayments: SifupData["monthlyPayments"]) {
+export type PlayerMonthlyContext = {
+  monthKey: string;
+  isMonthly: boolean;
+  // "roster": a monthly roster exists for that month and it is authoritative (even if unpaid).
+  // "global": no roster was ever set for that month, so the player's default plan decides.
+  source: "roster" | "global";
+};
+
+// Canonical mensual check: if a roster exists for the month, membership there
+// decides (regardless of payment status); otherwise falls back to the global plan.
+export function playerMonthlyContext(playerId: string, monthKey: string, players: Player[], monthlyPayments: SifupData["monthlyPayments"]): PlayerMonthlyContext {
   const hasRosterForMonth = monthlyPayments.some((payment) => payment.monthKey === monthKey);
   if (hasRosterForMonth) {
-    return monthlyPayments.some((payment) => payment.playerId === playerId && payment.monthKey === monthKey);
+    return {
+      monthKey,
+      isMonthly: monthlyPayments.some((payment) => payment.playerId === playerId && payment.monthKey === monthKey),
+      source: "roster",
+    };
   }
-  return players.find((player) => player.id === playerId)?.paymentPlan === "monthly";
+  return {
+    monthKey,
+    isMonthly: players.find((player) => player.id === playerId)?.paymentPlan === "monthly",
+    source: "global",
+  };
+}
+
+export function isPlayerMonthlyForMonth(playerId: string, monthKey: string, players: Player[], monthlyPayments: SifupData["monthlyPayments"]) {
+  return playerMonthlyContext(playerId, monthKey, players, monthlyPayments).isMonthly;
 }
 
 export function upsertResult(data: SifupData, result: MatchResult) {
@@ -197,7 +220,7 @@ export function planRosterChange({
   payment?: MonthlyPayment;
   cancelGalletas?: boolean;
 }): RosterChangePlan {
-  const monthMatchIds = new Set(matches.filter((match) => match.monthKey === monthKey).map((match) => match.id));
+  const monthMatchIds = new Set(matches.filter((match) => (match.date?.slice(0, 7) ?? match.monthKey) === monthKey && match.status !== "suspended").map((match) => match.id));
   const rows = playerRows.filter((row) => monthMatchIds.has(row.matchId) && row.attendanceStatus !== "out");
   const plan: RosterChangePlan = { rowUpdates: [], unpaidGalletaCount: 0, unpaidGalletaAmount: 0, paidGalletaAmount: 0, repricedCount: 0, paidMonthlyAmount: 0 };
 
@@ -223,7 +246,7 @@ export function planRosterChange({
 
   plan.paidMonthlyAmount = payment?.paymentStatus === "paid" ? payment.amountPaid : 0;
   for (const row of rows) {
-    if (row.attendanceStatus !== "confirmed" || row.amountDue > 0) continue;
+    if (row.attendanceStatus !== "confirmed" || row.amountDue > 0 || row.amountPaid > 0) continue;
     plan.repricedCount += 1;
     plan.rowUpdates.push({
       id: row.id,
