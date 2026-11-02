@@ -1,7 +1,7 @@
 import "server-only";
 
 import { revalidatePath } from "next/cache";
-import { COURT_COST, MONTHLY_AMOUNT, PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "./sifup-constants";
+import { COURT_COST, MONTHLY_AMOUNT, PER_MATCH_AMOUNT, PUBLIC_BASE_URL, ROYAL_SQUAD_TARGET, SQUAD_TARGET } from "./sifup-constants";
 import { monthKey, weekLabel } from "./sifup-date";
 import { cleanPlayerName, parseWhatsAppList } from "./parser";
 import { applyRosterChange as dbApplyRosterChange, deleteMonthlyPayment, getSifupData, saveMatch, saveMatchPlayers, saveMatchWithPlayers, saveMonthlyPayment, savePlayer, mergePlayers as dbMergePlayers } from "./repository";
@@ -1227,6 +1227,28 @@ export async function generateBalancedTeams(input: { matchId?: string; date?: st
     },
     messages: { teams: teamsMessage(match, sorted, data.players, data.monthlyPayments) },
   };
+}
+
+export async function closeMatchRoster({ matchId }: { matchId: string }) {
+  if (!matchId?.trim()) throw new Error("matchId es obligatorio para cerrar la lista.");
+  const data = await getSifupData();
+  const match = data.matches.find(item => item.id === matchId);
+  if (!match) throw new Error("Partido no encontrado.");
+  if (match.status === "played" || match.status === "suspended") {
+    throw new Error("No se puede cerrar la lista de un partido jugado o suspendido.");
+  }
+  const squadTarget = match.matchFormat === "rey_de_la_cancha"
+    ? ROYAL_SQUAD_TARGET : (match.squadTarget ?? (match.matchFormat === "7x7" ? 14 : SQUAD_TARGET));
+  const confirmedCount = data.matchPlayers.filter(row => row.matchId === matchId && row.attendanceStatus === "confirmed").length;
+  // The UI moves overflow to banca; this explicit, preservation-only operation must not.
+  if (confirmedCount > squadTarget) throw new Error("La lista excede el cupo. Resuelve el exceso explicitamente antes de cerrarla; no se movieron jugadores.");
+  const changed = match.status !== "roster_locked";
+  const updatedMatch: Match = changed ? { ...match, status: "roster_locked", updatedAt: new Date().toISOString() } : match;
+  if (changed) {
+    await saveMatch(updatedMatch);
+    revalidateSifupViews(matchId);
+  }
+  return { match: updatedMatch, rosterClosed: true, changed, confirmedCount, squadTarget };
 }
 
 export type UpdateMatchInput = {

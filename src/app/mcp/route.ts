@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { addPlayerToMatch, assignPlayerTeam, deduplicateMatchPlayers, findPlayer, generateBalancedTeams, getMatchTeams, getNextMatchSummary, getPendingPayments, getPlayerStandings, importWhatsAppMatch, mergePlayers, registerMatchPayment, registerMonthlyPayment, removePlayerFromMatch, replaceMatchTeams, setMatchResult, setMonthlyRoster, updateMatch, updateMatchPlayer } from "@/lib/sifup-service";
+import { addPlayerToMatch, assignPlayerTeam, closeMatchRoster, deduplicateMatchPlayers, findPlayer, generateBalancedTeams, getMatchTeams, getNextMatchSummary, getPendingPayments, getPlayerStandings, importWhatsAppMatch, mergePlayers, registerMatchPayment, registerMonthlyPayment, removePlayerFromMatch, replaceMatchTeams, setMatchResult, setMonthlyRoster, updateMatch, updateMatchPlayer } from "@/lib/sifup-service";
 import { PER_MATCH_AMOUNT, PUBLIC_BASE_URL } from "@/lib/sifup-constants";
 import { getCourtFinances, linkCourtPayment, getMatchRecords, scheduleMatches, registerCourtExpense } from "@/lib/court-payment-service";
 import { correctPaymentReceivedAt, getPaymentRecord } from "@/lib/sifup-service";
@@ -343,6 +343,17 @@ function createServer() {
       },
     },
     (input) => runTool(() => generateBalancedTeams(input)),
+  );
+
+  server.registerTool(
+    "close_match_roster",
+    {
+      title: "Cerrar lista explicitamente sin cambiar jugadores ni equipos",
+      description: "Cierra SOLO el partido exacto indicado: status=roster_locked. Devuelve match con estado nativo, rosterClosed, changed, confirmedCount y squadTarget. Si ya esta cerrado no escribe ni cambia updatedAt (changed=false). Conserva equipos, asistencia, banca/out, pagos, notas, costos, horas y ranking. Rechaza partidos jugados/suspendidos y exceso de cupo sin mover jugadores. No exige cupo completo ni genera equipos. Para releer el estado y datos protegidos usa get_match_records.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { matchId: z.string().min(1).describe("ID exacto obligatorio del partido, sin normalizar. No busca el siguiente partido ni cierra automaticamente por cupo.") },
+    },
+    (input) => runTool(() => closeMatchRoster(input)),
   );
 
   server.registerTool(

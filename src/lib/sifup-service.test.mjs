@@ -107,6 +107,140 @@ function balancingFixture(goalkeeperIndexes = []) {
   return { ...context, scores };
 }
 
+function closingFixture() {
+  const context = balancingFixture([13]);
+  const { data, matchId, repository } = context;
+  Object.assign(data.matches[0], { notes: 'Preservar nota manual', time: '20:15', updatedAt: 'match-before' });
+  data.matchPlayers.filter(row => row.matchId === matchId).forEach((row, index) => {
+    row.team = row.attendanceStatus === 'confirmed' ? (index % 2 ? 'B' : 'A') : 'none';
+  });
+  let writes = 0;
+  repository.saveMatch = async match => {
+    writes++;
+    data.matches[data.matches.findIndex(item => item.id === match.id)] = structuredClone(match);
+  };
+  return { ...context, writes: () => writes };
+}
+
+test('explicit roster closure preserves all data except native status/timestamp and reapplication is a no-op', async () => {
+  const { data, service, matchId, repository, writes } = closingFixture();
+  const before = structuredClone(data);
+  const rankingBefore = await service.getPlayerStandings({ minPlayed: 0 });
+  assert.equal(data.matches[0].status, 'confirmed'); // A full squad alone never closes it.
+  const result = await service.closeMatchRoster({ matchId });
+  assert.equal(result.match.id, matchId);
+  assert.equal(result.match.status, 'roster_locked');
+  assert.equal(result.rosterClosed, true);
+  assert.equal(result.changed, true);
+  assert.equal(result.confirmedCount, 14);
+  assert.equal(result.squadTarget, 14);
+  assert.equal(writes(), 1);
+  const after = await repository.getSifupData();
+  assert.equal(after.matches[0].status, 'roster_locked');
+  assert.deepEqual({ ...after, matches: [{ ...after.matches[0], status: before.matches[0].status,
+    updatedAt: before.matches[0].updatedAt }, ...after.matches.slice(1)] }, before);
+  assert.deepEqual(await service.getPlayerStandings({ minPlayed: 0 }), rankingBefore);
+  const repeated = await service.closeMatchRoster({ matchId });
+  assert.equal(repeated.changed, false);
+  assert.deepEqual(repeated.match, result.match);
+  assert.deepEqual(data, after);
+  assert.equal(writes(), 1);
+});
+
+test('explicit roster closure rejects missing/exact unknown ID, played/suspended and overflow without writing', async () => {
+  const { data, service, matchId, writes } = closingFixture();
+  for (const input of [{}, { matchId: '' }, { matchId: 'missing' }]) {
+    const before = structuredClone(data);
+    await assert.rejects(() => service.closeMatchRoster(input));
+    assert.deepEqual(data, before);
+  }
+  for (const status of ['played', 'suspended']) {
+    data.matches[0].status = status;
+    const before = structuredClone(data);
+    await assert.rejects(() => service.closeMatchRoster({ matchId }), /jugado|suspendido/);
+    assert.deepEqual(data, before);
+  }
+  data.matches[0].status = 'confirmed';
+  data.matchPlayers.find(row => row.id === 'target-banca').attendanceStatus = 'confirmed';
+  const before = structuredClone(data);
+  await assert.rejects(() => service.closeMatchRoster({ matchId }), /cupo/);
+  assert.deepEqual(data, before); // No overflow moved to banca, no team/payment changes.
+  assert.equal(writes(), 0);
+});
+
+test('explicit roster closure follows UI capacity constants without requiring a full or assigned squad', async () => {
+  for (const [format, target] of [['clasico', 12], ['7x7', 14], ['rey_de_la_cancha', 18]]) {
+    const { data, service, matchId } = closingFixture();
+    Object.assign(data.matches[0], { status: 'open', matchFormat: format, squadTarget: undefined });
+    data.matchPlayers = data.matchPlayers.filter(row => row.matchId !== matchId || row.whatsappOrder <= 2);
+    data.matchPlayers.filter(row => row.matchId === matchId).forEach(row => { row.team = 'none'; });
+    const result = await service.closeMatchRoster({ matchId });
+    assert.equal(result.squadTarget, target);
+    assert.equal(result.confirmedCount, 2);
+    assert.equal(result.match.status, 'roster_locked');
+  }
+});
+
+function rosterRoute(service) {
+  const filename = path.join(repo, 'src/app/mcp/route.ts');
+  const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  }).outputText;
+  const routeModule = { exports: {} };
+  vm.runInThisContext(`(function(require,module,exports){${output}\n})`, { filename })((name) => {
+    if (name === '@/lib/sifup-service') return service;
+    if (name === '@/lib/court-payment-service') return {};
+    if (name === '@/lib/sifup-constants') return serviceRequire('./sifup-constants.ts');
+    if (name === '@/lib/payment-receipt') return serviceRequire('./payment-receipt.ts');
+    return serviceRequire(name);
+  }, routeModule, routeModule.exports);
+  return routeModule.exports;
+}
+
+test('official MCP roster closure descriptor, authentication, readback and idempotence use the real SDK route', async () => {
+  const { data, service, matchId, writes } = closingFixture();
+  const route = rosterRoute(service);
+  const previous = process.env.SIFUP_MCP_TOKEN;
+  const localTestToken = 'synthetic-roster-test-only';
+  const request = (method, params, token = localTestToken) => new Request('http://localhost/mcp', {
+    method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream',
+      authorization: `Bearer ${token}` }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  });
+  try {
+    delete process.env.SIFUP_MCP_TOKEN;
+    assert.equal((await route.POST(request('tools/list', {}))).status, 401);
+    process.env.SIFUP_MCP_TOKEN = localTestToken;
+    assert.equal((await route.POST(request('tools/call', { name: 'close_match_roster', arguments: { matchId } }, 'wrong'))).status, 401);
+    assert.equal(writes(), 0);
+    const listed = await (await route.POST(request('tools/list', {}))).json();
+    const descriptor = listed.result.tools.find(tool => tool.name === 'close_match_roster');
+    assert.ok(descriptor);
+    assert.deepEqual(descriptor.inputSchema.required, ['matchId']);
+    assert.deepEqual(Object.keys(descriptor.inputSchema.properties), ['matchId']);
+    assert.equal(descriptor.annotations.idempotentHint, true);
+    const missing = await (await route.POST(request('tools/call', { name: 'close_match_roster', arguments: {} }))).json();
+    assert.equal(missing.result.isError, true);
+    assert.equal(writes(), 0);
+    const before = structuredClone(data);
+    const call = () => route.POST(request('tools/call', { name: 'close_match_roster', arguments: { matchId } }));
+    const closed = (await (await call()).json()).result.structuredContent;
+    assert.equal(closed.match.status, 'roster_locked');
+    assert.equal(closed.changed, true);
+    const second = (await (await call()).json()).result.structuredContent;
+    assert.equal(second.changed, false);
+    assert.deepEqual(second.match, closed.match);
+    assert.equal(writes(), 1);
+    assert.deepEqual(data.matchPlayers, before.matchPlayers);
+    assert.deepEqual(data.monthlyPayments, before.monthlyPayments);
+    assert.deepEqual(data.results, before.results);
+    assert.equal((await route.GET()).status, 405);
+    assert.equal((await route.DELETE()).status, 405);
+  } finally {
+    if (previous === undefined) delete process.env.SIFUP_MCP_TOKEN;
+    else process.env.SIFUP_MCP_TOKEN = previous;
+  }
+});
+
 for (const keepers of [[], [13], [12, 13]]) {
   test(`balanced teams use one effective ranking with ${keepers.length} confirmed goalkeepers, preserving pairs and data`, async (t) => {
     const { data, service, matchId, scores } = balancingFixture(keepers);
