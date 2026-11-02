@@ -163,7 +163,7 @@ test("matchSummaryMessage keeps overflow officials in Banca", () => {
     courtPrepaid: false, notes: "", matchFormat: "clasico", squadTarget: 12, createdAt: "", updatedAt: "",
   }, rows, [], []);
   assert.match(text, /12\u00b7 Jugador 12 \uD83C\uDF6A/);
-  assert.match(text, /\*Banca\* .+\n1. Jugador 13\n2. Jugador 14/);
+  assert.match(text, /\*Banca\* .+\n1· Jugador 13 🍪\n2· Jugador 14 🍪/);
 });
 
 test("cleanPlayerName strips emojis, symbols and text in parentheses", () => {

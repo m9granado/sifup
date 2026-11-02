@@ -62,6 +62,125 @@ function fixture() {
   return { data, service: fixtureModule.exports, matchId: match.id, repository };
 }
 
+function balancingFixture(goalkeeperIndexes = []) {
+  const context = fixture();
+  const { data, matchId, repository } = context;
+  data.matches[0].matchFormat = '7x7';
+  data.matches[0].squadTarget = 14;
+  data.matchTeams = [];
+  const scores = [20, 17, 16, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4];
+  data.players = scores.map((score, index) => ({ id: `fixture-${index}`, name: `Fixture ${index + 1}`,
+    nickname: '', paymentPlan: 'perMatch', active: true, isGoalkeeper: goalkeeperIndexes.includes(index) }));
+  const targetRows = data.players.map((player, index) => ({ id: `target-${index}`, matchId,
+    playerId: player.id, name: player.name, attendanceStatus: 'confirmed', team: 'none',
+    whatsappOrder: index + 1, note: 'fixture manual', amountDue: 5000, amountPaid: index * 100,
+    paymentStatus: 'unpaid', paidAt: null, paidDate: null, updatedAt: 'before' }));
+  data.matchPlayers = [...targetRows];
+  data.monthlyPayments = [];
+  const combinations = (score, slots = 5) => {
+    if (slots === 0) return score === 0 ? [] : null;
+    for (const points of [4, 1, 0]) {
+      const rest = combinations(score - points, slots - 1);
+      if (rest !== null) return [points, ...rest];
+    }
+    return null;
+  };
+  const histories = scores.map(score => combinations(score));
+  for (let game = 0; game < 5; game++) {
+    const id = `fixture-history-${game}`;
+    data.matches.push({ ...data.matches[0], id, date: `2026-09-0${game + 1}`, matchFormat: 'clasico', status: 'played' });
+    data.results.push({ id: `result-${game}`, matchId: id, winner: 'A', scoreA: 1, scoreB: 0 });
+    targetRows.forEach((row, index) => data.matchPlayers.push({ ...row, id: `history-${game}-${index}`,
+      matchId: id, team: histories[index][game] === 4 ? 'A' : histories[index][game] === 1 ? 'B' : 'none' }));
+  }
+  for (const status of ['banca', 'out']) {
+    const player = { ...data.players[0], id: `fixture-${status}`, name: `Fixture ${status}`, isGoalkeeper: true };
+    data.players.push(player);
+    data.matchPlayers.push({ ...targetRows[0], id: `target-${status}`, playerId: player.id,
+      name: player.name, attendanceStatus: status, team: 'B', whatsappOrder: status === 'banca' ? 15 : 16 });
+  }
+  // Preserve the historical rows exactly like the real repository, without importing it.
+  repository.saveMatchPlayers = async (id, rows) => {
+    assert.equal(id, matchId);
+    data.matchPlayers = [...data.matchPlayers.filter(row => row.matchId !== id), ...structuredClone(rows)];
+  };
+  return { ...context, scores };
+}
+
+for (const keepers of [[], [13], [12, 13]]) {
+  test(`balanced teams use one effective ranking with ${keepers.length} confirmed goalkeepers, preserving pairs and data`, async (t) => {
+    const { data, service, matchId, scores } = balancingFixture(keepers);
+    const before = structuredClone(data);
+    const standingsBefore = await service.getPlayerStandings({ minPlayed: 0 });
+    const result = await service.generateBalancedTeams({ matchId });
+    assert.deepEqual([result.teams.A.length, result.teams.B.length, result.teams.none.length], [7, 7, 0]);
+    const assigned = [...result.teams.A, ...result.teams.B];
+    assert.equal(new Set(assigned.map(row => row.id)).size, 14);
+    assert.ok(!result.messages.teams.includes('Fixture banca'));
+    assert.ok(!result.messages.teams.includes('Fixture out'));
+    if (keepers.length === 1) t.diagnostic(JSON.stringify({ syntheticOnly: true,
+      goalkeeper: { name: 'Fixture 14', base: scores[13], effective: scores[13] + 100 },
+      A: result.teams.A.map(row => row.name), B: result.teams.B.map(row => row.name) }));
+    assert.deepEqual(assigned.map(row => row.id).sort(), Array.from({ length: 14 }, (_, i) => `target-${i}`).sort());
+    const ranked = scores.map((points, index) => ({ index, points: points + (keepers.includes(index) ? 100 : 0) }))
+      .sort((a, b) => b.points - a.points);
+    const assignments = new Map(assigned.map(row => [row.id, row.team]));
+    ranked.forEach(({ index }, position) => {
+      const expected = ['A', 'B', 'B', 'A'][position % 4];
+      assert.equal(assignments.get(`target-${index}`), expected, `effective rank ${position + 1}`);
+      if (position % 2 === 0) assert.notEqual(assignments.get(`target-${index}`), assignments.get(`target-${ranked[position + 1].index}`));
+    });
+    assert.deepEqual(await service.getPlayerStandings({ minPlayed: 0 }), standingsBefore);
+    assert.deepEqual(data.players, before.players);
+    assert.deepEqual(data.results, before.results);
+    assert.deepEqual(data.monthlyPayments, before.monthlyPayments);
+    for (const old of before.matchPlayers) {
+      const actual = data.matchPlayers.find(row => row.id === old.id);
+      if (old.matchId === matchId && old.attendanceStatus === 'confirmed') {
+        assert.deepEqual({ ...actual, team: old.team, updatedAt: old.updatedAt }, old);
+      } else assert.deepEqual(actual, old);
+    }
+    const second = await service.generateBalancedTeams({ matchId });
+    assert.deepEqual(second.teams, result.teams);
+  });
+}
+
+test('one goalkeeper with no scored history cannot turn thirteen field players into 8/6', async () => {
+  const { data, service, matchId } = balancingFixture([13]);
+  data.results = [];
+  const result = await service.generateBalancedTeams({ matchId });
+  assert.deepEqual([result.teams.A.length, result.teams.B.length], [7, 7]);
+  assert.equal(result.teams.A.find(row => row.id === 'target-13')?.team, 'A');
+});
+
+test('team and bench cookie labels resolve the effective month roster, not global plan or stale notes', async () => {
+  const { data, service, matchId } = balancingFixture([13]);
+  const monthly = data.players[0];
+  const guest = data.players[13];
+  guest.paymentPlan = 'monthly'; // Global default cannot override an explicit per-match month.
+  data.monthlyPayments = [
+    { id: 'fee-monthly', playerId: monthly.id, monthKey: '2026-10', paymentStatus: 'unpaid', expectedAmount: 20000, amountPaid: 0 },
+  ];
+  data.matchPlayers.find(row => row.id === 'target-0').note = 'galleta antigua';
+  data.matchPlayers.find(row => row.id === 'target-13').note = 'mensualidad antigua';
+  const bench = data.matchPlayers.find(row => row.id === 'target-banca');
+  const monthlyBench = { ...bench, id: 'monthly-bench', playerId: monthly.id, name: monthly.name + ' banca' };
+  data.matchPlayers.push(monthlyBench);
+  const before = structuredClone(data);
+  const result = await service.generateBalancedTeams({ matchId });
+  const read = await service.getMatchTeams({ matchId });
+  assert.equal(result.messages.teams, read.messages.teams);
+  const monthlyLine = result.messages.teams.split('\n').find(line => line.includes('#1 '));
+  const guestLine = result.messages.teams.split('\n').find(line => line.includes('#14 '));
+  assert.ok(monthlyLine && !monthlyLine.includes('🍪'));
+  assert.ok(guestLine && guestLine.includes('🍪'));
+  const summary = await service.getNextMatchSummary({ matchId });
+  const benchLines = summary.messages.matchSummary.split('*Banca*')[1].split('❌')[0];
+  assert.ok(benchLines.split('\n').find(line => line.includes('Fixture banca')).includes('🍪'));
+  assert.ok(!benchLines.split('\n').find(line => line.includes(monthlyBench.name)).includes('🍪'));
+  assert.deepEqual(data.monthlyPayments, before.monthlyPayments);
+});
+
 test('pending payment buckets separate match dates without changing balances or the legacy total', async () => {
   const { data, service } = fixture();
   data.matches = ['2026-09-29', '2026-10-27', '2026-11-03'].map(date => ({ ...data.matches[0], id: date, date, monthKey: '2020-01' }));

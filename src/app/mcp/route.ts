@@ -336,7 +336,7 @@ function createServer() {
     "generate_balanced_teams",
     {
       title: "Generar equipos equilibrados",
-      description: "Genera y guarda equipos balanceados automaticamente usando el ranking global de jugadores. Distribuye los jugadores de campo en serpentin (1→Rojo, 2→Amarillo, 3→Amarillo, 4→Rojo...) y asigna el arquero mas fuerte al equipo mas debil (en contra del jugador #1). Sobreescribe los equipos actuales.",
+      description: "Genera y guarda equipos balanceados automaticamente. Ordena todos los confirmados por puntos del ranking global +100 si son arqueros (solo para el calculo; no modifica el ranking). Reparte en serpentin 1→Rojo, 2→Amarillo, 3→Amarillo, 4→Rojo, enfrentando cada pareja consecutiva, sin incorporar arqueros despues. Excluye banca y out. Sobreescribe los equipos actuales.",
       inputSchema: {
         matchId: z.string().optional().describe("ID del partido. Si se omite, se usa el proximo partido."),
         date: z.string().optional().describe("Fecha YYYY-MM-DD si no se entrega matchId."),

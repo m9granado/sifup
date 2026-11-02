@@ -3750,7 +3750,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       </Card>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <CopyBlock title="Resumen de equipos" text={isRoyal ? royalTeamsMessage(currentMatch, matchTeams, rows) : teamsMessage(currentMatch, rows)} />
+        <CopyBlock title="Resumen de equipos" text={isRoyal ? royalTeamsMessage(currentMatch, matchTeams, rows) : teamsMessage(currentMatch, rows, data.players, data.monthlyPayments)} />
         <CopyBlock title="Resumen del partido" text={matchSummaryMessage(currentMatch, rows, data.players, data.monthlyPayments)} />
       </div>
 

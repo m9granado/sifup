@@ -60,7 +60,7 @@ export function matchSummaryMessage(match: Match, rows: MatchPlayer[], players: 
   const benchSlots = Math.max(bench.length, MIN_SLOTS);
   const benchLines = Array.from({ length: benchSlots }, (_, index) => {
     const row = bench[index];
-    return row ? `${index + 1}· ${row.name}` : `${index + 1}.`;
+    return row ? `${index + 1}· ${row.name}${!isMonthlyRow(row, players, match.monthKey, monthlyPayments) ? " 🍪" : ""}` : `${index + 1}.`;
   });
   const benchBlock = `*Banca* 🪑🪑🪑\n${benchLines.join("\n")}`;
 
@@ -101,10 +101,11 @@ export function pendingPaymentsMessage(match: Match, players: MatchPlayer[]) {
     .join("\n")}`;
 }
 
-export function teamsMessage(match: Match, players: MatchPlayer[]) {
-  const teamA = sortByWhatsappOrder(players.filter((player) => player.team === "A"));
-  const teamB = sortByWhatsappOrder(players.filter((player) => player.team === "B"));
-  const playerLabel = (player: MatchPlayer) => `${player.attendanceStatus === "galleta" || player.attendanceStatus === "waitlist" || player.note.toLowerCase().includes("galleta") ? "🍪 " : ""}#${whatsappOrderFor(player)} ${player.name}`;
+export function teamsMessage(match: Match, players: MatchPlayer[], knownPlayers: Player[], monthlyPayments: MonthlyPayment[]) {
+  const confirmed = players.filter((player) => player.attendanceStatus === "confirmed");
+  const teamA = sortByWhatsappOrder(confirmed.filter((player) => player.team === "A"));
+  const teamB = sortByWhatsappOrder(confirmed.filter((player) => player.team === "B"));
+  const playerLabel = (player: MatchPlayer) => `${!isMonthlyRow(player, knownPlayers, match.monthKey, monthlyPayments) ? "🍪 " : ""}#${whatsappOrderFor(player)} ${player.name}`;
   return `SIFUP - Equipos ${match.date}\n\nEquipo Rojo:\n${teamA.map((player) => `- ${playerLabel(player)}`).join("\n") || "- Por asignar"}\n\nEquipo Amarillo:\n${teamB.map((player) => `- ${playerLabel(player)}`).join("\n") || "- Por asignar"}`;
 }
 

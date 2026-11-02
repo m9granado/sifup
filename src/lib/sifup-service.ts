@@ -740,7 +740,7 @@ function buildMatchPayload(match: Match, rows: MatchPlayer[], result: Parameters
     messages: {
       matchSummary: matchSummaryMessage(match, sortedRows, players, monthlyPayments),
       pendingPayments: pendingPaymentsMessage(match, sortedRows),
-      teams: teamsMessage(match, sortedRows),
+      teams: teamsMessage(match, sortedRows, players, monthlyPayments),
       finalResult: finalResultMessage(match, result),
     },
     url: `${PUBLIC_BASE_URL}/matches/${match.id}`,
@@ -974,7 +974,7 @@ export async function getMatchTeams(input: { matchId?: string; date?: string } =
       B: confirmed.filter((row) => row.team === "B").map(publicMatchPlayer),
       none: confirmed.filter((row) => row.team === "none").map(publicMatchPlayer),
     },
-    messages: { teams: teamsMessage(match, rows) },
+    messages: { teams: teamsMessage(match, rows, data.players, data.monthlyPayments) },
     url: `${PUBLIC_BASE_URL}/matches/${match.id}`,
   };
 }
@@ -1029,7 +1029,7 @@ export async function assignPlayerTeam(input: AssignPlayerTeamInput) {
       B: confirmed.filter((row) => row.team === "B").map(publicMatchPlayer),
       none: confirmed.filter((row) => row.team === "none").map(publicMatchPlayer),
     },
-    messages: { teams: teamsMessage(match, sorted) },
+    messages: { teams: teamsMessage(match, sorted, data.players, data.monthlyPayments) },
   };
 }
 
@@ -1085,7 +1085,7 @@ export async function replaceMatchTeams(input: ReplaceMatchTeamsInput) {
       B: sorted.filter((row) => row.team === "B").map(publicMatchPlayer),
       none: sorted.filter((row) => row.team === "none").map(publicMatchPlayer),
     },
-    messages: { teams: teamsMessage(match, sorted) },
+    messages: { teams: teamsMessage(match, sorted, data.players, data.monthlyPayments) },
     note: `Distribución reemplazada: ${red.length} en Rojo, ${yellow.length} en Amarillo.`
   };
 }
@@ -1188,46 +1188,19 @@ export async function generateBalancedTeams(input: { matchId?: string; date?: st
   const confirmed = rows.filter((row) => row.attendanceStatus === "confirmed");
 
   const isGoalkeeper = (row: MatchPlayer) => data.players.find((p) => p.id === row.playerId)?.isGoalkeeper === true;
-  const goalkeepers = confirmed.filter((row) => isGoalkeeper(row));
-  const fieldPlayers = confirmed.filter((row) => !isGoalkeeper(row));
-
-  const sortByRank = (a: MatchPlayer, b: MatchPlayer) => {
+  const sortedConfirmed = [...confirmed].sort((a, b) => {
     const sa = getStanding(a);
     const sb = getStanding(b);
-    if (sa.rank !== sb.rank) return sa.rank - sb.rank;
-    if (sa.points !== sb.points) return sb.points - sa.points;
-    return (a.whatsappOrder || 0) - (b.whatsappOrder || 0);
-  };
+    // Bonus is local to balancing: never alter the persisted/global ranking.
+    const scoreA = sa.points + (isGoalkeeper(a) ? 100 : 0);
+    const scoreB = sb.points + (isGoalkeeper(b) ? 100 : 0);
+    return scoreB - scoreA || sa.rank - sb.rank || (a.whatsappOrder || 0) - (b.whatsappOrder || 0);
+  });
 
-  const sortedField = [...fieldPlayers].sort(sortByRank);
-  const sortedGoalkeepers = [...goalkeepers].sort(sortByRank);
-
-  // Serpentine assignment for field players
+  // One serpentine pass across ALL confirmed players: each ranking pair is opposed.
   const teamAssignment = new Map<string, Team>();
-  sortedField.forEach((row, index) => {
+  sortedConfirmed.forEach((row, index) => {
     teamAssignment.set(row.id, suggestedTeamForRank(Math.floor(index / 2), index % 2));
-  });
-
-  // Determine weaker team by summing field-player global points
-  let pointsA = 0;
-  let pointsB = 0;
-  sortedField.forEach((row) => {
-    const t = teamAssignment.get(row.id);
-    const pts = getStanding(row).points;
-    if (t === "A") pointsA += pts;
-    else if (t === "B") pointsB += pts;
-  });
-
-  const weakerTeam: Team = pointsA <= pointsB ? "A" : "B";
-  const strongerTeam: Team = weakerTeam === "A" ? "B" : "A";
-
-  // Strongest goalkeeper goes to weaker team (against the #1 player's team)
-  sortedGoalkeepers.forEach((row, index) => {
-    let t: Team;
-    if (index === 0) t = weakerTeam;
-    else if (index === 1) t = strongerTeam;
-    else t = index % 2 === 0 ? weakerTeam : strongerTeam;
-    teamAssignment.set(row.id, t);
   });
 
   const now = new Date().toISOString();
@@ -1252,7 +1225,7 @@ export async function generateBalancedTeams(input: { matchId?: string; date?: st
       B: confirmedSorted.filter((row) => row.team === "B").map(publicMatchPlayer),
       none: confirmedSorted.filter((row) => row.team === "none").map(publicMatchPlayer),
     },
-    messages: { teams: teamsMessage(match, sorted) },
+    messages: { teams: teamsMessage(match, sorted, data.players, data.monthlyPayments) },
   };
 }
 
