@@ -1,4 +1,4 @@
-export type MatchStatus = "open" | "confirmed" | "played" | "roster_locked";
+export type MatchStatus = "open" | "confirmed" | "played" | "roster_locked" | "suspended";
 export type AttendanceStatus = "confirmed" | "maybe" | "out" | "waitlist" | "banca" | "galleta";
 export type PaymentStatus = "paid" | "unpaid" | "promised";
 export type PaymentPlan = "monthly" | "perMatch";
@@ -80,6 +80,8 @@ export type MatchPlayer = {
   paymentStatus: PaymentStatus;
   amountDue: number;
   amountPaid: number;
+  paidDate?: string;
+  paidAt?: string;
   note: string;
   team: Team;
   teamId?: string;
@@ -107,6 +109,7 @@ export type MonthlyPayment = {
   paymentStatus: PaymentStatus;
   note: string;
   paidAt?: string;
+  paidDate?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -136,6 +139,13 @@ export type ClubExpense = {
   updatedAt: string;
 };
 
+export type CourtPayment = {
+  sourceMatchId: string;
+  targetMatchId: string;
+  expenseId: string;
+  amount: number;
+};
+
 export type SifupData = {
   matches: Match[];
   players: Player[];
@@ -145,6 +155,7 @@ export type SifupData = {
   matchGames: MatchGame[];
   monthlyPayments: MonthlyPayment[];
   clubExpenses: ClubExpense[];
+  courtPayments?: CourtPayment[];
   clubFinance: ClubFinance;
 };
 
