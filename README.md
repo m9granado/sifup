@@ -67,6 +67,29 @@ Tools:
 - `assign_player_team`: moves one player between Rojo, Amarillo and sin equipo without changing payments or attendance.
 - `replace_match_teams`: replaces both complete team lists in one operation, preserving payments, attendance and WhatsApp order.
 
+### Court payments and suspended dates
+
+The local implementation adds `get_court_finances`, `link_court_payment`, and `transfer_court_payment`. It keeps cash payment dates unchanged and links a court expense to the match using its credit. A transfer preserves the original match as `suspended`, creates an empty destination if necessary, and never moves player payments, rosters or results. Existing destination rosters are preserved.
+
+- `get_court_finances({ monthKey: "2026-10" })` lists court expenses and IDs, cash paid, recorded cost of played matches, linked consumption, unlinked played matches, outgoing transfers and scheduled credits. Missing payment links are explicit: zero linked consumption is **not** proof that no court expense occurred.
+- `link_court_payment({ expenseId, matchId })` previews linking an existing expense to a match, including one already played.
+- `transfer_court_payment({ expenseId, matchId, targetDate: "2026-11-03" })` previews suspension and transfer. `dryRun: false` is required to write. An identical retry does not duplicate a match or allocation.
+- Each allocation covers a full court at its recorded cost. Different-cost destinations, ambiguous dates, over-allocation and already-played sources are rejected. Chained transfers are not supported; they require a separate history-aware workflow.
+- App server actions share the same services; writes require both `payments` and `matches` permissions. New financial controls and replacement of the legacy prepaid-balance panel are **not yet implemented**, pending UX review.
+
+**Release prerequisite:** back up the database and apply `npm run db:court-payments` to the explicitly approved database **before** running this version against it. `npm run db:schema` also applies this migration for new setups. No migration or live data transfer is performed by builds/tests. The migration adds the allocation table, suspended status and guards against changing linked expense dates/amounts, moving linked match dates/costs, or adding results to suspended dates.
+
+Offline checks (synthetic values only):
+
+```bash
+npm test
+# Install PGlite only in an approved scratch location, not as an app dependency:
+npm install --prefix "$TMPDIR/sifup-court-db-check" --no-save --package-lock=false --ignore-scripts @electric-sql/pglite
+PGLITE_MODULE="$TMPDIR/sifup-court-db-check/node_modules/@electric-sql/pglite" npx tsx scripts/check-court-payments-db.mjs
+```
+
+The database check runs PostgreSQL in memory, executes the real repository through a tagged-SQL adapter, checks transaction rollback and preserved payments, then calls the real MCP HTTP transport for authorization, tool discovery, reporting, preview, apply and retry. It does not test network connections to Supabase, production deployment, multi-session concurrency or rendered UI.
+
 ### OpenClaw / static bearer token clients
 
 Clients that let you set a raw header can skip OAuth entirely:
