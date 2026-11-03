@@ -263,64 +263,24 @@ function buildRankedTeamRows<T extends TeamAssignableRow>(rows: T[], players: Pl
   };
 
   const mapped = rows
-    .map((row, index) => ({
-      row,
-      index,
-      standing: standingForMatchRow(row, players, standings),
-    }))
+    .map((row, index) => {
+      const standing = standingForMatchRow(row, players, standings);
+      return { row, index, standing, balancingPoints: (standing?.points ?? 0) + (isGoalkeeper(row) ? 100 : 0) };
+    })
     .filter((item) => item.row.attendanceStatus === "confirmed");
 
-  // Separar arqueros de jugadores de campo
-  const goalkeepers = mapped.filter((item) => isGoalkeeper(item.row));
-  const fieldPlayers = mapped.filter((item) => !isGoalkeeper(item.row));
-
   const sortByRank = (a: typeof mapped[0], b: typeof mapped[0]) => {
+    if (a.balancingPoints !== b.balancingPoints) return b.balancingPoints - a.balancingPoints;
     const rankA = a.standing?.rank ?? Number.MAX_SAFE_INTEGER;
     const rankB = b.standing?.rank ?? Number.MAX_SAFE_INTEGER;
     if (rankA !== rankB) return rankA - rankB;
-    const pointsA = a.standing?.points ?? -1;
-    const pointsB = b.standing?.points ?? -1;
-    if (pointsA !== pointsB) return pointsB - pointsA;
     return rowOrder(a.row, a.index) - rowOrder(b.row, b.index) || a.row.name.localeCompare(b.row.name);
   };
 
-  goalkeepers.sort(sortByRank);
-  fieldPlayers.sort(sortByRank);
-
-  // Asignar jugadores de campo de manera balanceada
-  const rankedFieldPlayers = fieldPlayers.map((item, index): RankedTeamRow<T> => ({
+  return mapped.sort(sortByRank).map((item, index): RankedTeamRow<T> => ({
     ...item,
     suggestedTeam: suggestedTeamForRank(Math.floor(index / 2), index % 2),
   }));
-
-  // Calcular puntos de campo para determinar el equipo más débil
-  const pointsA = rankedFieldPlayers
-    .filter((item) => item.suggestedTeam === "A")
-    .reduce((sum, item) => sum + (item.standing?.points ?? 0), 0);
-  const pointsB = rankedFieldPlayers
-    .filter((item) => item.suggestedTeam === "B")
-    .reduce((sum, item) => sum + (item.standing?.points ?? 0), 0);
-
-  const weakerTeam = pointsA <= pointsB ? "A" : "B";
-  const strongerTeam = weakerTeam === "A" ? "B" : "A";
-
-  // Asignar arqueros: el arquero más fuerte (primer elemento) va al equipo más débil
-  const rankedGoalkeepers = goalkeepers.map((item, index): RankedTeamRow<T> => {
-    let suggestedTeam: Team = "none";
-    if (index === 0) {
-      suggestedTeam = weakerTeam;
-    } else if (index === 1) {
-      suggestedTeam = strongerTeam;
-    } else {
-      suggestedTeam = index % 2 === 0 ? weakerTeam : strongerTeam;
-    }
-    return {
-      ...item,
-      suggestedTeam,
-    };
-  });
-
-  return [...rankedGoalkeepers, ...rankedFieldPlayers];
 }
 
 function applyBalancedTeams<T extends TeamAssignableRow>(rows: T[], players: Player[], standings: Map<string, PlayerStanding>, playableRowIds?: Set<string>) {
@@ -811,7 +771,7 @@ function NewMatchTeamSuggestion<T extends TeamAssignableRow>({ rows, players, st
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm font-black uppercase tracking-wide text-white">Sugerencia automatica por ranking</p>
-          <p className="mt-1 text-xs text-(--muted)">El #1 enfrenta al #2, el #3 al #4, y asi sigue. Los colores se alternan por pareja para equilibrar puntos.</p>
+          <p className="mt-1 text-xs text-(--muted)">Puntos del ranking +100 para arqueros, solo para este reparto. Rojo: 1, 4, 5, 8, 9, 12, 13. Amarillo: 2, 3, 6, 7, 10, 11, 14.</p>
         </div>
         <div className="grid grid-cols-2 gap-2 text-right text-xs font-black uppercase">
           <span className="rounded-md border border-(--red)/35 bg-(--red)/10 px-3 py-2 text-(--red)">Rojo {teamA.length} - {pointsA} pts</span>
@@ -821,11 +781,11 @@ function NewMatchTeamSuggestion<T extends TeamAssignableRow>({ rows, players, st
       <div className="grid gap-2 lg:grid-cols-2">
         {pairs.map((pair, pairIndex) => (
           <div key={pairIndex} className="grid gap-2 rounded-md border border-white/10 bg-black/10 p-2 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
-            {pair.map((item) => {
+            {pair.map((item, positionInPair) => {
               const isArq = playerForMatchRow(item.row, players)?.isGoalkeeper === true;
               return (
                 <div key={`${item.index}-${item.row.name}`} className={`rounded-md border px-3 py-2 ${item.suggestedTeam === "A" ? "border-(--red)/35 bg-(--red)/10" : "border-(--gold)/40 bg-(--gold)/10"}`}>
-                  <p className="text-xs font-black uppercase tracking-wide text-(--muted)">#{item.standing?.rank ?? "SR"} - {teamLabel(item.suggestedTeam)}</p>
+                  <p className="text-xs font-black uppercase tracking-wide text-(--muted)">#{pairIndex * 2 + positionInPair + 1} - {teamLabel(item.suggestedTeam)}</p>
                   <p className="truncate font-semibold text-white">
                     {item.row.name}
                     {isArq ? (
@@ -834,7 +794,7 @@ function NewMatchTeamSuggestion<T extends TeamAssignableRow>({ rows, players, st
                       </span>
                     ) : null}
                   </p>
-                  <p className="text-xs font-semibold text-(--gold)">{item.standing?.points ?? 0} pts</p>
+                  <p className="text-xs font-semibold text-(--gold)">{item.standing?.points ?? 0}{isArq ? " + 100" : ""} pts para reparto</p>
                 </div>
               );
             })}
@@ -6143,6 +6103,11 @@ export function TeamsPage({ id, initialData }: { id: string } & InitialDataProps
             Equilibrar por Ranking
           </Button>
         </div>
+
+        <details className="rounded-md border border-(--border) p-3">
+          <summary className="cursor-pointer text-sm font-semibold text-white">Revisar orden y reparto sugerido</summary>
+          <div className="mt-3"><NewMatchTeamSuggestion rows={rows} players={data.players} standings={standings} /></div>
+        </details>
 
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
           <Card className="space-y-2 border-t-2 border-t-(--red)/70 bg-(--red)/5 p-3">
