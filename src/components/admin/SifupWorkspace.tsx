@@ -5,12 +5,13 @@ import { MatchesList } from "./MatchesList";
 import { ClubCashCard } from "./ClubCashCard";
 import { clubCashSnapshot, clubCashYear } from "@/lib/club-cash";
 import { courtFinanceSummary } from "@/lib/court-payments";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, Clipboard, Clock, Cookie, MapPin, Medal, MessageCircle, Pencil, Plus, RotateCcw, Save, Search, Share, Shield, Sparkles, TriangleAlert, Trophy, UserMinus, UserPlus, Users, WalletCards, X } from "lucide-react";
 import { downloadTeamsChallengeImage, type FormResult } from "@/lib/teams-image";
 import {
   clearMatchFinalStandingAction,
+  closeMatchRosterAction,
   createMatchAction,
   finishMatchGameAction,
   markMatchPlayerPaidAction,
@@ -33,7 +34,8 @@ import {
 import type { PlayerLogin } from "@/lib/auth";
 import { useIsAdmin } from "./AuthMode";
 import { parseWhatsAppList } from "@/lib/parser";
-import type { RosterChangePlan } from "@/lib/store";
+import type { RosterChangePlan, RosterCloseChoice, RosterCloseProposal, RosterCloseResult } from "@/lib/store";
+import { rosterCloseProposal, rosterWaitlistRows } from "@/lib/store";
 import { adjacentMatches, currentMonthKey, formatCurrency, isPlayerMonthlyForMonth, monthLabel, monthlyPaymentFor, newId, newMatchId, newPlayerId, nextMatch, planRosterChange, replaceMatchPlayers, shiftMonthKey, sortByWhatsappOrder, summarizeMatch, upsertMatch, upsertMonthlyPayment, upsertPlayer, upsertResult, whatsappOrderFor } from "@/lib/store";
 import { calculateRankingRecord, pointsForMatchRow, rankingMatches } from "@/lib/standings";
 import { matchSummaryMessage, royalTeamsMessage, teamsMessage } from "@/lib/whatsapp";
@@ -1494,7 +1496,7 @@ function UnifiedMatchRoster({
   }, [rows, players, match.monthKey, monthlyPayments]);
 
   const waitlistRows = useMemo(() => {
-    return sortByWhatsappOrder(rows.filter((row) => row.attendanceStatus === "waitlist" || row.attendanceStatus === "galleta" || row.attendanceStatus === "banca"));
+    return rosterWaitlistRows(rows);
   }, [rows]);
 
   const unansweredItems = useMemo(() => {
@@ -3096,6 +3098,60 @@ function RoyalNightPanel({
   );
 }
 
+function CloseRosterDialog({ proposal, pending, error, onConfirm, onCancel, returnFocusRef }: {
+  proposal: RosterCloseProposal;
+  pending: boolean;
+  error: string;
+  onConfirm: (choice: RosterCloseChoice) => void;
+  onCancel: () => void;
+  returnFocusRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const titleId = useId();
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const previousFocus = document.activeElement;
+    const fallbackFocus = returnFocusRef.current;
+    dialog.showModal();
+    headingRef.current?.focus();
+    return () => {
+      dialog.close();
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected && !previousFocus.matches(":disabled")) previousFocus.focus();
+      else fallbackFocus?.focus();
+    };
+  }, [returnFocusRef]);
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-labelledby={titleId}
+      aria-describedby={`${titleId}-description`}
+      aria-busy={pending}
+      onCancel={(event) => { event.preventDefault(); if (!pending) onCancel(); }}
+      className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg overflow-y-auto rounded-xl border border-(--border) bg-(--bg-deep) p-5 text-white shadow-xl backdrop:bg-black/70"
+    >
+      <h2 id={titleId} ref={headingRef} tabIndex={-1} className="text-xl font-black">¿Incluir jugadores de En espera?</h2>
+      <p id={`${titleId}-description`} className="mt-3 text-sm text-(--muted)">
+        Hay {proposal.confirmedCount} de {proposal.squadTarget} jugadores confirmados y {proposal.vacancies} cupos libres.
+        Se incluirían {proposal.selected.length} personas, en este orden:
+      </p>
+      <ol className="my-3 list-inside list-decimal space-y-1 break-words text-sm">
+        {proposal.selected.map((row) => <li key={row.id}>{row.name}</li>)}
+      </ol>
+      <p className="text-sm">Al incluir, quedarían {proposal.remainingVacancies} cupos libres y {proposal.waitingCount - proposal.selected.length} personas en espera.</p>
+      <p className="mt-2 text-sm text-(--muted)">Cerrar sin incluir deja {proposal.vacancies} cupos libres y {proposal.waitingCount} personas en espera.</p>
+      {error ? <p role="alert" className="mt-3 text-sm text-(--gold)">{error}</p> : null}
+      <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+        <Button onClick={() => onConfirm("include")} disabled={pending}>Incluir y cerrar lista</Button>
+        <Button variant="secondary" onClick={() => onConfirm("exclude")} disabled={pending}>Cerrar sin incluir</Button>
+        <Button variant="secondary" onClick={onCancel} disabled={pending}>Cancelar</Button>
+      </div>
+      {pending ? <p role="status" className="mt-3 text-sm text-(--muted)">Cerrando lista…</p> : null}
+    </dialog>
+  );
+}
+
 export function MatchDetailPage({ id, initialData }: { id: string } & InitialDataProps) {
   const isAdmin = useIsAdmin();
   const { data, commit } = useSifupData(initialData);
@@ -3111,6 +3167,13 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
   const [showAddPlayer, setShowAddPlayer] = useState(false);
   const [associatingRowId, setAssociatingRowId] = useState<string | null>(null);
   const [showResultModal, setShowResultModal] = useState(false);
+  const [closeProposal, setCloseProposal] = useState<RosterCloseProposal | null>(null);
+  const [closeSummary, setCloseSummary] = useState("");
+  const [closeNeedsReload, setCloseNeedsReload] = useState(false);
+  const closeNeedsReloadRef = useRef(false);
+  const closingRosterRef = useRef(false);
+  const closeReturnFocusRef = useRef<HTMLDivElement>(null);
+  const closeRouter = useRouter();
   const standings = useMemo(() => buildPlayerStandings(data), [data]);
 
   const [prevRowsKey, setPrevRowsKey] = useState({ initialData, id });
@@ -3353,8 +3416,74 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
     }
   }
 
+  function handleRosterCloseResult(response: RosterCloseResult) {
+    if (response.status === "changed") {
+      setCloseProposal(response.proposal);
+      setError("La lista cambió. No se guardó el cierre. Revisa la propuesta actualizada y vuelve a confirmar.");
+      return;
+    }
+    setCloseProposal(null);
+    if (response.status === "reload") {
+      setError(response.message);
+      closeRouter.refresh();
+      return;
+    }
+    const applyUpdate = (row: MatchPlayer) => {
+      const update = response.playerUpdates.find((item) => item.id === row.id);
+      return update ? { ...row, ...update } : row;
+    };
+    setRows((previousRows) => previousRows.map(applyUpdate));
+    commit((previousData) => ({
+      ...previousData,
+      matches: previousData.matches.map((item) => item.id === currentMatch.id ? { ...item, status: "roster_locked", updatedAt: response.updatedAt } : item),
+      matchPlayers: previousData.matchPlayers.map(applyUpdate),
+    }));
+    const promoted = response.playerUpdates.length;
+    setCloseSummary(`Lista cerrada con ${response.proposal.confirmedCount + promoted}/${response.proposal.squadTarget} jugadores. ${promoted ? `Se incluyeron ${response.proposal.selected.map((row) => row.name).join(", ")}. ` : ""}Quedan ${response.proposal.vacancies - promoted} cupos libres.`);
+    setError("");
+    closeRouter.refresh();
+  }
+
+  async function persistRosterClose(proposal: RosterCloseProposal, choice: RosterCloseChoice) {
+    let response: RosterCloseResult;
+    try {
+      response = await closeMatchRosterAction(currentMatch.id, proposal.snapshot, choice);
+    } catch {
+      closeNeedsReloadRef.current = true;
+      setCloseNeedsReload(true);
+      setCloseProposal(null);
+      setCloseSummary("");
+      setError("");
+      return;
+    }
+    handleRosterCloseResult(response);
+  }
+
+  function submitRosterClose(proposal: RosterCloseProposal, choice: RosterCloseChoice) {
+    if (closeNeedsReloadRef.current || closingRosterRef.current || isPending) return;
+    closingRosterRef.current = true;
+    setError("");
+    setCloseSummary("");
+    startTransition(async () => {
+      try {
+        await persistRosterClose(proposal, choice);
+      } finally {
+        closingRosterRef.current = false;
+      }
+    });
+  }
+
   function lockRoster() {
+    if (closeNeedsReloadRef.current || closingRosterRef.current || isPending) return;
     const confirmed = sortRowsMonthlyFirst(rows.filter((r) => r.attendanceStatus === "confirmed"), data.players, currentMatch.monthKey, data.monthlyPayments);
+    if (currentMatch.status !== "roster_locked" && confirmed.length <= squadTarget) {
+      const proposal = rosterCloseProposal(currentMatch, rows);
+      setCloseSummary("");
+      setError("");
+      if (proposal.selected.length > 0) setCloseProposal(proposal);
+      else submitRosterClose(proposal, "exclude");
+      return;
+    }
     const overflow = confirmed.slice(squadTarget);
     const overflowIds = new Set(overflow.map((r) => r.id));
 
@@ -3372,10 +3501,18 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         })
       : rows;
 
+    closingRosterRef.current = true;
+    setCloseSummary("");
     startTransition(async () => {
       try {
         if (overflowIds.size > 0) {
           await saveMatchDetailAction(currentMatch.id, nextRows);
+          setRows(nextRows);
+          commit(replaceMatchPlayers(data, currentMatch.id, nextRows));
+        }
+        if (currentMatch.status !== "roster_locked") {
+          await persistRosterClose(rosterCloseProposal(currentMatch, nextRows), "exclude");
+          return;
         }
         await updateMatchAction({ matchId: currentMatch.id, status: "roster_locked" });
         const updatedMatch: Match = {
@@ -3392,12 +3529,15 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         setError("");
       } catch (err) {
         setError(err instanceof Error ? err.message : "No se pudo cerrar la lista.");
+      } finally {
+        closingRosterRef.current = false;
       }
     });
   }
 
   function reopenRoster() {
     if (!confirm("¿Reabrir la lista? Los jugadores confirmados podran volver a modificar su asistencia.")) return;
+    setCloseSummary("");
     startTransition(async () => {
       try {
         await updateMatchAction({ matchId: currentMatch.id, status: "confirmed" });
@@ -3640,7 +3780,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
       {isAdmin ? <MatchPaymentsSection rows={rows} match={currentMatch} /> : null}
 
       <Card className="mt-4 space-y-3">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div ref={closeReturnFocusRef} tabIndex={-1} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs font-black uppercase tracking-wide text-(--muted)">Plantel</p>
             <h2 className="mt-1 text-xl font-black text-white">{isAdmin ? "Jugadores y asistencia" : "Plantel y asistencia"}</h2>
@@ -3653,7 +3793,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
               <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 rounded-md border border-(--green)/30 bg-(--green)/15 px-3 py-1.5 text-xs font-bold text-(--green)">
                   <Check size={14} />
-                  Lista cerrada ({squadTarget} jugadores)
+                  Lista cerrada ({rows.filter((row) => row.attendanceStatus === "confirmed").length}/{squadTarget} jugadores)
                 </span>
                 <Link
                   href={`/matches/${currentMatch.id}/teams`}
@@ -3662,7 +3802,7 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
                   <Users size={16} />
                   Armar equipos
                 </Link>
-                <Button variant="secondary" onClick={lockRoster} disabled={isPending} title="Volver a verificar cupo y cerrar lista">
+                <Button variant="secondary" onClick={lockRoster} disabled={isPending || closeNeedsReload} title="Volver a verificar cupo y cerrar lista">
                   Re-cerrar lista
                 </Button>
                 <Button variant="secondary" onClick={reopenRoster} disabled={isPending} title="Reabrir lista para volver a editar asistencia">
@@ -3671,13 +3811,19 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
                 </Button>
               </div>
             ) : (
-              <Button onClick={lockRoster} disabled={isPending}>
+              <Button onClick={lockRoster} disabled={isPending || closeNeedsReload}>
                 <Shield size={16} />
-                Cerrar lista con {squadTarget} jugadores
+                Cerrar lista
               </Button>
             )
           ) : null}
         </div>
+        {closeNeedsReload ? (
+          <div role="alert" className="space-y-3 rounded-md bg-(--gold)/15 px-3 py-3 text-sm font-bold text-(--gold)">
+            <p>No pudimos confirmar el resultado del cierre. Recarga la pagina para comprobar si la lista quedo cerrada antes de volver a intentar.</p>
+            <Button variant="secondary" onClick={() => window.location.reload()}>Recargar partido</Button>
+          </div>
+        ) : null}
         {isAdmin ? (
           <TeamAssignmentBoard
             rows={rows}
@@ -3748,6 +3894,17 @@ export function MatchDetailPage({ id, initialData }: { id: string } & InitialDat
         />
       ) : null}
 
+      {closeSummary && currentMatch.status === "roster_locked" ? <p role="status" className="mt-4 rounded-md bg-(--green)/15 px-3 py-2 text-sm text-(--green)">{closeSummary}</p> : null}
+      {closeProposal ? (
+        <CloseRosterDialog
+          proposal={closeProposal}
+          pending={isPending}
+          error={error}
+          returnFocusRef={closeReturnFocusRef}
+          onConfirm={(choice) => submitRosterClose(closeProposal, choice)}
+          onCancel={() => { if (!closingRosterRef.current) { setCloseProposal(null); setError(""); } }}
+        />
+      ) : null}
       {showResultModal ? (
         <ResultModal
           winner={winner}

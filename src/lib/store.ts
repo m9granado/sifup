@@ -1,5 +1,5 @@
 import type { Match, MatchPlayer, MatchResult, MonthlyPayment, Player, SifupData } from "./types";
-import { MONTHLY_AMOUNT, PER_MATCH_AMOUNT } from "./sifup-constants";
+import { MONTHLY_AMOUNT, PER_MATCH_AMOUNT, ROYAL_SQUAD_TARGET, SQUAD_TARGET } from "./sifup-constants";
 
 export function newId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -66,7 +66,7 @@ export function replaceMatchPlayers(data: SifupData, matchId: string, rows: Matc
   };
 }
 
-export function sortByWhatsappOrder(rows: MatchPlayer[]) {
+export function sortByWhatsappOrder<Row extends Pick<MatchPlayer, "id" | "name" | "whatsappOrder">>(rows: Row[]) {
   return [...rows].sort((a, b) => {
     const orderA = whatsappOrderFor(a);
     const orderB = whatsappOrderFor(b);
@@ -75,9 +75,59 @@ export function sortByWhatsappOrder(rows: MatchPlayer[]) {
   });
 }
 
-export function whatsappOrderFor(row: MatchPlayer) {
+export function whatsappOrderFor(row: Pick<MatchPlayer, "id" | "whatsappOrder">) {
   const orderFromId = Number(row.id.match(/-player-(\d+)$/)?.[1] ?? 0);
   return row.whatsappOrder || orderFromId || Number.MAX_SAFE_INTEGER;
+}
+
+type RosterCloseRow = Pick<MatchPlayer, "id" | "matchId" | "name" | "whatsappOrder" | "attendanceStatus">;
+export type RosterCloseChoice = "include" | "exclude";
+
+export function rosterWaitlistRows<Row extends RosterCloseRow>(rows: Row[]) {
+  return sortByWhatsappOrder(rows.filter((row) => ["waitlist", "galleta", "banca"].includes(row.attendanceStatus))
+    .sort((left, right) => left.id.localeCompare(right.id)));
+}
+
+export function rosterCloseProposal(match: Pick<Match, "id" | "status" | "matchFormat" | "squadTarget">, rows: RosterCloseRow[]) {
+  const squadTarget = match.matchFormat === "rey_de_la_cancha" ? ROYAL_SQUAD_TARGET : (match.squadTarget ?? (match.matchFormat === "7x7" ? 14 : SQUAD_TARGET));
+  const matchRows = rows.filter((row) => row.matchId === match.id);
+  const confirmedIds = matchRows.filter((row) => row.attendanceStatus === "confirmed").map((row) => row.id).sort();
+  const waiting = rosterWaitlistRows(matchRows);
+  const vacancies = Math.max(0, squadTarget - confirmedIds.length);
+  const selected = waiting.slice(0, vacancies).map(({ id, name }) => ({ id, name }));
+  return {
+    matchId: match.id,
+    matchStatus: match.status,
+    squadTarget,
+    confirmedCount: confirmedIds.length,
+    vacancies,
+    waitingCount: waiting.length,
+    selected,
+    remainingVacancies: vacancies - selected.length,
+    snapshot: JSON.stringify([match.id, match.status, squadTarget, confirmedIds, waiting.length, selected]),
+  };
+}
+
+export type RosterCloseProposal = ReturnType<typeof rosterCloseProposal>;
+export type RosterCloseResult =
+  | { status: "closed"; proposal: RosterCloseProposal; playerUpdates: Pick<MatchPlayer, "id" | "attendanceStatus" | "updatedAt">[]; updatedAt: string }
+  | { status: "changed"; proposal: RosterCloseProposal }
+  | { status: "reload"; message: string };
+
+export function planRosterClose(proposal: RosterCloseProposal, expectedSnapshot: string, choice: RosterCloseChoice, updatedAt: string) {
+  if (!["open", "confirmed"].includes(proposal.matchStatus) || proposal.confirmedCount > proposal.squadTarget) {
+    return { status: "reload" as const, message: "La convocatoria cambió. Recarga el partido antes de cerrar la lista." };
+  }
+  if (proposal.snapshot !== expectedSnapshot) {
+    return proposal.selected.length > 0
+      ? { status: "changed" as const, proposal }
+      : { status: "reload" as const, message: "La propuesta ya no aplica. Recarga el partido antes de cerrar la lista." };
+  }
+  return {
+    status: "ready" as const,
+    playerUpdates: choice === "include" ? proposal.selected.map(({ id }) => ({ id, attendanceStatus: "confirmed" as const, updatedAt })) : [],
+    matchUpdate: { status: "roster_locked" as const, updatedAt },
+  };
 }
 
 export type PlayerMonthlyContext = {

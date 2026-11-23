@@ -8,6 +8,7 @@ import { hashPassword } from "@/lib/auth";
 import { randomUUID } from "crypto";
 import {
   clearMatchFinalStanding,
+  closeMatchRoster,
   deleteMonthlyPayment,
   finishMatchGame,
   markMatchPlayerPaid,
@@ -26,6 +27,7 @@ import {
 import { setMonthlyRoster, updateMatch, type UpdateMatchInput } from "@/lib/sifup-service";
 import { getCourtFinances, linkCourtPayment } from "@/lib/court-payment-service";
 import type { CourtPaymentInput } from "@/lib/court-payments";
+import type { RosterCloseChoice } from "@/lib/store";
 import type { ClubExpense, Match, MatchGame, MatchPlayer, MatchResult, MatchTeam, MonthlyPayment, Player } from "@/lib/types";
 
 export type LoginState = { error: string };
@@ -135,6 +137,16 @@ export async function updateMatchAction(input: UpdateMatchInput) {
   await requirePermission("matches");
   const result = await updateMatch(input);
   revalidateAdminViews(result.match.id);
+  return result;
+}
+
+export async function closeMatchRosterAction(matchId: string, expectedSnapshot: string, choice: RosterCloseChoice) {
+  await requirePermission("matches");
+  if (typeof matchId !== "string" || !matchId.trim() || typeof expectedSnapshot !== "string" || !expectedSnapshot || !["include", "exclude"].includes(choice)) {
+    throw new Error("La decisión de cierre no es válida.");
+  }
+  const result = await closeMatchRoster(matchId, expectedSnapshot, choice);
+  if (result.status === "closed") revalidateAdminViews(matchId);
   return result;
 }
 

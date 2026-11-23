@@ -7,6 +7,7 @@ import { seedData } from "./mock-data";
 import { getSql, hasDatabaseUrl } from "./db";
 import { monthKey } from "./sifup-date";
 import { mergedReceipt, parsePaymentReceipt } from "./payment-receipt";
+import { planRosterClose, rosterCloseProposal, type RosterCloseChoice, type RosterCloseResult } from "./store";
 import type { ClubExpense, CourtPayment, Match, MatchGame, MatchPlayer, MatchResult, MatchTeam, MonthlyPayment, Player, SifupData } from "./types";
 
 function iso(value: Date | string) {
@@ -438,6 +439,30 @@ export async function saveMatch(match: Match) {
       squad_target = excluded.squad_target,
       updated_at = excluded.updated_at
   `;
+}
+
+export async function closeMatchRoster(matchId: string, expectedSnapshot: string, choice: RosterCloseChoice): Promise<RosterCloseResult> {
+  return requireDatabase().begin(async (tx) => {
+    const matches = await tx<Pick<MatchRow, "id" | "status" | "match_format" | "squad_target">[]>`
+      select id, status, match_format, squad_target from matches where id = ${matchId} for update
+    `;
+    const match = matches[0];
+    if (!match) return { status: "reload", message: "El partido ya no existe. Recarga la página." };
+    const rows = await tx<Pick<MatchPlayerRow, "id" | "name" | "attendance_status" | "whatsapp_order">[]>`
+      select id, name, attendance_status, whatsapp_order from match_players where match_id = ${matchId} order by id for update
+    `;
+    const proposal = rosterCloseProposal({ id: match.id, status: match.status, matchFormat: match.match_format, squadTarget: match.squad_target }, rows.map((row) => ({
+      id: row.id, matchId, name: row.name, attendanceStatus: row.attendance_status, whatsappOrder: row.whatsapp_order ?? 0,
+    })));
+    const updatedAt = new Date().toISOString();
+    const plan = planRosterClose(proposal, expectedSnapshot, choice, updatedAt);
+    if (plan.status !== "ready") return plan;
+    for (const update of plan.playerUpdates) {
+      await tx`update match_players set attendance_status = ${update.attendanceStatus}, updated_at = ${update.updatedAt} where match_id = ${matchId} and id = ${update.id}`;
+    }
+    await tx`update matches set status = ${plan.matchUpdate.status}, updated_at = ${plan.matchUpdate.updatedAt} where id = ${matchId}`;
+    return { status: "closed", proposal, playerUpdates: plan.playerUpdates, updatedAt };
+  });
 }
 
 export async function saveMatchPlayers(matchId: string, players: MatchPlayer[], result?: MatchResult) {
